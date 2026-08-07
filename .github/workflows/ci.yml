@@ -59,7 +59,7 @@ jobs:
         run: python -m governance
 
       - name: Pytest
-        run: pytest
+        run: pytest -m "not integration"
 
   package-validation:
     name: package-validation
@@ -87,6 +87,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install dist/*.whl
           python -c "import governance; print(governance.__version__)"
+          python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
+          python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
           python -m governance
 
   postgres-integration:
@@ -111,6 +113,35 @@ jobs:
           docker compose down -v
           docker compose up -d --wait
           bash sample/verify_demo.sh
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
+
+  metadata-integration:
+    name: metadata-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Validate Compose file
+        run: docker compose config -q
+
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait
+
+      - name: Metadata integration tests
+        run: pytest -m integration
 
       - name: Teardown
         if: always()

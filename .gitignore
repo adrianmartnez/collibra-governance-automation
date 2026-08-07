@@ -157,6 +157,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Generated metadata inventory output
+artifacts/
+
 # Spyder project settings
 .spyderproject
 .spyproject
