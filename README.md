@@ -1,102 +1,214 @@
 # collibra-governance-automation
 
-Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for catalog integrations. The current implementation discovers PostgreSQL technical metadata, exports deterministic inventory JSON, maps inventory into an inspectable Collibra-oriented desired state, provides mock and live Core REST API v2 adapter boundaries, and executes plan-driven dry-run/apply synchronization without automatic deletes.
+Discover PostgreSQL technical metadata, export a deterministic governance inventory, map it into an inspectable Collibra-oriented desired state, compare against remote managed state, and apply safe plan-driven synchronization through a single CLI.
 
-**Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose
+**Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
-## Current capabilities
+**Release prep:** package version `1.0.0` is ready for tagging after merge. See [CHANGELOG.md](CHANGELOG.md). This repository state prepares `v1.0.0`; the Git tag and GitHub Release are created only after merge to `main`.
 
-- Reproducible PostgreSQL governance demo with fictional metadata-rich relational structures
-- PostgreSQL technical metadata discovery directly from system catalogs
-- Vendor-neutral governance model for sources, databases, schemas, tables, columns, keys, relationships, and ownership
-- Primary-key and foreign-key discovery, including composite constraints and self-references
-- Table and column comments plus database, schema, and table ownership metadata
-- Stable logical identifiers independent of host, port, credentials, or PostgreSQL OIDs
-- Deterministic, versioned metadata inventory with human-reviewable JSON export
-- Collibra-oriented asset and relationship mapping with deterministic desired state
-- Mock Collibra adapter for local, offline demonstration
-- Live Collibra Core REST API v2 adapter boundary (contract-tested; tenant validation not claimed)
-- Plan-driven metadata diff with dry-run and explicit apply
-- No automatic remote deletes; unmanaged tenant objects are ignored
-- Automated quality gates for linting, unit tests, package validation, PostgreSQL reproducibility, metadata integration, and Collibra mock lifecycle
-
-## Project status
-
-| Current | Planned |
-| --- | --- |
-| Python package foundation | End-to-end governance CLI |
-| Reproducible PostgreSQL governance demo | Release documentation |
-| Vendor-neutral governance domain model | |
-| PostgreSQL system-catalog discovery | |
-| Deterministic metadata inventory | |
-| Collibra asset and relationship mapping | |
-| Mock and live Collibra adapters | |
-| Safe plan-driven synchronization | |
-| Six automated quality gates | |
-
-Tracking: [v1.0 - Governance Automation MVP](https://github.com/fgnfmackk/collibra-governance-automation/milestone/1)
-
-Pipeline:
+## What is implemented
 
 ```text
-PostgreSQL
-  -> metadata discovery                 [current]
-  -> vendor-neutral governance model    [current]
-  -> deterministic inventory            [current]
-  -> Collibra mapping                    [current]
-  -> mock/live adapters                 [current]
-  -> diff + safe sync                    [current]
-  -> end-to-end CLI                      [planned]
+PostgreSQL metadata discovery
+-> deterministic governance inventory
+-> Collibra mapping
+-> mock/live adapter boundary
+-> deterministic diff
+-> safe sync
+-> CLI
 ```
 
-## Design principles
+| Area | Status |
+| --- | --- |
+| PostgreSQL discovery + vendor-neutral model | Real against local demo |
+| Deterministic inventory export | Real |
+| Collibra mapping + sync planning | Real, local |
+| Mock Collibra adapter | Real, process-local, no external network |
+| Live Collibra Core REST API v2 adapter | Contract-tested; no commercial tenant validation claimed |
+| CLI (`scan` / `export` / `diff` / `sync`) | Real |
+| Live tenant credentials / commercial validation | Not provided by this repository |
 
-- **Vendor-neutral core model** — discovered metadata is represented independently of PostgreSQL drivers and catalog-specific API types.
-- **Read-only discovery** — scanner queries run against PostgreSQL metadata catalogs inside a read-only transaction and do not inspect business-row contents.
-- **Consistent metadata snapshot** — each scan uses one repeatable-read transaction so related catalog queries observe a coherent database state.
-- **Deterministic state** — stable logical IDs and ordered serialization make equivalent metadata produce equivalent output.
-- **Bulk catalog access** — discovery reads metadata in a fixed set of catalog queries rather than issuing per-table or per-column queries.
-- **Reproducible local environment** — Docker Compose and versioned SQL initialize the same fictional demo database from a clean volume.
-- **Safe-by-default synchronization** — catalog writes require an explicit plan, default to dry-run, update only supported managed fields, and never delete automatically.
+Central safety: sync defaults to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. No automatic deletes.
 
-## Requirements
+```mermaid
+flowchart LR
+  PostgreSQL --> Scanner
+  Scanner --> GovernanceModel
+  GovernanceModel --> MetadataInventory
+  GovernanceModel --> CollibraMapping
+  CollibraMapping --> DesiredState
+  DesiredState --> RemoteState
+  RemoteState --> SyncPlan
+  SyncPlan --> DryRunOrApply
+  DryRunOrApply --> MockAdapter
+  DryRunOrApply --> LiveCoreRESTv2Adapter
+```
 
-- Python 3.12+
-- Docker with Docker Compose
+Neutral core owns discovery, inventory, mapping, and plan construction. Adapters are the integration boundary. Plans are built before any write.
 
-## Quick start
+## Quick start (clean checkout, mock)
 
-Create and activate a virtual environment.
+No Collibra tenant is required.
 
 ### Bash / Linux / macOS / WSL / Git Bash
 
 ```bash
+git clone https://github.com/fgnfmackk/collibra-governance-automation.git
+cd collibra-governance-automation
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -e ".[dev]"
-python -m governance
+docker compose up -d --wait
+governance scan
+governance export
+governance diff --mode mock
+governance sync --mode mock
+governance sync --mode mock --apply
+docker compose down -v
 ```
 
 ### PowerShell / Windows
 
 ```powershell
+git clone https://github.com/fgnfmackk/collibra-governance-automation.git
+cd collibra-governance-automation
 python -m venv .venv
 .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -e ".[dev]"
-python -m governance
+docker compose up -d --wait
+governance scan
+governance export
+governance diff --mode mock
+governance sync --mode mock
+governance sync --mode mock --apply
+docker compose down -v
 ```
 
-Copy `.env.example` to `.env` only when local overrides are needed. The defaults match the Docker Compose demo environment. Collibra defaults to mock mode and require no credentials.
+Copy `.env.example` to `.env` only when local overrides are needed. Defaults match the Docker Compose demo. Collibra defaults to mock mode.
+
+Optional Bash helper for the SQL demo contract: `bash sample/verify_demo.sh` (Bash / WSL / Git Bash).
+
+## CLI
+
+```text
+governance scan
+governance export [--output PATH]
+governance diff [--mode mock|live] [--mapping-config PATH] [--json]
+governance sync [--mode mock|live] [--mapping-config PATH] [--apply] [--confirm-live] [--json]
+governance --help
+governance --version
+```
+
+Exit codes:
+
+- `0` — completed successfully
+- `1` — operational / configuration / integration failure
+- `2` — usage / argument / live-apply confirmation error
+
+`create` / `update` / `unchanged` / `remote_only` counts are plan actions, not completed remote writes. Dry-run means zero remote mutations (`applied=0`); it does not mean zero network in live mode.
+
+### Representative local output (mock demo)
+
+```text
+governance 1.0.0
+```
+
+```text
+source=governance-demo
+database=governance_demo
+schemas=2
+tables=7
+columns=41
+primary_keys=7
+foreign_keys=7
+relationships=7
+```
+
+```text
+mode=mock
+create=108
+update=0
+unchanged=0
+remote_only=0
+writes=0
+CREATE column col:governance-demo/governance_demo/commerce/customers/customer_id
+CREATE table tbl:governance-demo/governance_demo/commerce/customers
+CREATE relationship rel:fk:tbl:governance-demo/governance_demo/commerce/orders/orders_customer_id_fkey
+```
+
+A standalone mock `diff` starts from an empty mock adapter, so the plan commonly lists `CREATE` actions for the desired state. Mock state is process-local and is not persisted between CLI invocations.
+
+```text
+mode=mock
+dry_run=true
+create=108
+update=0
+unchanged=0
+remote_only=0
+applied=0
+success=true
+```
+
+## Mock vs live
+
+### Mock
+
+- Zero external network
+- Uses symbolic `mock:*` mapping refs
+- No Collibra credentials
+- Suitable for Quick Start and CI
+
+### Live
+
+- Uses existing Settings/env auth (`COLLIBRA_BASE_URL` plus Basic or Bearer)
+- Requires `--mapping-config PATH` with tenant catalog refs only (no credentials in that file)
+- `diff` and dry-run `sync` may perform GET/read calls against remote managed state
+- Remote mutations require both `--apply` and `--confirm-live`
+- Contract-tested; commercial tenant validation is not claimed
+
+Example mapping shape: [`sample/collibra-mapping.example.json`](sample/collibra-mapping.example.json). Placeholders such as `<tenant-domain-id>` are intentionally non-functional and are rejected by the live CLI until replaced.
+
+## Live usage
+
+Configure auth in the environment (not on the command line):
+
+```text
+COLLIBRA_MODE=live
+COLLIBRA_BASE_URL=https://your-collibra-host.example
+COLLIBRA_USERNAME=...
+COLLIBRA_PASSWORD=...
+# or COLLIBRA_BEARER_TOKEN=...
+```
+
+Use a real mapping file derived from the sample placeholders:
+
+```bash
+governance diff \
+  --mode live \
+  --mapping-config tenant-mapping.json
+
+governance sync \
+  --mode live \
+  --mapping-config tenant-mapping.json
+
+governance sync \
+  --mode live \
+  --mapping-config tenant-mapping.json \
+  --apply \
+  --confirm-live
+```
+
+Dry-run first. Live dry-run may read remote state; it does not POST/PATCH/DELETE.
 
 ## PostgreSQL demo
-
-Start the demo database:
 
 ```bash
 docker compose up -d --wait
 ```
 
-Local credentials are intentionally fictional and development-only:
+Local credentials are fictional and development-only:
 
 | Setting | Value |
 | --- | --- |
@@ -107,167 +219,15 @@ Local credentials are intentionally fictional and development-only:
 | Password | `postgres` |
 | Logical source | `governance-demo` |
 
-The primary demo schema is `commerce`, containing:
+Primary demo schema: `commerce` (`customers`, `products`, `employees`, `orders`, `order_items`, `payments`, `marketing_contacts`). Seed data is synthetic (`@example.com`).
 
-- `customers`
-- `products`
-- `employees`
-- `orders`
-- `order_items`
-- `payments`
-- `marketing_contacts`
+## Library seams
 
-Seed data is synthetic and uses reserved example data such as `@example.com`. Its purpose is to provide a realistic metadata structure, not production-like volume.
-
-Verify the demo contract from Bash, WSL, or Git Bash:
-
-```bash
-bash sample/verify_demo.sh
-```
-
-## Metadata discovery
-
-`PostgresMetadataScanner` reads PostgreSQL system catalogs and maps the connected database into the vendor-neutral `GovernanceModel`.
-
-Discovery includes:
-
-- user schemas
-- ordinary and partitioned tables
-- columns and PostgreSQL-formatted data types
-- nullability and ordinal position
-- primary keys
-- foreign keys
-- table and column comments
-- database, schema, and table ownership
-- table-to-table relationships derived from foreign keys
-
-The scanner does not sample, profile, count, or otherwise read business-row contents.
-
-```python
-from governance.config import load_settings
-from governance.scanner import PostgresMetadataScanner
-
-settings = load_settings()
-model = PostgresMetadataScanner(settings).scan()
-
-print(model.to_json())
-```
-
-The logical source name comes from `POSTGRES_SOURCE_NAME`. Host, port, credentials, and PostgreSQL OIDs are intentionally excluded from public governance identifiers.
-
-## Metadata inventory
-
-The discovered governance model can be wrapped in a deterministic, versioned inventory and written as UTF-8 JSON.
+The CLI orchestrates the same public layers available to library callers:
 
 ```python
 from governance.config import load_settings
 from governance.exporters import MetadataInventory, write_inventory
-from governance.scanner import PostgresMetadataScanner
-
-settings = load_settings()
-model = PostgresMetadataScanner(settings).scan()
-inventory = MetadataInventory.from_model(model)
-
-write_inventory(inventory, settings.inventory_output_path)
-```
-
-Default output:
-
-```text
-artifacts/metadata-inventory.json
-```
-
-The generated `artifacts/` directory is ignored by Git.
-
-Inventory envelope:
-
-```json
-{
-  "governance": {},
-  "inventory_schema": "governance-metadata-inventory",
-  "inventory_version": "1.0",
-  "scan": {
-    "scanner": "postgresql",
-    "scanner_contract_version": "1"
-  },
-  "source": {
-    "database": "governance_demo",
-    "name": "governance-demo",
-    "system_type": "postgresql"
-  }
-}
-```
-
-The `governance` object contains the complete vendor-neutral metadata graph. Equivalent metadata produces equivalent serialized inventory output; volatile execution data such as timestamps, OIDs, host details, and credentials is excluded.
-
-## Collibra mapping
-
-The mapping layer translates a `GovernanceModel` or `MetadataInventory` into an inspectable `CollibraDesiredState` without network calls or PostgreSQL access.
-
-Tenant-specific Collibra domain, asset-type, relation-type, and attribute-type references are supplied through `CollibraMappingConfig`. Mock helpers use symbolic `mock:*` refs that are local identifiers, not commercial tenant UUIDs.
-
-Mapped assets use:
-
-- `local_id` — stable governance identifier used for reconciliation
-- `name` — deterministic full name (`database`, `database.schema`, `database.schema.table`, `database.schema.table.column`)
-- `display_name` — short original object name
-
-```python
-from governance.config import load_settings
-from governance.exporters import MetadataInventory
-from governance.integrations.collibra import map_to_desired_state, mock_mapping_config
-from governance.scanner import PostgresMetadataScanner
-
-settings = load_settings()
-model = PostgresMetadataScanner(settings).scan()
-inventory = MetadataInventory.from_model(model)
-desired = map_to_desired_state(inventory, mock_mapping_config())
-print(desired.to_json())
-```
-
-## Collibra adapters
-
-Adapters share one application-facing contract for reading remote state and applying explicit create/update operations. Diff/sync planning is separate.
-
-### Mock mode
-
-- Local deterministic state, no network, no Collibra tenant
-- Clearly identified as `mode == "mock"`
-- Uses symbolic `mock:*` mapping refs and deterministic mock remote IDs
-
-### Live mode
-
-- HTTP client for Collibra Core REST API v2 (`/rest/2.0`)
-- Supports Basic username/password or a caller-supplied Bearer token
-- Core REST may accept Bearer/JWT tokens that originate from OAuth elsewhere; this project does not acquire, refresh, or cache OAuth tokens
-- Requires `COLLIBRA_BASE_URL` and exactly one auth method
-- Finite timeout (default 10s), TLS verification on
-- Reads are scoped to the configured domain and asset types (`whole_tenant_scan=false`)
-- Attribute updates are directed (create/patch managed attributes only); tenant-specific attributes and unmanaged relations are not replaced or deleted
-- Remote-state discovery is paginated and deterministic after retrieval, but Collibra REST reads are not treated as a transactional snapshot across concurrent tenant mutations
-- Contract-tested with mocked HTTP; not validated against a commercial Collibra tenant in this repository
-
-## Safe synchronization
-
-Synchronization always builds an explicit `SyncPlan` before any write:
-
-1. `adapter.read_remote_state(desired)`
-2. `build_sync_plan(desired, remote)`
-3. `execute_sync_plan(adapter, plan, apply=False)` for dry-run
-4. `execute_sync_plan(adapter, plan, apply=True)` only after review
-
-Safety rules:
-
-- dry-run performs zero writes
-- no automatic DELETE actions
-- only managed objects (configured domain/types + stable `local_id` attribute) participate in diff/sync
-- unmanaged tenant assets/relations are ignored and never adopted by name
-- `REMOTE_ONLY` reports managed remote objects absent from desired state without deleting them
-- REST sync is not a distributed transaction
-
-```python
-from governance.config import load_settings
-from governance.exporters import MetadataInventory
 from governance.integrations.collibra import (
     build_collibra_adapter,
     build_sync_plan,
@@ -279,55 +239,49 @@ from governance.scanner import PostgresMetadataScanner
 
 settings = load_settings()
 model = PostgresMetadataScanner(settings).scan()
-desired = map_to_desired_state(MetadataInventory.from_model(model), mock_mapping_config())
-adapter = build_collibra_adapter(settings, mock_mapping_config())
+inventory = MetadataInventory.from_model(model)
+write_inventory(inventory, settings.inventory_output_path)
 
+desired = map_to_desired_state(model, mock_mapping_config())
+adapter = build_collibra_adapter(settings, mock_mapping_config())
 remote = adapter.read_remote_state(desired)
 plan = build_sync_plan(desired, remote)
 dry_run = execute_sync_plan(adapter, plan, apply=False)
-result = execute_sync_plan(adapter, plan, apply=True)
 ```
 
-## Local validation
+## Repository structure
 
-Python quality and unit tests:
+```text
+src/governance/
+  domain/                 vendor-neutral governance model
+  scanner/                PostgreSQL metadata discovery
+  exporters/              deterministic inventory JSON
+  integrations/collibra/  mapping, adapters, sync planning
+  cli.py                  argparse CLI orchestration
+tests/
+sample/                   demo SQL, verification helper, mapping example
+.github/workflows/        CI quality gates
+```
+
+## Testing and CI
 
 ```bash
 ruff check src tests
 ruff format --check src tests
-pytest -m "not integration and not collibra_integration"
-python -m governance
+pytest -m "not integration and not collibra_integration and not cli_integration"
 python -m build
 ```
 
-PostgreSQL demo contract:
-
-```bash
-docker compose config -q
-docker compose down -v
-docker compose up -d --wait
-bash sample/verify_demo.sh
-```
-
-Metadata integration:
+With the demo database running:
 
 ```bash
 pytest -m integration
-```
-
-Collibra mock lifecycle:
-
-```bash
 pytest -m collibra_integration
-```
-
-Final cleanup:
-
-```bash
+pytest -m cli_integration
 docker compose down -v
 ```
 
-CI runs six independent GitHub-hosted `ubuntu-latest` jobs:
+CI defines seven `ubuntu-latest` jobs:
 
 - `lint`
 - `unit-tests`
@@ -335,7 +289,21 @@ CI runs six independent GitHub-hosted `ubuntu-latest` jobs:
 - `postgres-integration`
 - `metadata-integration`
 - `collibra-integration`
+- `cli-integration`
+
+No commercial Collibra tenant, self-hosted runners, or OS matrix is required.
+
+## Limitations
+
+- No commercial Collibra tenant validation
+- No OAuth acquisition/refresh
+- No automatic deletes
+- No arbitrary tenant customization beyond configured refs
+- No transactional REST snapshot across concurrent mutations
+- No large-scale performance benchmark
+- Mock state is process-local demonstration state
+- Demo data is fictional
 
 ## License
 
-MIT
+[MIT](LICENSE)

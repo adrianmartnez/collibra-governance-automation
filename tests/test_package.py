@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib import metadata
+from pathlib import Path
 
 import governance
 from governance import __version__
 
 
 def test_package_import() -> None:
-    assert __version__ == governance.__version__
+    assert __version__ == "1.0.0"
+    assert governance.__version__ == "1.0.0"
     assert governance.__name__ == "governance"
+
+
+def test_pyproject_version_matches_runtime() -> None:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    assert 'version = "1.0.0"' in text
+    assert metadata.version("collibra-governance-automation") == "1.0.0"
 
 
 def test_entry_point_module_help() -> None:

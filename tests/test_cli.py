@@ -563,6 +563,12 @@ def test_mapping_file_loader_and_placeholder_helper(tmp_path: Path) -> None:
     assert mapping_contains_example_placeholders(load_mapping_config_file(placeholder)) is True
 
 
+def test_sample_mapping_example_parses_and_is_placeholder() -> None:
+    sample = Path(__file__).resolve().parents[1] / "sample" / "collibra-mapping.example.json"
+    config = load_mapping_config_file(sample)
+    assert mapping_contains_example_placeholders(config) is True
+
+
 def test_adapter_failure_exit_1(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
