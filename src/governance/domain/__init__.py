@@ -1,1 +1,43 @@
 """Vendor-neutral governance domain model."""
+
+from governance.domain.models import (
+    Column,
+    Database,
+    DataSource,
+    ForeignKey,
+    GovernanceModel,
+    Ownership,
+    PrimaryKey,
+    Relationship,
+    Schema,
+    Table,
+    make_column_id,
+    make_database_id,
+    make_datasource_id,
+    make_foreign_key_id,
+    make_primary_key_id,
+    make_relationship_id,
+    make_schema_id,
+    make_table_id,
+)
+
+__all__ = [
+    "Column",
+    "Database",
+    "DataSource",
+    "ForeignKey",
+    "GovernanceModel",
+    "Ownership",
+    "PrimaryKey",
+    "Relationship",
+    "Schema",
+    "Table",
+    "make_column_id",
+    "make_database_id",
+    "make_datasource_id",
+    "make_foreign_key_id",
+    "make_primary_key_id",
+    "make_relationship_id",
+    "make_schema_id",
+    "make_table_id",
+]
