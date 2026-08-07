@@ -9,7 +9,9 @@ from governance.integrations.collibra.live import LiveCollibraAdapter
 from governance.integrations.collibra.mapping import (
     CollibraMappingConfig,
     CollibraMappingError,
+    load_mapping_config_file,
     map_to_desired_state,
+    mapping_contains_example_placeholders,
     mock_mapping_config,
 )
 from governance.integrations.collibra.mock import MockCollibraAdapter, mock_remote_id
@@ -53,7 +55,9 @@ __all__ = [
     "build_collibra_adapter",
     "build_sync_plan",
     "execute_sync_plan",
+    "load_mapping_config_file",
     "map_to_desired_state",
+    "mapping_contains_example_placeholders",
     "mock_mapping_config",
     "mock_remote_id",
 ]

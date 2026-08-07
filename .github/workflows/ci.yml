@@ -56,10 +56,12 @@ jobs:
         run: python -c "import governance; print(governance.__version__)"
 
       - name: Entry point
-        run: python -m governance
+        run: |
+          governance --help
+          python -m governance --help
 
       - name: Pytest
-        run: pytest -m "not integration and not collibra_integration"
+        run: pytest -m "not integration and not collibra_integration and not cli_integration"
 
   package-validation:
     name: package-validation
@@ -89,8 +91,10 @@ jobs:
           python -c "import governance; print(governance.__version__)"
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
-          python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, map_to_desired_state, mock_mapping_config"
-          python -m governance
+          python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, load_mapping_config_file, map_to_desired_state, mapping_contains_example_placeholders, mock_mapping_config"
+          governance --help
+          governance --version
+          python -m governance --help
 
   postgres-integration:
     name: postgres-integration
@@ -172,6 +176,35 @@ jobs:
 
       - name: Collibra mock lifecycle
         run: pytest -m collibra_integration
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
+
+  cli-integration:
+    name: cli-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Validate Compose file
+        run: docker compose config -q
+
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait
+
+      - name: CLI integration tests
+        run: pytest -m cli_integration
 
       - name: Teardown
         if: always()

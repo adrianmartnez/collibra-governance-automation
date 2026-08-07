@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-governance = "governance.__main__:main"
+governance = "governance.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -35,6 +35,7 @@ pythonpath = ["src"]
 markers = [
     "integration: requires the local PostgreSQL demo service",
     "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",
+    "cli_integration: end-to-end CLI smoke against local PostgreSQL demo",
 ]
 
 [tool.ruff]
