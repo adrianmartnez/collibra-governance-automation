@@ -1,0 +1,23 @@
+{
+  "domain_ref": "<tenant-domain-id>",
+  "asset_type_refs": {
+    "database": "<database-asset-type-id>",
+    "schema": "<schema-asset-type-id>",
+    "table": "<table-asset-type-id>",
+    "column": "<column-asset-type-id>"
+  },
+  "relation_type_refs": {
+    "database_schema": "<database-schema-relation-type-id>",
+    "schema_table": "<schema-table-relation-type-id>",
+    "table_column": "<table-column-relation-type-id>",
+    "table_fk": "<table-fk-relation-type-id>"
+  },
+  "attribute_type_refs": {
+    "local_id": "<local-id-attribute-type-id>",
+    "description": "<description-attribute-type-id>",
+    "owner": "<owner-attribute-type-id>",
+    "data_type": "<data-type-attribute-type-id>",
+    "nullable": "<nullable-attribute-type-id>",
+    "ordinal_position": "<ordinal-position-attribute-type-id>"
+  }
+}

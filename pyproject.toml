@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "collibra-governance-automation"
-version = "0.1.0"
+version = "1.0.0"
 description = "Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for Collibra integration."
 readme = "README.md"
 license = "MIT"
@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-governance = "governance.__main__:main"
+governance = "governance.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -35,6 +35,7 @@ pythonpath = ["src"]
 markers = [
     "integration: requires the local PostgreSQL demo service",
     "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",
+    "cli_integration: end-to-end CLI smoke against local PostgreSQL demo",
 ]
 
 [tool.ruff]

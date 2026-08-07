@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from governance.domain import (
     Column,
@@ -121,6 +125,58 @@ def mock_mapping_config() -> CollibraMappingConfig:
             "ordinal_position": "mock:attribute-type:ordinal-position",
         },
     )
+
+
+_EXAMPLE_PLACEHOLDER_RE = re.compile(r"<[^>]+>")
+
+
+def load_mapping_config_file(path: str | Path) -> CollibraMappingConfig:
+    """Load a UTF-8 JSON mapping config file into CollibraMappingConfig.
+
+    Errors omit file contents and credentials. Auth never belongs in this file.
+    """
+    target = Path(path)
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CollibraMappingError("invalid Collibra mapping configuration") from exc
+
+    try:
+        payload: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CollibraMappingError("invalid Collibra mapping configuration") from exc
+
+    if not isinstance(payload, dict):
+        raise CollibraMappingError("invalid Collibra mapping configuration")
+
+    try:
+        domain_ref = payload["domain_ref"]
+        asset_type_refs = payload["asset_type_refs"]
+        relation_type_refs = payload["relation_type_refs"]
+        attribute_type_refs = payload["attribute_type_refs"]
+    except KeyError as exc:
+        raise CollibraMappingError("invalid Collibra mapping configuration") from exc
+
+    try:
+        return CollibraMappingConfig(
+            domain_ref=domain_ref,
+            asset_type_refs=asset_type_refs,
+            relation_type_refs=relation_type_refs,
+            attribute_type_refs=attribute_type_refs,
+        )
+    except CollibraMappingError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise CollibraMappingError("invalid Collibra mapping configuration") from exc
+
+
+def mapping_contains_example_placeholders(config: CollibraMappingConfig) -> bool:
+    """Return True when any ref still looks like a sample ``<placeholder>``."""
+    values = [config.domain_ref]
+    values.extend(str(value) for value in config.asset_type_refs.values())
+    values.extend(str(value) for value in config.relation_type_refs.values())
+    values.extend(str(value) for value in config.attribute_type_refs.values())
+    return any(_EXAMPLE_PLACEHOLDER_RE.search(value) for value in values)
 
 
 def map_to_desired_state(
