@@ -16,6 +16,8 @@ DEFAULT_POSTGRES_PASSWORD = "postgres"
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_POSTGRES_SOURCE_NAME = "governance-demo"
 DEFAULT_INVENTORY_OUTPUT_PATH = "artifacts/metadata-inventory.json"
+DEFAULT_COLLIBRA_MODE = "mock"
+DEFAULT_COLLIBRA_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +32,12 @@ class Settings:
     postgres_source_name: str
     inventory_output_path: str
     log_level: str = DEFAULT_LOG_LEVEL
+    collibra_mode: str = DEFAULT_COLLIBRA_MODE
+    collibra_base_url: str = ""
+    collibra_username: str = ""
+    collibra_password: str = ""
+    collibra_bearer_token: str = ""
+    collibra_timeout_seconds: float = DEFAULT_COLLIBRA_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
         if not self.postgres_host.strip():
@@ -48,6 +56,12 @@ class Settings:
             raise ValueError("inventory_output_path is required")
         if not self.log_level.strip():
             raise ValueError("log_level is required")
+        mode = self.collibra_mode.strip().lower()
+        if mode not in {"mock", "live"}:
+            raise ValueError("collibra_mode must be 'mock' or 'live'")
+        object.__setattr__(self, "collibra_mode", mode)
+        if self.collibra_timeout_seconds <= 0:
+            raise ValueError("collibra_timeout_seconds must be positive")
 
     @property
     def database_url(self) -> str:
@@ -56,7 +70,7 @@ class Settings:
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
-    def redacted(self) -> dict[str, str | int]:
+    def redacted(self) -> dict[str, str | int | float]:
         """Return a logging-safe representation with secrets masked."""
         return {
             "postgres_host": self.postgres_host,
@@ -67,6 +81,12 @@ class Settings:
             "postgres_source_name": self.postgres_source_name,
             "inventory_output_path": self.inventory_output_path,
             "log_level": self.log_level,
+            "collibra_mode": self.collibra_mode,
+            "collibra_base_url": self.collibra_base_url,
+            "collibra_username": self.collibra_username,
+            "collibra_password": "***" if self.collibra_password else "",
+            "collibra_bearer_token": "***" if self.collibra_bearer_token else "",
+            "collibra_timeout_seconds": self.collibra_timeout_seconds,
         }
 
 
@@ -94,7 +114,7 @@ def load_settings(
         load_dotenv(dotenv_path, override=False)
 
     env = environ if environ is not None else os.environ
-    values: dict[str, str | int] = {
+    values: dict[str, str | int | float] = {
         "postgres_host": env.get("POSTGRES_HOST", DEFAULT_POSTGRES_HOST),
         "postgres_port": int(env.get("POSTGRES_PORT", str(DEFAULT_POSTGRES_PORT))),
         "postgres_db": env.get("POSTGRES_DB", DEFAULT_POSTGRES_DB),
@@ -103,6 +123,14 @@ def load_settings(
         "postgres_source_name": env.get("POSTGRES_SOURCE_NAME", DEFAULT_POSTGRES_SOURCE_NAME),
         "inventory_output_path": env.get("INVENTORY_OUTPUT_PATH", DEFAULT_INVENTORY_OUTPUT_PATH),
         "log_level": env.get("LOG_LEVEL", DEFAULT_LOG_LEVEL),
+        "collibra_mode": env.get("COLLIBRA_MODE", DEFAULT_COLLIBRA_MODE),
+        "collibra_base_url": env.get("COLLIBRA_BASE_URL", ""),
+        "collibra_username": env.get("COLLIBRA_USERNAME", ""),
+        "collibra_password": env.get("COLLIBRA_PASSWORD", ""),
+        "collibra_bearer_token": env.get("COLLIBRA_BEARER_TOKEN", ""),
+        "collibra_timeout_seconds": float(
+            env.get("COLLIBRA_TIMEOUT_SECONDS", str(DEFAULT_COLLIBRA_TIMEOUT_SECONDS))
+        ),
     }
 
     database_url = env.get("DATABASE_URL")
@@ -118,4 +146,10 @@ def load_settings(
         postgres_source_name=str(values["postgres_source_name"]),
         inventory_output_path=str(values["inventory_output_path"]),
         log_level=str(values["log_level"]),
+        collibra_mode=str(values["collibra_mode"]),
+        collibra_base_url=str(values["collibra_base_url"]),
+        collibra_username=str(values["collibra_username"]),
+        collibra_password=str(values["collibra_password"]),
+        collibra_bearer_token=str(values["collibra_bearer_token"]),
+        collibra_timeout_seconds=float(values["collibra_timeout_seconds"]),
     )

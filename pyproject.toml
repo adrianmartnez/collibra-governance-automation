@@ -13,6 +13,7 @@ authors = [{ name = "fgnfmackk" }]
 dependencies = [
     "python-dotenv>=1.0",
     "psycopg[binary]>=3.2,<4",
+    "httpx>=0.28,<1",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "integration: requires the local PostgreSQL demo service",
+    "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",
 ]
 
 [tool.ruff]

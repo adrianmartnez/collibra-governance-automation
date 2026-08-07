@@ -1,1 +1,1 @@
-"""External catalog integrations (not implemented in PR1)."""
+"""External catalog integrations."""

@@ -22,6 +22,9 @@ def test_default_settings() -> None:
     assert settings.postgres_source_name == DEFAULT_POSTGRES_SOURCE_NAME
     assert settings.inventory_output_path == DEFAULT_INVENTORY_OUTPUT_PATH
     assert settings.log_level == "INFO"
+    assert settings.collibra_mode == "mock"
+    assert settings.collibra_base_url == ""
+    assert settings.collibra_timeout_seconds == 10.0
 
 
 def test_env_overrides() -> None:
@@ -80,7 +83,31 @@ def test_redacted_masks_password() -> None:
     assert redacted["postgres_password"] == "***"
     assert redacted["postgres_source_name"] == "governance-demo"
     assert redacted["inventory_output_path"] == "artifacts/metadata-inventory.json"
+    assert redacted["collibra_mode"] == "mock"
+    assert redacted["collibra_bearer_token"] == ""
     assert "super-secret" not in str(redacted)
+
+
+def test_redacted_masks_collibra_secrets() -> None:
+    settings = Settings(
+        postgres_host="localhost",
+        postgres_port=5432,
+        postgres_db="governance_demo",
+        postgres_user="postgres",
+        postgres_password="postgres",
+        postgres_source_name="governance-demo",
+        inventory_output_path="artifacts/metadata-inventory.json",
+        collibra_mode="live",
+        collibra_base_url="https://collibra.example.invalid",
+        collibra_password="collibra-pass",
+        collibra_bearer_token="collibra-token",
+    )
+    # Construction allows both secrets on Settings; live adapter rejects dual auth.
+    redacted = settings.redacted()
+    assert redacted["collibra_password"] == "***"
+    assert redacted["collibra_bearer_token"] == "***"
+    assert "collibra-pass" not in str(redacted)
+    assert "collibra-token" not in str(redacted)
 
 
 def test_rejects_blank_host() -> None:
