@@ -1,1 +1,5 @@
-"""Metadata scanners (not implemented in PR1)."""
+"""Metadata scanners."""
+
+from governance.scanner.postgres import MetadataDiscoveryError, PostgresMetadataScanner
+
+__all__ = ["MetadataDiscoveryError", "PostgresMetadataScanner"]

@@ -14,6 +14,8 @@ DEFAULT_POSTGRES_DB = "governance_demo"
 DEFAULT_POSTGRES_USER = "postgres"
 DEFAULT_POSTGRES_PASSWORD = "postgres"
 DEFAULT_LOG_LEVEL = "INFO"
+DEFAULT_POSTGRES_SOURCE_NAME = "governance-demo"
+DEFAULT_INVENTORY_OUTPUT_PATH = "artifacts/metadata-inventory.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +27,8 @@ class Settings:
     postgres_db: str
     postgres_user: str
     postgres_password: str
+    postgres_source_name: str
+    inventory_output_path: str
     log_level: str = DEFAULT_LOG_LEVEL
 
     def __post_init__(self) -> None:
@@ -38,6 +42,10 @@ class Settings:
             raise ValueError("postgres_user is required")
         if not self.postgres_password:
             raise ValueError("postgres_password is required")
+        if not self.postgres_source_name.strip():
+            raise ValueError("postgres_source_name is required")
+        if not self.inventory_output_path.strip():
+            raise ValueError("inventory_output_path is required")
         if not self.log_level.strip():
             raise ValueError("log_level is required")
 
@@ -56,6 +64,8 @@ class Settings:
             "postgres_db": self.postgres_db,
             "postgres_user": self.postgres_user,
             "postgres_password": "***",
+            "postgres_source_name": self.postgres_source_name,
+            "inventory_output_path": self.inventory_output_path,
             "log_level": self.log_level,
         }
 
@@ -90,6 +100,8 @@ def load_settings(
         "postgres_db": env.get("POSTGRES_DB", DEFAULT_POSTGRES_DB),
         "postgres_user": env.get("POSTGRES_USER", DEFAULT_POSTGRES_USER),
         "postgres_password": env.get("POSTGRES_PASSWORD", DEFAULT_POSTGRES_PASSWORD),
+        "postgres_source_name": env.get("POSTGRES_SOURCE_NAME", DEFAULT_POSTGRES_SOURCE_NAME),
+        "inventory_output_path": env.get("INVENTORY_OUTPUT_PATH", DEFAULT_INVENTORY_OUTPUT_PATH),
         "log_level": env.get("LOG_LEVEL", DEFAULT_LOG_LEVEL),
     }
 
@@ -103,5 +115,7 @@ def load_settings(
         postgres_db=str(values["postgres_db"]),
         postgres_user=str(values["postgres_user"]),
         postgres_password=str(values["postgres_password"]),
+        postgres_source_name=str(values["postgres_source_name"]),
+        inventory_output_path=str(values["inventory_output_path"]),
         log_level=str(values["log_level"]),
     )

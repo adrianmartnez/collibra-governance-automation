@@ -12,6 +12,7 @@ requires-python = ">=3.12"
 authors = [{ name = "fgnfmackk" }]
 dependencies = [
     "python-dotenv>=1.0",
+    "psycopg[binary]>=3.2,<4",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: requires the local PostgreSQL demo service",
+]
 
 [tool.ruff]
 line-length = 100
