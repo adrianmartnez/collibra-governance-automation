@@ -1,6 +1,6 @@
 # collibra-governance-automation
 
-Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for catalog integrations. The current implementation discovers PostgreSQL technical metadata from system catalogs and exports deterministic inventory JSON; Collibra integration remains planned.
+Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for catalog integrations. The current implementation discovers PostgreSQL technical metadata, exports deterministic inventory JSON, and maps inventory into an inspectable Collibra-oriented desired state. Mock/live adapters and synchronization remain planned.
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · Docker Compose
 
@@ -13,20 +13,22 @@ Technical metadata governance tooling with Python and PostgreSQL, using a vendor
 - Table and column comments plus database, schema, and table ownership metadata
 - Stable logical identifiers independent of host, port, credentials, or PostgreSQL OIDs
 - Deterministic, versioned metadata inventory with human-reviewable JSON export
+- Collibra-oriented asset and relationship mapping with deterministic desired state
 - Automated quality gates for linting, unit tests, package validation, PostgreSQL reproducibility, and metadata integration
 
 ## Project status
 
-Metadata discovery and deterministic inventory generation are implemented. Catalog-specific mapping and synchronization remain separate later stages.
+Metadata discovery, inventory export, and Collibra desired-state mapping are implemented. Catalog adapters and synchronization remain separate later stages.
 
 | Current | Planned |
 | --- | --- |
-| Python package foundation | Collibra asset and relationship mapping |
-| Reproducible PostgreSQL governance demo | Mock and live Collibra adapters |
-| Vendor-neutral governance domain model | Catalog-state diff |
-| PostgreSQL system-catalog discovery | Safe synchronization |
-| Deterministic metadata inventory | End-to-end governance CLI |
-| Five automated quality gates | Release documentation |
+| Python package foundation | Mock and live Collibra adapters |
+| Reproducible PostgreSQL governance demo | Catalog-state diff |
+| Vendor-neutral governance domain model | Safe synchronization |
+| PostgreSQL system-catalog discovery | End-to-end governance CLI |
+| Deterministic metadata inventory | Release documentation |
+| Collibra asset and relationship mapping | |
+| Five automated quality gates | |
 
 Tracking: [v1.0 - Governance Automation MVP](https://github.com/fgnfmackk/collibra-governance-automation/milestone/1)
 
@@ -37,7 +39,7 @@ PostgreSQL
   -> metadata discovery                 [current]
   -> vendor-neutral governance model    [current]
   -> deterministic inventory            [current]
-  -> Collibra mapping                    [planned]
+  -> Collibra mapping                    [current]
   -> mock/live adapters                 [planned]
   -> diff + safe sync                    [planned]
   -> end-to-end CLI                      [planned]
@@ -193,6 +195,31 @@ Inventory envelope:
 ```
 
 The `governance` object contains the complete vendor-neutral metadata graph. Equivalent metadata produces equivalent serialized inventory output; volatile execution data such as timestamps, OIDs, host details, and credentials is excluded.
+
+## Collibra mapping
+
+The mapping layer translates a `GovernanceModel` or `MetadataInventory` into an inspectable `CollibraDesiredState` without network calls or PostgreSQL access.
+
+Tenant-specific Collibra domain, asset-type, relation-type, and attribute-type references are supplied through `CollibraMappingConfig`. Mock helpers use symbolic `mock:*` refs that are local identifiers, not commercial tenant UUIDs.
+
+Mapped assets use:
+
+- `local_id` — stable governance identifier used for future reconciliation
+- `name` — deterministic full name (`database`, `database.schema`, `database.schema.table`, `database.schema.table.column`)
+- `display_name` — short original object name
+
+```python
+from governance.exporters import MetadataInventory
+from governance.integrations.collibra import map_to_desired_state, mock_mapping_config
+from governance.scanner import PostgresMetadataScanner
+from governance.config import load_settings
+
+settings = load_settings()
+model = PostgresMetadataScanner(settings).scan()
+inventory = MetadataInventory.from_model(model)
+desired = map_to_desired_state(inventory, mock_mapping_config())
+print(desired.to_json())
+```
 
 ## Local validation
 
