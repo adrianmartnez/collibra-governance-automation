@@ -1,6 +1,6 @@
 # collibra-governance-automation
 
-Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for catalog integrations. The current implementation discovers PostgreSQL technical metadata, exports deterministic inventory JSON, and maps inventory into an inspectable Collibra-oriented desired state. Mock/live adapters and synchronization remain planned.
+Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for catalog integrations. The current implementation discovers PostgreSQL technical metadata, exports deterministic inventory JSON, maps inventory into an inspectable Collibra-oriented desired state, and provides mock plus live Core REST API v2 adapter boundaries. Safe plan-driven synchronization remains planned.
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · Docker Compose
 
@@ -14,20 +14,23 @@ Technical metadata governance tooling with Python and PostgreSQL, using a vendor
 - Stable logical identifiers independent of host, port, credentials, or PostgreSQL OIDs
 - Deterministic, versioned metadata inventory with human-reviewable JSON export
 - Collibra-oriented asset and relationship mapping with deterministic desired state
+- Mock Collibra adapter for local, offline demonstration
+- Live Collibra Core REST API v2 adapter boundary (contract-tested; tenant validation not claimed)
 - Automated quality gates for linting, unit tests, package validation, PostgreSQL reproducibility, and metadata integration
 
 ## Project status
 
-Metadata discovery, inventory export, and Collibra desired-state mapping are implemented. Catalog adapters and synchronization remain separate later stages.
+Metadata discovery, inventory export, Collibra desired-state mapping, and mock/live adapters are implemented. Plan-driven synchronization remains a later stage.
 
 | Current | Planned |
 | --- | --- |
-| Python package foundation | Mock and live Collibra adapters |
-| Reproducible PostgreSQL governance demo | Catalog-state diff |
-| Vendor-neutral governance domain model | Safe synchronization |
-| PostgreSQL system-catalog discovery | End-to-end governance CLI |
-| Deterministic metadata inventory | Release documentation |
+| Python package foundation | Catalog-state diff |
+| Reproducible PostgreSQL governance demo | Safe synchronization |
+| Vendor-neutral governance domain model | End-to-end governance CLI |
+| PostgreSQL system-catalog discovery | Release documentation |
+| Deterministic metadata inventory | |
 | Collibra asset and relationship mapping | |
+| Mock and live Collibra adapters | |
 | Five automated quality gates | |
 
 Tracking: [v1.0 - Governance Automation MVP](https://github.com/fgnfmackk/collibra-governance-automation/milestone/1)
@@ -40,7 +43,7 @@ PostgreSQL
   -> vendor-neutral governance model    [current]
   -> deterministic inventory            [current]
   -> Collibra mapping                    [current]
-  -> mock/live adapters                 [planned]
+  -> mock/live adapters                 [current]
   -> diff + safe sync                    [planned]
   -> end-to-end CLI                      [planned]
 ```
@@ -219,6 +222,36 @@ model = PostgresMetadataScanner(settings).scan()
 inventory = MetadataInventory.from_model(model)
 desired = map_to_desired_state(inventory, mock_mapping_config())
 print(desired.to_json())
+```
+
+## Collibra adapters
+
+Adapters share one application-facing contract for reading remote state and applying explicit create/update operations. Diff and sync planning are separate and not implemented yet.
+
+### Mock mode
+
+- Local deterministic state, no network, no Collibra tenant
+- Clearly identified as `mode == "mock"`
+- Uses symbolic `mock:*` mapping refs and deterministic mock remote IDs
+
+### Live mode
+
+- HTTP client for Collibra Core REST API v2 (`/rest/2.0`)
+- Supports Basic username/password or a caller-supplied Bearer token
+- Core REST may accept Bearer/JWT tokens that originate from OAuth elsewhere; this project does not acquire, refresh, or cache OAuth tokens
+- Requires `COLLIBRA_BASE_URL` and exactly one auth method
+- Finite timeout (default 10s), TLS verification on
+- Reads are scoped to the configured domain and asset types
+- Attribute updates are directed (create/patch managed attributes only); tenant-specific attributes and unmanaged relations are not replaced or deleted
+- Contract-tested with mocked HTTP; not validated against a commercial Collibra tenant in this repository
+
+```python
+from governance.config import load_settings
+from governance.integrations.collibra import build_collibra_adapter, mock_mapping_config
+
+settings = load_settings()  # COLLIBRA_MODE=mock by default
+adapter = build_collibra_adapter(settings, mock_mapping_config())
+assert adapter.mode == "mock"
 ```
 
 ## Local validation

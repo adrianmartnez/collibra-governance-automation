@@ -89,6 +89,7 @@ jobs:
           python -c "import governance; print(governance.__version__)"
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
+          python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, build_collibra_adapter, map_to_desired_state, mock_mapping_config"
           python -m governance
 
   postgres-integration:
