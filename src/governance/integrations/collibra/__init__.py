@@ -1,4 +1,4 @@
-"""Collibra integration: mapping and mock/live adapter boundaries."""
+"""Collibra integration: mapping, adapters, and safe plan-driven sync."""
 
 from governance.integrations.collibra.adapters import (
     CollibraAdapter,
@@ -22,7 +22,13 @@ from governance.integrations.collibra.models import (
     CollibraRemoteAttribute,
     CollibraRemoteRelationship,
     CollibraRemoteState,
+    SyncAction,
+    SyncActionType,
+    SyncObjectKind,
+    SyncPlan,
+    SyncResult,
 )
+from governance.integrations.collibra.sync import build_sync_plan, execute_sync_plan
 
 __all__ = [
     "CollibraAdapter",
@@ -39,7 +45,14 @@ __all__ = [
     "CollibraRemoteState",
     "LiveCollibraAdapter",
     "MockCollibraAdapter",
+    "SyncAction",
+    "SyncActionType",
+    "SyncObjectKind",
+    "SyncPlan",
+    "SyncResult",
     "build_collibra_adapter",
+    "build_sync_plan",
+    "execute_sync_plan",
     "map_to_desired_state",
     "mock_mapping_config",
     "mock_remote_id",

@@ -1,9 +1,10 @@
-"""Collibra-oriented desired and remote-state models (inspectable, no network)."""
+"""Collibra-oriented desired/remote/sync models (inspectable, no network)."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 
@@ -281,3 +282,157 @@ class CollibraRemoteState:
             )
             + "\n"
         )
+
+
+class SyncActionType(StrEnum):
+    CREATE = "create"
+    UPDATE = "update"
+    UNCHANGED = "unchanged"
+    REMOTE_ONLY = "remote_only"
+
+
+class SyncObjectKind(StrEnum):
+    ASSET = "asset"
+    RELATIONSHIP = "relationship"
+
+
+@dataclass(frozen=True, slots=True)
+class SyncAction:
+    """One deterministic plan entry. DELETE is intentionally unsupported."""
+
+    action_type: SyncActionType
+    object_kind: SyncObjectKind
+    local_id: str | None = None
+    remote_id: str | None = None
+    reason: str = ""
+    desired_asset: CollibraAssetSpec | None = None
+    desired_relationship: CollibraRelationshipSpec | None = None
+    changed_fields: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "changed_fields",
+            tuple(sorted(self.changed_fields)),
+        )
+        if self.action_type is SyncActionType.REMOTE_ONLY and not self.remote_id:
+            raise ValueError("REMOTE_ONLY actions require remote_id")
+        if (
+            self.action_type is SyncActionType.CREATE
+            and self.object_kind is SyncObjectKind.ASSET
+            and self.desired_asset is None
+        ):
+            raise ValueError("CREATE asset actions require desired_asset")
+        if (
+            self.action_type is SyncActionType.CREATE
+            and self.object_kind is SyncObjectKind.RELATIONSHIP
+            and self.desired_relationship is None
+        ):
+            raise ValueError("CREATE relationship actions require desired_relationship")
+        if self.action_type is SyncActionType.UPDATE and (
+            self.remote_id is None or self.desired_asset is None
+        ):
+            raise ValueError("UPDATE actions require remote_id and desired_asset")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "action_type": self.action_type.value,
+            "changed_fields": list(self.changed_fields),
+            "desired_asset": self.desired_asset.to_dict() if self.desired_asset else None,
+            "desired_relationship": (
+                self.desired_relationship.to_dict() if self.desired_relationship else None
+            ),
+            "local_id": self.local_id,
+            "object_kind": self.object_kind.value,
+            "reason": self.reason,
+            "remote_id": self.remote_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPlan:
+    """Immutable, inspectable synchronization plan. Never includes DELETE."""
+
+    actions: tuple[SyncAction, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "actions",
+            tuple(sorted(self.actions, key=_sync_action_sort_key)),
+        )
+
+    @property
+    def creates(self) -> tuple[SyncAction, ...]:
+        return tuple(
+            action for action in self.actions if action.action_type is SyncActionType.CREATE
+        )
+
+    @property
+    def updates(self) -> tuple[SyncAction, ...]:
+        return tuple(
+            action for action in self.actions if action.action_type is SyncActionType.UPDATE
+        )
+
+    @property
+    def unchanged(self) -> tuple[SyncAction, ...]:
+        return tuple(
+            action for action in self.actions if action.action_type is SyncActionType.UNCHANGED
+        )
+
+    @property
+    def remote_only(self) -> tuple[SyncAction, ...]:
+        return tuple(
+            action for action in self.actions if action.action_type is SyncActionType.REMOTE_ONLY
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"actions": [action.to_dict() for action in self.actions]}
+
+    def to_json(self) -> str:
+        return (
+            json.dumps(
+                self.to_dict(),
+                indent=2,
+                sort_keys=True,
+                ensure_ascii=True,
+            )
+            + "\n"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SyncResult:
+    """Outcome of dry-run or apply execution against an explicit plan.
+
+    REST synchronization is not a distributed transaction; failed writes are
+    reported without pretending remote rollback occurred.
+    """
+
+    success: bool
+    dry_run: bool
+    applied_count: int
+    unchanged_count: int
+    failed_action: SyncAction | None = None
+    error: str | None = None
+    plan: SyncPlan | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "applied_count": self.applied_count,
+            "dry_run": self.dry_run,
+            "error": self.error,
+            "failed_action": self.failed_action.to_dict() if self.failed_action else None,
+            "plan": self.plan.to_dict() if self.plan else None,
+            "success": self.success,
+            "unchanged_count": self.unchanged_count,
+        }
+
+
+def _sync_action_sort_key(action: SyncAction) -> tuple[str, str, str, str]:
+    return (
+        action.action_type.value,
+        action.object_kind.value,
+        action.local_id or "",
+        action.remote_id or "",
+    )

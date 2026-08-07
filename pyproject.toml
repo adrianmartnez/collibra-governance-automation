@@ -34,6 +34,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
     "integration: requires the local PostgreSQL demo service",
+    "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",
 ]
 
 [tool.ruff]

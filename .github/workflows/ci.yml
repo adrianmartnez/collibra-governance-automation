@@ -59,7 +59,7 @@ jobs:
         run: python -m governance
 
       - name: Pytest
-        run: pytest -m "not integration"
+        run: pytest -m "not integration and not collibra_integration"
 
   package-validation:
     name: package-validation
@@ -89,7 +89,7 @@ jobs:
           python -c "import governance; print(governance.__version__)"
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
-          python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, build_collibra_adapter, map_to_desired_state, mock_mapping_config"
+          python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, map_to_desired_state, mock_mapping_config"
           python -m governance
 
   postgres-integration:
@@ -143,6 +143,35 @@ jobs:
 
       - name: Metadata integration tests
         run: pytest -m integration
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
+
+  collibra-integration:
+    name: collibra-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: Validate Compose file
+        run: docker compose config -q
+
+      - name: Start PostgreSQL
+        run: docker compose up -d --wait
+
+      - name: Collibra mock lifecycle
+        run: pytest -m collibra_integration
 
       - name: Teardown
         if: always()
