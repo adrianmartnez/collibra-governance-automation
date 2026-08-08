@@ -25,7 +25,8 @@ PostgreSQL metadata discovery
 | Collibra mapping + sync planning | Real, local |
 | Mock Collibra adapter | Real, process-local, no external network |
 | Live Collibra Core REST API v2 adapter | Contract-tested; no commercial tenant validation claimed |
-| CLI (`scan` / `export` / `diff` / `sync`) | Real |
+| CLI (`scan` / `export` / `diff` / `sync` / `config validate`) | Real |
+| Governance-as-Code (`governance.yaml`, snapshots, content identities) | Real (opt-in via `--config`) |
 | Live tenant credentials / commercial validation | Not provided by this repository |
 
 Central safety: sync defaults to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. No automatic deletes.
@@ -93,13 +94,28 @@ Optional Bash helper for the SQL demo contract: `bash sample/verify_demo.sh` (Ba
 ## CLI
 
 ```text
-governance scan
-governance export [--output PATH]
-governance diff [--mode mock|live] [--mapping-config PATH] [--json]
-governance sync [--mode mock|live] [--mapping-config PATH] [--apply] [--confirm-live] [--json]
+governance scan [--config PATH] [--profile NAME]
+governance export [--config PATH] [--profile NAME] [--artifact inventory|snapshot] [--output PATH]
+governance diff [--config PATH] [--profile NAME] [--mode mock|live] [--mapping-config PATH] [--json]
+governance sync [--config PATH] [--profile NAME] [--mode mock|live] [--mapping-config PATH] [--apply] [--confirm-live] [--json]
+governance config validate [--config PATH] [--profile NAME] [--json]
 governance --help
 governance --version
 ```
+
+Without `--config`, operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory.
+
+## Governance-as-Code (optional)
+
+Declare sources, optional Collibra targets, artifact paths, and policy file hooks in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml).
+
+```bash
+governance config validate --config sample/governance.example.yaml
+governance config validate --config sample/governance.example.yaml --json
+governance export --config sample/governance.example.yaml --artifact snapshot
+```
+
+Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables via `*_env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping`) are integrity digests, not authenticity proofs.
 
 Exit codes:
 

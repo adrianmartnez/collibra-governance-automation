@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from governance.domain import GovernanceModel
+from governance.io.atomic import atomic_write_text
 
 INVENTORY_SCHEMA = "governance-metadata-inventory"
 INVENTORY_VERSION = "1.0"
@@ -81,40 +80,7 @@ def write_inventory(inventory: MetadataInventory, output_path: str | Path) -> Pa
     target = Path(output_path)
     if target.exists() and target.is_dir():
         raise InventoryExportError(f"Inventory output path is a directory: {target}")
-
-    payload = inventory.to_json()
-    parent = target.parent
     try:
-        parent.mkdir(parents=True, exist_ok=True)
+        return atomic_write_text(target, inventory.to_json())
     except OSError as exc:
-        raise InventoryExportError(
-            f"Unable to create inventory parent directory: {parent}"
-        ) from exc
-
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
-            dir=parent,
-            prefix=f".{target.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temp_path = Path(handle.name)
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, target)
-        return target
-    except InventoryExportError:
-        raise
-    except OSError as exc:
-        if temp_path is not None and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
         raise InventoryExportError(f"Unable to write inventory to {target}") from exc
-    except Exception:
-        if temp_path is not None and temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-        raise InventoryExportError(f"Unable to write inventory to {target}") from None

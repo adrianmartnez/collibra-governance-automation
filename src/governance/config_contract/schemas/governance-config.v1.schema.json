@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-config:1",
+  "title": "Governance-as-Code configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sources"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Configuration contract version. Only \"1\" is supported."
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "description": "Logical discovery sources. v1 requires exactly one PostgreSQL source.",
+      "items": { "$ref": "#/$defs/source" }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "description": "Optional governance targets. When present, v1 requires exactly one Collibra target.",
+      "items": { "$ref": "#/$defs/target" }
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifacts",
+      "description": "Optional output path configuration relative to the config file directory."
+    },
+    "policies": {
+      "$ref": "#/$defs/policies",
+      "description": "Declarative policy file references. Not evaluated in this release."
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Named overlays selected via CLI --profile or GOVERNANCE_PROFILE.",
+      "additionalProperties": { "$ref": "#/$defs/profileOverlay" }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "POSIX-relative path under the config file directory. Must not escape via .."
+    },
+    "envName": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+      "description": "Environment variable name used as an indirect reference."
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inventory_path": { "$ref": "#/$defs/relativePath" },
+        "snapshot_path": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" },
+          "description": "Relative policy file paths. Validated for path safety only."
+        }
+      }
+    },
+    "profileOverlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/source" }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "$ref": "#/$defs/target" }
+        },
+        "artifacts": { "$ref": "#/$defs/artifacts" },
+        "policies": { "$ref": "#/$defs/policies" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "config"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Logical source identifier."
+        },
+        "provider": {
+          "type": "string",
+          "const": "postgresql",
+          "description": "Integration provider. v1 supports only postgresql."
+        },
+        "config": { "$ref": "#/$defs/postgresqlSourceConfig" }
+      }
+    },
+    "postgresqlSourceConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connection"],
+      "properties": {
+        "source_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Logical source name used in governance IDs."
+        },
+        "source_name_env": {
+          "$ref": "#/$defs/envName",
+          "description": "Environment variable holding the logical source name."
+        },
+        "connection": { "$ref": "#/$defs/postgresqlConnection" }
+      }
+    },
+    "postgresqlConnection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Indirect connection references. Use database_url_env XOR discrete env refs.",
+      "properties": {
+        "database_url_env": { "$ref": "#/$defs/envName" },
+        "host_env": { "$ref": "#/$defs/envName" },
+        "port_env": { "$ref": "#/$defs/envName" },
+        "db_env": { "$ref": "#/$defs/envName" },
+        "user_env": { "$ref": "#/$defs/envName" },
+        "password_env": { "$ref": "#/$defs/envName" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "config"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Logical target identifier."
+        },
+        "provider": {
+          "type": "string",
+          "const": "collibra",
+          "description": "Integration provider. v1 supports only collibra."
+        },
+        "config": { "$ref": "#/$defs/collibraTargetConfig" }
+      }
+    },
+    "collibraTargetConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mapping"],
+      "properties": {
+        "mode_env": {
+          "$ref": "#/$defs/envName",
+          "description": "Environment variable for Collibra mode (mock|live)."
+        },
+        "mapping": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/relativePath",
+              "description": "Relative path to Collibra mapping JSON."
+            }
+          }
+        },
+        "auth": { "$ref": "#/$defs/collibraAuth" }
+      }
+    },
+    "collibraAuth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "base_url_env": { "$ref": "#/$defs/envName" },
+        "username_env": { "$ref": "#/$defs/envName" },
+        "password_env": { "$ref": "#/$defs/envName" },
+        "bearer_token_env": { "$ref": "#/$defs/envName" },
+        "timeout_seconds_env": { "$ref": "#/$defs/envName" }
+      }
+    }
+  }
+}

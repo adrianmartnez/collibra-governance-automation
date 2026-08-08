@@ -92,6 +92,7 @@ jobs:
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
           python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, load_mapping_config_file, map_to_desired_state, mapping_contains_example_placeholders, mock_mapping_config"
+          python -c "from importlib.resources import files; p = files('governance.config_contract.schemas').joinpath('governance-config.v1.schema.json'); text = p.read_text(encoding='utf-8'); assert p.is_file(); assert 'urn:collibra-governance-automation:schema:governance-config:1' in text; assert 'schema_version' in text"
           governance --help
           test "$(governance --version)" = "governance 1.0.0"
           python -m governance --help
