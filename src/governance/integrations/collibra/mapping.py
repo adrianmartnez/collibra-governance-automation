@@ -80,6 +80,15 @@ class CollibraMappingConfig:
             ),
         )
 
+    def to_identity_dict(self) -> dict[str, Any]:
+        """Normalized mapping content for content identity (path-independent)."""
+        return {
+            "attribute_type_refs": dict(sorted(self.attribute_type_refs.items())),
+            "asset_type_refs": dict(sorted(self.asset_type_refs.items())),
+            "domain_ref": self.domain_ref,
+            "relation_type_refs": dict(sorted(self.relation_type_refs.items())),
+        }
+
 
 def _validate_ref_map(
     refs: Mapping[str, str],
