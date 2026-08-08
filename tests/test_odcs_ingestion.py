@@ -13,12 +13,24 @@ import yaml
 from jsonschema.validators import Draft202012Validator, validator_for
 
 from governance import __version__
+from governance.domain.graph import (
+    EDGE_KIND_CONTAINS,
+    EDGE_KIND_DEPENDS_ON,
+    EDGE_KIND_GOVERNS,
+    NODE_KIND_COLUMN,
+    NODE_KIND_CONTRACT,
+    NODE_KIND_DATA_SOURCE,
+    NODE_KIND_DATASET,
+)
 from governance.integrations.odcs import (
+    OdcsMappingError,
     OdcsParseError,
     OdcsReadError,
     OdcsSchemaError,
     OdcsUnsupportedVersionError,
     load_odcs_document,
+    load_odcs_graph,
+    map_odcs_document,
     validate_odcs_document,
 )
 from governance.integrations.odcs.schema import (
@@ -312,6 +324,809 @@ def test_non_json_compatible_type_rejected() -> None:
     with pytest.raises(OdcsSchemaError) as exc:
         validate_odcs_document(doc)
     assert exc.value.errors[0].message == "document is not a finite JSON tree"
+
+
+# --- C: Contract mapping ---
+
+
+def test_exactly_one_contract_node() -> None:
+    graph = map_odcs_document(_minimal_contract(), namespace=NS)
+    contracts = [n for n in graph.nodes if n.identity.kind == NODE_KIND_CONTRACT]
+    assert len(contracts) == 1
+    assert contracts[0].identity.namespace == NS
+    assert contracts[0].identity.logical_id == "contract-orders"
+    assert contracts[0].identity.parent is None
+
+
+def test_contract_name_fallback_to_id() -> None:
+    doc = _minimal_contract()
+    del doc["name"]
+    graph = map_odcs_document(doc, namespace=NS)
+    contract = next(n for n in graph.nodes if n.identity.kind == NODE_KIND_CONTRACT)
+    assert contract.name == "contract-orders"
+
+
+def test_purpose_description_rule() -> None:
+    doc = _minimal_contract(
+        description={
+            "purpose": "Track orders",
+            "usage": "Analytics",
+            "limitations": "None",
+        }
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    contract = next(n for n in graph.nodes if n.identity.kind == NODE_KIND_CONTRACT)
+    assert contract.description == "Track orders"
+    assert contract.attributes_canonical  # has description object attrs
+
+
+def test_contract_attributes_and_ownership_metadata() -> None:
+    doc = _minimal_contract(
+        domain="commerce",
+        dataProduct="orders",
+        tenant="ACME",
+        tags=["b", "a", "a"],
+        team={
+            "name": "Data",
+            "members": [
+                {"username": "bob", "role": "owner"},
+                {"username": "alice", "role": "steward"},
+            ],
+        },
+        roles=[
+            {"role": "reader", "description": "r"},
+            {"role": "writer", "description": "w"},
+        ],
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    contract = next(n for n in graph.nodes if n.identity.kind == NODE_KIND_CONTRACT)
+    attrs = contract.to_dict()["attributes"]
+    assert attrs["api_version"] == "v3.1.0"
+    assert attrs["contract_version"] == "1.0.0"
+    assert attrs["status"] == "active"
+    assert attrs["domain"] == "commerce"
+    assert attrs["data_product"] == "orders"
+    assert attrs["tenant"] == "acme"
+    assert attrs["tags"] == ["a", "b"]
+    assert "team" in attrs
+    assert "roles" in attrs
+    assert all(n.identity.kind != "person" for n in graph.nodes)
+
+
+def test_odcs_provenance_exact() -> None:
+    graph = map_odcs_document(_minimal_contract(), namespace=NS)
+    for node in graph.nodes:
+        assert len(node.provenance) == 1
+        prov = node.provenance[0]
+        assert prov.provider_type == "odcs"
+        assert prov.source_ref == "contract-orders"
+        assert prov.source_version == "1.0.0"
+        assert prov.observation_mode == "declared"
+
+
+# --- D/E: Dataset and fields ---
+
+
+def _rich_contract() -> dict[str, Any]:
+    return _minimal_contract(
+        schema=[
+            {
+                "id": "ds-orders",
+                "name": "orders",
+                "physicalName": "orders_tbl",
+                "logicalType": "object",
+                "description": "Orders table",
+                "tags": ["t2", "t1"],
+                "properties": [
+                    {
+                        "id": "col-id",
+                        "name": "order_id",
+                        "logicalType": "string",
+                        "required": True,
+                        "classification": "internal",
+                        "tags": ["pk"],
+                    },
+                    {
+                        "name": "customer",
+                        "logicalType": "object",
+                        "logicalTypeOptions": {"required": ["city", "name"]},
+                        "properties": [
+                            {"name": "name", "logicalType": "string"},
+                            {"name": "city", "logicalType": "string"},
+                        ],
+                    },
+                    {
+                        "name": "items",
+                        "logicalType": "array",
+                        "items": {
+                            "logicalType": "object",
+                            "properties": [
+                                {"name": "sku", "logicalType": "string"},
+                            ],
+                        },
+                    },
+                ],
+                "relationships": [
+                    {
+                        "from": "orders.order_id",
+                        "to": "customers.id",
+                    }
+                ],
+                "quality": [{"type": "text", "description": "order_id must be present"}],
+            }
+        ],
+        servers=[
+            {
+                "server": "prod",
+                "type": "postgresql",
+                "host": "db",
+                "port": 5432,
+                "database": "x",
+                "schema": "public",
+            }
+        ],
+    )
+
+
+def test_dataset_mapping_and_governs() -> None:
+    graph = map_odcs_document(_rich_contract(), namespace=NS)
+    datasets = [n for n in graph.nodes if n.identity.kind == NODE_KIND_DATASET]
+    assert len(datasets) == 1
+    ds = datasets[0]
+    assert ds.identity.logical_id == "ds-orders"
+    assert ds.identity.parent is None
+    assert ds.to_dict()["attributes"]["physical_name"] == "orders_tbl"
+    governs = [e for e in graph.edges if e.kind == EDGE_KIND_GOVERNS]
+    assert len(governs) == 1
+    assert governs[0].source.kind == NODE_KIND_CONTRACT
+    assert governs[0].target.kind == NODE_KIND_DATASET
+
+
+def test_dataset_id_fallback_to_name() -> None:
+    doc = _minimal_contract(schema=[{"name": "orders", "logicalType": "object"}])
+    graph = map_odcs_document(doc, namespace=NS)
+    ds = next(n for n in graph.nodes if n.identity.kind == NODE_KIND_DATASET)
+    assert ds.identity.logical_id == "orders"
+
+
+def test_schema_input_order_irrelevant() -> None:
+    a = _minimal_contract(
+        schema=[
+            {"id": "a", "name": "a", "logicalType": "object"},
+            {"id": "b", "name": "b", "logicalType": "object"},
+        ]
+    )
+    b = _minimal_contract(
+        schema=[
+            {"id": "b", "name": "b", "logicalType": "object"},
+            {"id": "a", "name": "a", "logicalType": "object"},
+        ]
+    )
+    g1 = map_odcs_document(a, namespace=NS)
+    g2 = map_odcs_document(b, namespace=NS)
+    assert g1.content_identity() == g2.content_identity()
+
+
+def test_column_parent_contains_and_nested() -> None:
+    graph = map_odcs_document(_rich_contract(), namespace=NS)
+    columns = [n for n in graph.nodes if n.identity.kind == NODE_KIND_COLUMN]
+    by_id = {n.identity.logical_id: n for n in columns}
+    assert "col-id" in by_id
+    assert by_id["col-id"].identity.parent is not None
+    assert by_id["col-id"].identity.parent.kind == NODE_KIND_DATASET
+    assert "customer" in by_id
+    assert "name" in by_id
+    assert by_id["name"].identity.parent.logical_id == "customer"
+    assert "sku" in by_id
+    assert by_id["sku"].identity.parent.logical_id == "items"
+    contains = [e for e in graph.edges if e.kind == EDGE_KIND_CONTAINS]
+    assert contains
+    assert not any(e.kind == EDGE_KIND_DEPENDS_ON for e in graph.edges)
+
+
+def test_field_order_irrelevant() -> None:
+    base = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"name": "a", "logicalType": "string"},
+                    {"name": "b", "logicalType": "string"},
+                ],
+            }
+        ]
+    )
+    swapped = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"name": "b", "logicalType": "string"},
+                    {"name": "a", "logicalType": "string"},
+                ],
+            }
+        ]
+    )
+    assert (
+        map_odcs_document(base, namespace=NS).content_identity()
+        == map_odcs_document(swapped, namespace=NS).content_identity()
+    )
+
+
+def test_classification_change_alters_identity() -> None:
+    base = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"name": "ssn", "logicalType": "string", "classification": "public"}
+                ],
+            }
+        ]
+    )
+    changed = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"name": "ssn", "logicalType": "string", "classification": "confidential"}
+                ],
+            }
+        ]
+    )
+    assert (
+        map_odcs_document(base, namespace=NS).content_identity()
+        != map_odcs_document(changed, namespace=NS).content_identity()
+    )
+
+
+# --- F: Provenance / path independence ---
+
+
+def test_path_independence(tmp_path: Path) -> None:
+    doc = _rich_contract()
+    p1 = tmp_path / "a" / "c.yaml"
+    p1.parent.mkdir(parents=True, exist_ok=True)
+    _write(p1, doc)
+    p2 = tmp_path / "b" / "other.yaml"
+    p2.parent.mkdir(parents=True, exist_ok=True)
+    _write(p2, doc)
+    g1 = load_odcs_graph(p1, namespace=NS)
+    g2 = load_odcs_graph(p2, namespace=NS)
+    assert g1.content_identity() == g2.content_identity()
+    assert g1.to_dict() == g2.to_dict()
+    for node in g1.nodes:
+        assert node.provenance[0].source_ref == "contract-orders"
+        assert "tmp" not in node.provenance[0].source_ref
+        assert "\\" not in node.provenance[0].source_ref
+
+
+def test_yaml_json_equivalent(tmp_path: Path) -> None:
+    doc = _rich_contract()
+    y = _write(tmp_path / "c.yaml", doc, fmt="yaml")
+    j = _write(tmp_path / "c.json", doc, fmt="json")
+    assert (
+        load_odcs_graph(y, namespace=NS).content_identity()
+        == load_odcs_graph(j, namespace=NS).content_identity()
+    )
+
+
+# --- G: Metadata order / tenant ---
+
+
+def test_tenant_casefold_same_identity() -> None:
+    digests = {
+        map_odcs_document(_minimal_contract(tenant=t), namespace=NS).content_identity().digest
+        for t in ("ACME", "acme", "AcMe")
+    }
+    assert len(digests) == 1
+
+
+def test_tenant_material_difference_changes_digest() -> None:
+    a = map_odcs_document(_minimal_contract(tenant="acme"), namespace=NS)
+    b = map_odcs_document(_minimal_contract(tenant="globex"), namespace=NS)
+    assert a.content_identity() != b.content_identity()
+
+
+def test_tags_permutation_same_hash() -> None:
+    a = map_odcs_document(_minimal_contract(tags=["b", "a"]), namespace=NS)
+    b = map_odcs_document(_minimal_contract(tags=["a", "b"]), namespace=NS)
+    assert a.content_identity() == b.content_identity()
+
+
+def test_team_members_and_roles_permutation() -> None:
+    a = _minimal_contract(
+        team={
+            "members": [
+                {"username": "bob"},
+                {"username": "alice"},
+            ]
+        },
+        roles=[{"role": "b"}, {"role": "a"}],
+    )
+    b = _minimal_contract(
+        team={
+            "members": [
+                {"username": "alice"},
+                {"username": "bob"},
+            ]
+        },
+        roles=[{"role": "a"}, {"role": "b"}],
+    )
+    assert (
+        map_odcs_document(a, namespace=NS).content_identity()
+        == map_odcs_document(b, namespace=NS).content_identity()
+    )
+
+
+def test_logical_type_options_required_permutation() -> None:
+    def make(required: list[str]) -> dict[str, Any]:
+        return _minimal_contract(
+            schema=[
+                {
+                    "name": "orders",
+                    "properties": [
+                        {
+                            "name": "customer",
+                            "logicalType": "object",
+                            "logicalTypeOptions": {"required": required},
+                            "properties": [
+                                {"name": "name", "logicalType": "string"},
+                                {"name": "city", "logicalType": "string"},
+                            ],
+                        }
+                    ],
+                }
+            ]
+        )
+
+    assert (
+        map_odcs_document(make(["city", "name"]), namespace=NS).content_identity()
+        == map_odcs_document(make(["name", "city"]), namespace=NS).content_identity()
+    )
+
+
+def test_role_custom_properties_permutation() -> None:
+    a = _minimal_contract(
+        roles=[
+            {
+                "role": "reader",
+                "customProperties": [
+                    {"property": "b", "value": 2},
+                    {"property": "a", "value": 1},
+                ],
+            }
+        ]
+    )
+    b = _minimal_contract(
+        roles=[
+            {
+                "role": "reader",
+                "customProperties": [
+                    {"property": "a", "value": 1},
+                    {"property": "b", "value": 2},
+                ],
+            }
+        ]
+    )
+    assert (
+        map_odcs_document(a, namespace=NS).content_identity()
+        == map_odcs_document(b, namespace=NS).content_identity()
+    )
+
+
+def test_dataset_and_column_setlike_permutation() -> None:
+    def make(
+        tags: list[str], auth: list[dict[str, str]], cps: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        return _minimal_contract(
+            schema=[
+                {
+                    "name": "orders",
+                    "tags": tags,
+                    "authoritativeDefinitions": auth,
+                    "customProperties": cps,
+                    "properties": [
+                        {
+                            "name": "id",
+                            "logicalType": "string",
+                            "tags": tags,
+                            "authoritativeDefinitions": auth,
+                            "customProperties": cps,
+                        }
+                    ],
+                }
+            ]
+        )
+
+    auth_a = [
+        {"url": "https://b.example", "type": "businessDefinition"},
+        {"url": "https://a.example", "type": "businessDefinition"},
+    ]
+    auth_b = list(reversed(auth_a))
+    cps_a = [{"property": "b", "value": 1}, {"property": "a", "value": 2}]
+    cps_b = list(reversed(cps_a))
+    g1 = map_odcs_document(make(["z", "y"], auth_a, cps_a), namespace=NS)
+    g2 = map_odcs_document(make(["y", "z"], auth_b, cps_b), namespace=NS)
+    assert g1.content_identity() == g2.content_identity()
+
+
+def test_custom_property_value_array_order_is_material() -> None:
+    a = _minimal_contract(customProperties=[{"property": "flags", "value": ["x", "y"]}])
+    b = _minimal_contract(customProperties=[{"property": "flags", "value": ["y", "x"]}])
+    assert (
+        map_odcs_document(a, namespace=NS).content_identity()
+        != map_odcs_document(b, namespace=NS).content_identity()
+    )
+
+
+def test_object_key_order_irrelevant() -> None:
+    # JSON loads with different key insertion order
+    raw_a = (
+        '{"status":"active","version":"1.0.0","kind":"DataContract",'
+        '"apiVersion":"v3.1.0","id":"contract-orders","name":"Orders Contract"}'
+    )
+    raw_b = (
+        '{"apiVersion":"v3.1.0","id":"contract-orders","kind":"DataContract",'
+        '"name":"Orders Contract","status":"active","version":"1.0.0"}'
+    )
+    assert (
+        map_odcs_document(json.loads(raw_a), namespace=NS).content_identity()
+        == map_odcs_document(json.loads(raw_b), namespace=NS).content_identity()
+    )
+
+
+# --- H: Scope guards ---
+
+
+def test_relationships_quality_servers_do_not_create_graph_semantics() -> None:
+    graph = map_odcs_document(_rich_contract(), namespace=NS)
+    assert not any(e.kind == EDGE_KIND_DEPENDS_ON for e in graph.edges)
+    assert not any(n.identity.kind == NODE_KIND_DATA_SOURCE for n in graph.nodes)
+    assert not any("quality" in n.to_dict()["attributes"] for n in graph.nodes)
+    assert all(n.identity.namespace == NS for n in graph.nodes)
+
+
+# --- I: Errors / conflicts / namespace ---
+
+
+def test_duplicate_schema_same_id_rejected() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {"id": "same", "name": "orders", "logicalType": "object"},
+            {"id": "same", "name": "orders", "logicalType": "object"},
+        ]
+    )
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(doc, namespace=NS)
+    assert exc.value.errors[0].code == "odcs_mapping_error"
+
+
+def test_duplicate_schema_fallback_name_rejected() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {"name": "orders", "logicalType": "object"},
+            {"name": "orders", "logicalType": "object"},
+        ]
+    )
+    with pytest.raises(OdcsMappingError):
+        map_odcs_document(doc, namespace=NS)
+
+
+def test_duplicate_property_same_id_rejected() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"id": "x", "name": "a", "logicalType": "string"},
+                    {"id": "x", "name": "b", "logicalType": "string"},
+                ],
+            }
+        ]
+    )
+    with pytest.raises(OdcsMappingError):
+        map_odcs_document(doc, namespace=NS)
+
+
+def test_duplicate_property_fallback_name_rejected() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"name": "a", "logicalType": "string"},
+                    {"name": "a", "logicalType": "string"},
+                ],
+            }
+        ]
+    )
+    with pytest.raises(OdcsMappingError):
+        map_odcs_document(doc, namespace=NS)
+
+
+def test_same_local_id_under_different_parents_ok() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [{"id": "shared", "name": "id", "logicalType": "string"}],
+            },
+            {
+                "name": "customers",
+                "properties": [{"id": "shared", "name": "id", "logicalType": "string"}],
+            },
+        ]
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    shared = [n for n in graph.nodes if n.identity.logical_id == "shared"]
+    assert len(shared) == 2
+
+
+def test_distinct_ids_same_display_name_ok() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"id": "p1", "name": "code", "logicalType": "string"},
+                    {"id": "p2", "name": "code", "logicalType": "integer"},
+                ],
+            }
+        ]
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    codes = [n for n in graph.nodes if n.name == "code"]
+    assert len(codes) == 2
+
+
+def test_namespace_empty_raises_odcs_mapping_error() -> None:
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(_minimal_contract(), namespace="  ")
+    assert exc.value.errors[0].path == ""
+    assert exc.value.errors[0].message == "namespace is required"
+
+
+def test_namespace_non_str_raises_odcs_mapping_error() -> None:
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(_minimal_contract(), namespace=123)  # type: ignore[arg-type]
+    assert exc.value.errors[0].code == "odcs_mapping_error"
+
+
+def test_load_odcs_graph_namespace_error(tmp_path: Path) -> None:
+    path = _write(tmp_path / "c.yaml", _minimal_contract())
+    with pytest.raises(OdcsMappingError):
+        load_odcs_graph(path, namespace="")
+
+
+def test_empty_contract_id_raises_mapping_error() -> None:
+    for value in ("", "   "):
+        with pytest.raises(OdcsMappingError) as exc:
+            map_odcs_document(_minimal_contract(id=value), namespace=NS)
+        assert exc.value.errors[0].path == "/id"
+        assert not isinstance(exc.value, ValueError)
+
+
+def test_empty_contract_version_raises_mapping_error() -> None:
+    for value in ("", "   "):
+        with pytest.raises(OdcsMappingError) as exc:
+            map_odcs_document(_minimal_contract(version=value), namespace=NS)
+        assert exc.value.errors[0].path == "/version"
+
+
+def test_empty_dataset_name_rejected_not_dropped() -> None:
+    doc = _minimal_contract(schema=[{"name": "  ", "logicalType": "object"}])
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(doc, namespace=NS)
+    assert exc.value.errors[0].path == "/schema/0/name"
+
+
+def test_empty_property_name_rejected_not_dropped() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [{"name": "", "logicalType": "string"}],
+            }
+        ]
+    )
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(doc, namespace=NS)
+    assert exc.value.errors[0].path == "/schema/0/properties/0/name"
+
+
+def test_nested_empty_property_name_exact_pointer() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {
+                        "name": "customer",
+                        "logicalType": "object",
+                        "properties": [{"name": "  ", "logicalType": "string"}],
+                    }
+                ],
+            }
+        ]
+    )
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(doc, namespace=NS)
+    assert exc.value.errors[0].path == "/schema/0/properties/0/properties/0/name"
+
+
+def test_id_collides_with_sibling_fallback_name() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {"id": "x", "name": "alpha", "logicalType": "string"},
+                    {"name": "x", "logicalType": "string"},
+                ],
+            }
+        ]
+    )
+    with pytest.raises(OdcsMappingError) as exc:
+        map_odcs_document(doc, namespace=NS)
+    assert exc.value.errors[0].code == "odcs_mapping_error"
+
+
+def test_array_object_named_property_mapped() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {
+                        "name": "items",
+                        "logicalType": "array",
+                        "items": {
+                            "logicalType": "object",
+                            "properties": [{"name": "sku", "logicalType": "string"}],
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    assert any(n.identity.logical_id == "sku" for n in graph.nodes)
+    assert not any(n.identity.logical_id == "items_items" for n in graph.nodes)
+    assert not any(n.name == "items" and n.identity.kind != NODE_KIND_COLUMN for n in graph.nodes)
+
+
+def test_array_array_object_named_property_mapped() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {
+                        "name": "batches",
+                        "logicalType": "array",
+                        "items": {
+                            "logicalType": "array",
+                            "items": {
+                                "logicalType": "object",
+                                "properties": [{"name": "sku", "logicalType": "string"}],
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    sku = next(n for n in graph.nodes if n.identity.logical_id == "sku")
+    assert sku.identity.parent is not None
+    assert sku.identity.parent.logical_id == "batches"
+    assert not any(n.identity.logical_id == "items" for n in graph.nodes)
+
+
+def test_three_level_array_before_object_maps_named_property() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {
+                        "name": "cube",
+                        "logicalType": "array",
+                        "items": {
+                            "logicalType": "array",
+                            "items": {
+                                "logicalType": "array",
+                                "items": {
+                                    "logicalType": "object",
+                                    "properties": [{"name": "sku", "logicalType": "string"}],
+                                },
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    graph = map_odcs_document(doc, namespace=NS)
+    assert any(n.identity.logical_id == "sku" for n in graph.nodes)
+
+
+def test_duplicate_named_property_in_deep_items_rejected() -> None:
+    doc = _minimal_contract(
+        schema=[
+            {
+                "name": "orders",
+                "properties": [
+                    {
+                        "name": "batches",
+                        "logicalType": "array",
+                        "items": {
+                            "logicalType": "array",
+                            "items": {
+                                "logicalType": "object",
+                                "properties": [
+                                    {"name": "sku", "logicalType": "string"},
+                                    {"name": "sku", "logicalType": "string"},
+                                ],
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    with pytest.raises(OdcsMappingError):
+        map_odcs_document(doc, namespace=NS)
+
+
+def test_deep_items_property_order_permutation_same_hash() -> None:
+    def make(props: list[dict[str, str]]) -> dict[str, Any]:
+        return _minimal_contract(
+            schema=[
+                {
+                    "name": "orders",
+                    "properties": [
+                        {
+                            "name": "batches",
+                            "logicalType": "array",
+                            "items": {
+                                "logicalType": "array",
+                                "items": {
+                                    "logicalType": "object",
+                                    "properties": props,
+                                },
+                            },
+                        }
+                    ],
+                }
+            ]
+        )
+
+    a = [
+        {"name": "sku", "logicalType": "string"},
+        {"name": "qty", "logicalType": "integer"},
+    ]
+    b = list(reversed(a))
+    assert (
+        map_odcs_document(make(a), namespace=NS).content_identity()
+        == map_odcs_document(make(b), namespace=NS).content_identity()
+    )
+
+
+def test_public_api_surface_is_small() -> None:
+    import governance.integrations.odcs as odcs
+
+    assert "ODCS_SCHEMA_SHA256" not in odcs.__all__
+    assert "load_odcs_schema" not in odcs.__all__
+    assert "SUPPORTED_API_VERSION" not in odcs.__all__
+    for name in (
+        "load_odcs_document",
+        "validate_odcs_document",
+        "map_odcs_document",
+        "load_odcs_graph",
+    ):
+        assert name in odcs.__all__
 
 
 # --- J: Packaging / integrity ---
