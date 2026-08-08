@@ -1,0 +1,12 @@
+# Sample warning-only policy for Governance-as-Code demos.
+# Severity warning demonstrates evaluation without blocking plan generation.
+policy_schema: governance-policy
+policy_version: "1"
+policies:
+  - id: tables-require-description
+    description: Tables should have a human-readable description when available.
+    severity: warning
+    rule:
+      type: require_description
+      select:
+        kind: table

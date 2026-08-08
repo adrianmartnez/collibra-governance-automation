@@ -99,29 +99,54 @@ governance export [--config PATH] [--profile NAME] [--artifact inventory|snapsho
 governance diff [--config PATH] [--profile NAME] [--mode mock|live] [--mapping-config PATH] [--json]
 governance sync [--config PATH] [--profile NAME] [--mode mock|live] [--mapping-config PATH] [--apply] [--confirm-live] [--json]
 governance config validate [--config PATH] [--profile NAME] [--json]
+governance check --config PATH [--profile NAME] [--format human|json]
+governance plan --config PATH --output FILE.gplan [--profile NAME] [--format human|json]
+governance plan inspect FILE.gplan [--format human|json]
+governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json] [--apply] [--confirm-live]
 governance --help
 governance --version
 ```
 
-Without `--config`, operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory.
+Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, and `apply` require explicit `--config` (except `plan inspect`).
 
 ## Governance-as-Code (optional)
 
 Declare sources, optional Collibra targets, artifact paths, and policy file hooks in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml).
 
 ```bash
+export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/governance_demo}"
+export COLLIBRA_MODE="${COLLIBRA_MODE:-mock}"
+
 governance config validate --config sample/governance.example.yaml
 governance config validate --config sample/governance.example.yaml --json
 governance export --config sample/governance.example.yaml --artifact snapshot
+
+# Policy evaluation (no Collibra I/O)
+governance check --config sample/governance.example.yaml
+governance check --config sample/governance.example.yaml --format json
+
+# Plan-review-apply (saved .gplan; apply executes the reviewed action set)
+governance plan --config sample/governance.example.yaml --output production.gplan
+governance plan inspect production.gplan
+governance apply production.gplan --config sample/governance.example.yaml
+# Mutations still require --apply; live apply still requires --confirm-live
 ```
 
-Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables via `*_env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping`) are integrity digests, not authenticity proofs.
+Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables via `*_env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping` / `policy` / `remote_state` / `target_context` / plan) are integrity digests, not authenticity proofs.
 
-Exit codes:
+`governance plan` / `governance apply` use `--config` and optional `--profile` as the declarative source of truth (no `--mode` / `--mapping-config` overrides on that path). Legacy `diff` / `sync` keep their existing overrides. YAML and `.gplan` never authorize writes. Remote apply is fail-fast and not a distributed transaction.
+
+Exit codes (legacy commands `scan` / `export` / `diff` / `sync` / `config validate`):
 
 - `0` — completed successfully
 - `1` — operational / configuration / integration failure
 - `2` — usage / argument / live-apply confirmation error
+
+Additional exit codes for `check` / `plan` / `apply` only:
+
+- `3` — policy error violations (or plan blocked by policy errors)
+- `4` — config / runtime-resolution / policy / saved-plan validation failure
+- `5` — stale saved plan (apply refused before mutation)
 
 `create` / `update` / `unchanged` / `remote_only` counts are plan actions, not completed remote writes. Dry-run means zero remote mutations (`applied=0`); it does not mean zero network in live mode.
 
