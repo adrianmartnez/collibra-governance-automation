@@ -1,4 +1,4 @@
-"""Governance CLI: scan, export, diff, sync, check, and plan orchestration."""
+"""Governance CLI: scan, export, diff, sync, check, plan, and apply orchestration."""
 
 from __future__ import annotations
 
@@ -25,19 +25,25 @@ from governance.config_contract import (
     resolve_snapshot_path,
     runtime_invalid_diagnostic,
     unresolved_env_diagnostic,
+    validate_collibra_runtime,
     validate_governance_config,
 )
+from governance.config_contract.resolution_diagnostics import CODE_ENV_UNRESOLVED
 from governance.domain import GovernanceModel
 from governance.exporters import (
+    SCANNER_CONTRACT_VERSION,
     InventoryExportError,
     MetadataInventory,
     write_inventory,
 )
 from governance.identity import (
     config_identity,
+    mapping_identity,
     policy_identity,
+    target_context_identity,
 )
 from governance.integrations.collibra import (
+    PLANNER_CONTRACT_VERSION,
     CollibraAdapterError,
     CollibraMappingConfig,
     CollibraMappingError,
@@ -58,13 +64,27 @@ from governance.operation_diagnostics import operation_diagnostics_failure
 from governance.plans import (
     PlanError,
     SavedGovernancePlan,
+    build_apply_result,
     build_saved_plan,
+    build_stale_result,
     compute_remote_state_identity_value,
+    format_apply_result_human,
+    format_stale_human,
+    identity_mismatch,
     load_saved_plan,
     plan_diagnostics_failure,
+    version_mismatch,
     write_saved_plan,
 )
-from governance.plans.target_context import build_target_context_projection
+from governance.plans.errors import (
+    CODE_TARGET_CONTEXT_INCONSISTENT,
+    PlanDiagnosticError,
+    PlanIntegrityError,
+)
+from governance.plans.target_context import (
+    build_target_context_projection,
+    target_context_public,
+)
 from governance.policy import (
     PolicyError,
     build_policy_report,
@@ -97,7 +117,6 @@ _OPERATIONAL_ERROR_TYPES: tuple[type[BaseException], ...] = (
     InventoryExportError,
     CollibraMappingError,
     CollibraAdapterError,
-    ConfigResolutionError,
 )
 
 
@@ -110,6 +129,9 @@ class CliOperationalError(Exception):
 
 
 def _is_operational_error(exc: BaseException) -> bool:
+    # Runtime configuration failures must not be classified as operational I/O.
+    if isinstance(exc, ConfigResolutionError):
+        return False
     if isinstance(exc, _OPERATIONAL_ERROR_TYPES):
         return True
     try:
@@ -163,6 +185,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_check(args)
     if command == "plan":
         return _cmd_plan(args)
+    if command == "apply":
+        return _cmd_apply(args)
 
     canonical: CanonicalConfig | None = None
     config_path = getattr(args, "config", None)
@@ -346,6 +370,41 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_format(inspect)
 
+    apply = subparsers.add_parser(
+        "apply",
+        help=(
+            "Validate freshness of a saved .gplan and optionally execute saved actions. "
+            "Default is dry-run (zero remote mutations)."
+        ),
+    )
+    apply.add_argument(
+        "plan_file",
+        metavar="FILE",
+        help="Path to a saved .gplan artifact.",
+    )
+    apply.add_argument(
+        "--config",
+        metavar="PATH",
+        required=True,
+        help="Path to governance.yaml (required).",
+    )
+    apply.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay (overrides GOVERNANCE_PROFILE).",
+    )
+    _add_format(apply)
+    apply.add_argument(
+        "--apply",
+        action="store_true",
+        help="Execute saved CREATE/UPDATE writes (default: dry-run).",
+    )
+    apply.add_argument(
+        "--confirm-live",
+        action="store_true",
+        help="Required together with --apply when effective mode is live.",
+    )
+
     config = subparsers.add_parser(
         "config",
         help="Governance-as-Code configuration utilities.",
@@ -518,6 +577,26 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
         return loaded
     canonical, settings = loaded
 
+    if not canonical.targets:
+        return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
+
+    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    if isinstance(mode, int):
+        return mode
+    try:
+        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+    except CliOperationalError as exc:
+        return _emit_operational_message(str(exc), fmt)
+
+    # Validate effective Collibra runtime before any PostgreSQL/Collibra I/O.
+    try:
+        validate_collibra_runtime(settings, canonical)
+        build_target_context_projection(settings)
+    except ConfigResolutionError as exc:
+        return _emit_resolution_error(exc, fmt, canonical=canonical)
+    except ValueError as exc:
+        return _emit_runtime_invalid(exc, fmt, canonical=canonical)
+
     try:
         policy_set = load_normalized_policies(canonical)
     except PolicyError as exc:
@@ -544,28 +623,14 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
             sys.stdout.write(format_policy_report_human(report))
         return 3
 
-    if not canonical.targets:
-        return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
-
-    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
-    if isinstance(mode, int):
-        return mode
-    try:
-        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
-    except CliOperationalError as exc:
-        return _emit_operational_message(str(exc), fmt)
-
-    try:
-        build_target_context_projection(settings)
-    except ValueError as exc:
-        return _emit_runtime_invalid(exc, fmt, canonical=canonical)
-
     try:
         desired = map_to_desired_state(model, mapping_config)
         adapter = build_collibra_adapter(settings, mapping_config)
         remote = adapter.read_remote_state(desired)
         sync_plan = build_sync_plan(desired, remote)
         remote_identity = compute_remote_state_identity_value(remote)
+    except ConfigResolutionError as exc:
+        return _emit_resolution_error(exc, fmt, canonical=canonical)
     except Exception as exc:
         if _is_operational_error(exc):
             return _emit_operational(exc, fmt)
@@ -593,6 +658,215 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
         )
     return 0
 
+
+def _cmd_apply(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    apply = bool(getattr(args, "apply", False))
+    confirm_live = bool(getattr(args, "confirm_live", False))
+
+    # Syntactic / mode-independent usage (before any operational I/O).
+    if confirm_live and not apply:
+        raise CliUsageError("--confirm-live requires --apply")
+
+    try:
+        saved = load_saved_plan(args.plan_file)
+    except PlanError as exc:
+        return _emit_plan_error(exc, fmt)
+
+    loaded = _load_canonical_and_settings(
+        config_path=args.config,
+        profile=getattr(args, "profile", None),
+        fmt=fmt,
+    )
+    if isinstance(loaded, int):
+        return loaded
+    canonical, settings = loaded
+
+    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    if isinstance(mode, int):
+        return mode
+    _validate_apply_flags(mode=mode, apply=apply, confirm_live=confirm_live)
+
+    try:
+        policy_set = load_normalized_policies(canonical)
+    except PolicyError as exc:
+        return _emit_policy_error(exc, fmt)
+
+    if not canonical.targets:
+        return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
+
+    try:
+        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+    except CliOperationalError as exc:
+        return _emit_operational_message(str(exc), fmt)
+
+    try:
+        validate_collibra_runtime(settings, canonical)
+        target_projection = build_target_context_projection(settings)
+    except ConfigResolutionError as exc:
+        return _emit_resolution_error(exc, fmt, canonical=canonical)
+    except ValueError as exc:
+        return _emit_runtime_invalid(exc, fmt, canonical=canonical)
+
+    observed_public = target_context_public(target_projection)
+    observed_target = target_context_identity(target_projection)
+    if (
+        dict(saved.target_context) != observed_public
+        and observed_target == saved.target_context_identity
+    ):
+        # Public inspectable context must not diverge when identities still match.
+        return _emit_plan_error(
+            PlanIntegrityError(
+                [
+                    PlanDiagnosticError(
+                        code=CODE_TARGET_CONTEXT_INCONSISTENT,
+                        path="/target_context",
+                        message=(
+                            "saved target_context is inconsistent with "
+                            "target_context_identity and effective runtime"
+                        ),
+                    )
+                ]
+            ),
+            fmt,
+        )
+
+    try:
+        model = _scan_model(settings)
+    except Exception as exc:
+        if _is_operational_error(exc):
+            return _emit_operational(exc, fmt)
+        raise
+
+    snapshot = GovernanceSnapshot.from_model(model)
+    observed_config = config_identity(canonical.identity_projection())
+    observed_policy = policy_identity(policy_set.to_identity_dict())
+    observed_snapshot = snapshot.content_identity()
+    observed_mapping = mapping_identity(mapping_config.to_identity_dict())
+
+    mismatches: list[dict[str, Any]] = []
+    if observed_config != saved.config_identity:
+        mismatches.append(
+            identity_mismatch(
+                category="config",
+                expected=saved.config_identity,
+                observed=observed_config,
+                message="governance config identity changed",
+            )
+        )
+    if observed_snapshot != saved.snapshot_identity:
+        mismatches.append(
+            identity_mismatch(
+                category="snapshot",
+                expected=saved.snapshot_identity,
+                observed=observed_snapshot,
+                message="source snapshot identity changed",
+            )
+        )
+    if observed_policy != saved.policy_identity:
+        mismatches.append(
+            identity_mismatch(
+                category="policy",
+                expected=saved.policy_identity,
+                observed=observed_policy,
+                message="policy identity changed",
+            )
+        )
+    if observed_mapping != saved.mapping_identity:
+        mismatches.append(
+            identity_mismatch(
+                category="mapping",
+                expected=saved.mapping_identity,
+                observed=observed_mapping,
+                message="mapping identity changed",
+            )
+        )
+    if observed_target != saved.target_context_identity:
+        mismatches.append(
+            identity_mismatch(
+                category="target_context",
+                expected=saved.target_context_identity,
+                observed=observed_target,
+                message="effective target context changed",
+            )
+        )
+    if saved.planner_contract_version != PLANNER_CONTRACT_VERSION:
+        mismatches.append(
+            version_mismatch(
+                category="planner_contract",
+                expected=saved.planner_contract_version,
+                observed=PLANNER_CONTRACT_VERSION,
+                message="planner contract version changed",
+            )
+        )
+    if saved.scanner_contract_version != SCANNER_CONTRACT_VERSION:
+        mismatches.append(
+            version_mismatch(
+                category="scanner_contract",
+                expected=saved.scanner_contract_version,
+                observed=SCANNER_CONTRACT_VERSION,
+                message="scanner contract version changed",
+            )
+        )
+
+    adapter = None
+    target_fresh = (
+        observed_target == saved.target_context_identity
+        and dict(saved.target_context) == observed_public
+    )
+    if target_fresh:
+        try:
+            desired = map_to_desired_state(model, mapping_config)
+            adapter = build_collibra_adapter(settings, mapping_config)
+            remote = adapter.read_remote_state(desired)
+            observed_remote = compute_remote_state_identity_value(remote)
+        except ConfigResolutionError as exc:
+            return _emit_resolution_error(exc, fmt, canonical=canonical)
+        except Exception as exc:
+            if _is_operational_error(exc):
+                return _emit_operational(exc, fmt)
+            raise
+        if observed_remote != saved.remote_state_identity:
+            mismatches.append(
+                identity_mismatch(
+                    category="remote_state",
+                    expected=saved.remote_state_identity,
+                    observed=observed_remote,
+                    message="remote state identity changed",
+                )
+            )
+
+    if mismatches:
+        stale = build_stale_result(mismatches)
+        if fmt == "json":
+            _print_json(stale)
+        else:
+            sys.stdout.write(format_stale_human(stale))
+        return 5
+
+    if adapter is None:
+        # Unreachable when fresh: matching target_context always builds adapter above.
+        try:
+            validate_collibra_runtime(settings, canonical)
+            adapter = build_collibra_adapter(settings, mapping_config)
+        except ConfigResolutionError as exc:
+            return _emit_resolution_error(exc, fmt, canonical=canonical)
+        except Exception as exc:
+            if _is_operational_error(exc):
+                return _emit_operational(exc, fmt)
+            raise
+
+    result = execute_sync_plan(adapter, saved.sync_plan, apply=apply)
+    payload = build_apply_result(
+        sync_plan=saved.sync_plan,
+        result=result,
+        plan_content_identity=saved.content_identity(),
+    )
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        sys.stdout.write(format_apply_result_human(payload))
+    return 0 if result.success else 1
 
 
 def _load_canonical_and_settings(
@@ -632,16 +906,20 @@ def _emit_resolution_error(
     *,
     canonical: CanonicalConfig | None,
 ) -> int:
-    path = ""
-    if canonical is not None and canonical.sources:
-        connection = canonical.sources[0].config.connection
-        if connection.database_url_env and connection.database_url_env in str(exc):
-            path = "/sources/0/config/connection/database_url_env"
-    payload = unresolved_env_diagnostic(path=path, message=_SAFE_RESOLUTION)
+    del canonical  # path/code are carried on the exception
+    path = exc.path or ""
+    code = exc.code or CODE_ENV_UNRESOLVED
+    if code == CODE_ENV_UNRESOLVED:
+        payload = unresolved_env_diagnostic(path=path, message=_SAFE_RESOLUTION)
+        human = _SAFE_RESOLUTION
+    else:
+        message = _safe_error_message(exc)
+        payload = runtime_invalid_diagnostic(path=path, message=message)
+        human = message
     if fmt == "json":
         _print_json(payload)
     else:
-        print(f"error: {_SAFE_RESOLUTION}", file=sys.stderr)
+        print(f"error: {human}", file=sys.stderr)
         if path:
             print(f"  path={path}", file=sys.stderr)
     return 4
@@ -745,6 +1023,13 @@ def _validate_sync_flags(*, mode: Mode, apply: bool, confirm_live: bool) -> None
     if mode == "live" and apply and not confirm_live:
         raise CliUsageError("live apply requires --confirm-live")
 
+
+def _validate_apply_flags(*, mode: Mode, apply: bool, confirm_live: bool) -> None:
+    """Validate apply flag combinations against effective mode after resolution."""
+    if confirm_live and mode != "live":
+        raise CliUsageError("--confirm-live is only valid when effective mode is live")
+    if mode == "live" and apply and not confirm_live:
+        raise CliUsageError("live apply requires --confirm-live")
 
 
 def _resolve_cli_mapping_path(

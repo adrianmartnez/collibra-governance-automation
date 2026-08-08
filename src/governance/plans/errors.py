@@ -14,6 +14,7 @@ CODE_SCHEMA = "schema_validation_failed"
 CODE_IDENTITY = "content_identity_mismatch"
 CODE_MALFORMED_ACTION = "malformed_action"
 CODE_UNSUPPORTED_ACTION = "unsupported_action_type"
+CODE_TARGET_CONTEXT_INCONSISTENT = "target_context_inconsistent"
 
 STALE_RESULT_SCHEMA = "governance-stale-plan-result"
 STALE_RESULT_VERSION = "1"

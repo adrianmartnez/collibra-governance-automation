@@ -1,4 +1,4 @@
-"""Unit tests for saved .gplan artifacts (round-trip and inspect)."""
+"""Unit tests for saved .gplan artifacts (round-trip, inspect, dry apply)."""
 
 from __future__ import annotations
 
@@ -430,6 +430,64 @@ def test_plan_inspect_offline(
     assert adapter_calls["read"] == 0
 
 
+def test_dry_apply_zero_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, plan_path = _generate_plan(monkeypatch, tmp_path, capsys)
+    adapter_calls = _patch_adapter(monkeypatch)
+    build_calls = {"count": 0}
+
+    def boom_build(*args, **kwargs):
+        build_calls["count"] += 1
+        raise AssertionError("apply must not rebuild sync plan")
+
+    monkeypatch.setattr("governance.cli.build_sync_plan", boom_build)
+
+    assert main(["apply", str(plan_path), "--config", str(config), "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stale"] is False
+    assert payload["dry_run"] is True
+    assert payload["success"] is True
+    assert payload["applied_count"] == 0
+    assert payload["failed_action"] is None
+    assert payload["error"] is None
+    assert payload["result_schema"] == "governance-apply-result"
+    assert build_calls["count"] == 0
+    assert adapter_calls["writes"] == 0
+
+
+def test_apply_does_not_call_build_sync_plan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config, plan_path = _generate_plan(monkeypatch, tmp_path, capsys)
+    adapter_calls = _patch_adapter(monkeypatch)
+    build_calls = {"count": 0}
+
+    def boom_build(*args, **kwargs):
+        build_calls["count"] += 1
+        raise AssertionError("apply must use saved actions only")
+
+    monkeypatch.setattr("governance.cli.build_sync_plan", boom_build)
+    assert (
+        main(
+            [
+                "apply",
+                str(plan_path),
+                "--config",
+                str(config),
+                "--apply",
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    assert build_calls["count"] == 0
+    assert int(adapter_calls["writes"]) > 0
 
 
 def test_no_secrets_in_gplan(
