@@ -14,6 +14,8 @@ dependencies = [
     "python-dotenv>=1.0",
     "psycopg[binary]>=3.2,<4",
     "httpx>=0.28,<1",
+    "PyYAML>=6.0.1,<7",
+    "jsonschema>=4.23,<5",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,9 @@ governance = "governance.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"governance.config_contract.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

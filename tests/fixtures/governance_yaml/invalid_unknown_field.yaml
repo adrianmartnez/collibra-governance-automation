@@ -1,0 +1,9 @@
+schema_version: "1"
+project: not-allowed
+
+sources:
+  - id: primary
+    provider: postgresql
+    config:
+      connection:
+        database_url_env: DATABASE_URL

@@ -7,10 +7,24 @@ import json
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, Literal, TextIO
 
 from governance import __version__
 from governance.config import Settings, load_settings
+from governance.config_contract import (
+    CanonicalConfig,
+    ConfigContractError,
+    ConfigResolutionError,
+    diagnostics_failure,
+    diagnostics_success,
+    load_canonical_config,
+    resolve_inventory_path,
+    resolve_mapping_path,
+    resolve_settings,
+    resolve_snapshot_path,
+    validate_governance_config,
+)
 from governance.domain import GovernanceModel
 from governance.exporters import InventoryExportError, MetadataInventory, write_inventory
 from governance.integrations.collibra import (
@@ -33,12 +47,24 @@ from governance.integrations.collibra import (
 from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner
 
 Mode = Literal["mock", "live"]
+ArtifactKind = Literal["inventory", "snapshot"]
 
 _SAFE_UNEXPECTED = "unexpected error"
 _SAFE_MAPPING = "invalid Collibra mapping configuration"
 _SAFE_PLACEHOLDER = "Collibra mapping configuration contains example placeholders"
 _SAFE_MAPPING_REQUIRED = "live mode requires --mapping-config"
 _SAFE_SYNC_FAILED = "synchronization failed"
+_SAFE_TARGET_REQUIRED = "governance.yaml must define a target for diff/sync"
+_SAFE_CONFIG = "invalid governance configuration"
+
+_OPERATIONAL_ERROR_TYPES: tuple[type[BaseException], ...] = (
+    ValueError,
+    MetadataDiscoveryError,
+    InventoryExportError,
+    CollibraMappingError,
+    CollibraAdapterError,
+    ConfigResolutionError,
+)
 
 
 class CliUsageError(Exception):
@@ -47,6 +73,16 @@ class CliUsageError(Exception):
 
 class CliOperationalError(Exception):
     """Expected operational failure translated to a safe stderr message."""
+
+
+def _is_operational_error(exc: BaseException) -> bool:
+    if isinstance(exc, _OPERATIONAL_ERROR_TYPES):
+        return True
+    try:
+        from governance.snapshots.errors import SnapshotError
+    except ImportError:  # pragma: no cover
+        return False
+    return isinstance(exc, SnapshotError)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -65,16 +101,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     except CliOperationalError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    except (
-        ValueError,
-        MetadataDiscoveryError,
-        InventoryExportError,
-        CollibraMappingError,
-        CollibraAdapterError,
-    ) as exc:
-        print(f"error: {_safe_error_message(exc)}", file=sys.stderr)
+    except ConfigContractError as exc:
+        print(f"error: {_SAFE_CONFIG}", file=sys.stderr)
+        for item in exc.errors:
+            print(f"  {item.path or '/'}: {item.message} ({item.code})", file=sys.stderr)
         return 1
-    except Exception:
+    except Exception as exc:
+        if _is_operational_error(exc):
+            print(f"error: {_safe_error_message(exc)}", file=sys.stderr)
+            return 1
         print(f"error: {_SAFE_UNEXPECTED}", file=sys.stderr)
         return 1
 
@@ -87,20 +122,44 @@ def _run(argv: list[str] | None) -> int:
         parser.print_help(sys.stdout)
         return 0
 
-    settings = load_settings()
     command = args.command
+    if command == "config":
+        return _cmd_config(args)
+
+    canonical: CanonicalConfig | None = None
+    config_path = getattr(args, "config", None)
+    if config_path is not None:
+        canonical = load_canonical_config(
+            config_path,
+            profile=getattr(args, "profile", None),
+        )
+        if command in {"diff", "sync"} and not canonical.targets:
+            raise CliOperationalError(_SAFE_TARGET_REQUIRED)
+        settings = resolve_settings(canonical)
+    else:
+        settings = load_settings()
 
     if command == "scan":
         return _cmd_scan(settings, json_output=bool(args.json))
     if command == "export":
-        output = args.output if args.output is not None else settings.inventory_output_path
-        return _cmd_export(settings, output_path=output)
+        artifact: ArtifactKind = getattr(args, "artifact", "inventory") or "inventory"
+        output = _resolve_export_output(
+            settings,
+            canonical=canonical,
+            artifact=artifact,
+            cli_output=getattr(args, "output", None),
+        )
+        return _cmd_export(settings, output_path=output, artifact=artifact)
     if command == "diff":
         mode = _resolve_mode(settings, getattr(args, "mode", None))
+        mapping_path = _resolve_cli_mapping_path(
+            canonical,
+            getattr(args, "mapping_config", None),
+        )
         return _cmd_diff(
             settings,
             mode=mode,
-            mapping_config_path=getattr(args, "mapping_config", None),
+            mapping_config_path=mapping_path,
             json_output=bool(args.json),
         )
     if command == "sync":
@@ -108,10 +167,14 @@ def _run(argv: list[str] | None) -> int:
         apply = bool(getattr(args, "apply", False))
         confirm_live = bool(getattr(args, "confirm_live", False))
         _validate_sync_flags(mode=mode, apply=apply, confirm_live=confirm_live)
+        mapping_path = _resolve_cli_mapping_path(
+            canonical,
+            getattr(args, "mapping_config", None),
+        )
         return _cmd_sync(
             settings,
             mode=mode,
-            mapping_config_path=getattr(args, "mapping_config", None),
+            mapping_config_path=mapping_path,
             apply=apply,
             json_output=bool(args.json),
         )
@@ -139,6 +202,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "scan",
         help="Discover PostgreSQL metadata and print a summary (no Collibra I/O).",
     )
+    _add_config_profile(scan)
     scan.add_argument(
         "--json",
         action="store_true",
@@ -147,12 +211,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
     export = subparsers.add_parser(
         "export",
-        help="Discover metadata and write deterministic inventory JSON.",
+        help="Discover metadata and write deterministic inventory or snapshot JSON.",
+    )
+    _add_config_profile(export)
+    export.add_argument(
+        "--artifact",
+        choices=("inventory", "snapshot"),
+        default="inventory",
+        help="Artifact kind to write (default: inventory).",
     )
     export.add_argument(
         "--output",
         metavar="PATH",
-        help="Inventory output path (default: settings.inventory_output_path).",
+        help="Output path (default: settings or governance.yaml artifacts paths).",
     )
 
     diff = subparsers.add_parser(
@@ -162,6 +233,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "In live mode this reads remote state (GET); mutations remain zero."
         ),
     )
+    _add_config_profile(diff)
     _add_mode_mapping_json(diff)
 
     sync = subparsers.add_parser(
@@ -172,6 +244,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "--apply and --confirm-live."
         ),
     )
+    _add_config_profile(sync)
     _add_mode_mapping_json(sync)
     sync.add_argument(
         "--apply",
@@ -183,7 +256,46 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Required together with --apply when effective mode is live.",
     )
+
+    config = subparsers.add_parser(
+        "config",
+        help="Governance-as-Code configuration utilities.",
+    )
+    config_sub = config.add_subparsers(dest="config_command")
+    validate = config_sub.add_parser(
+        "validate",
+        help="Validate governance.yaml (no PostgreSQL or Collibra I/O).",
+    )
+    validate.add_argument(
+        "--config",
+        metavar="PATH",
+        default="governance.yaml",
+        help="Path to governance.yaml (default: governance.yaml).",
+    )
+    validate.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay (overrides GOVERNANCE_PROFILE).",
+    )
+    validate.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit machine-readable diagnostics JSON on stdout.",
+    )
     return parser
+
+
+def _add_config_profile(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Optional governance.yaml path (opt-in GaC mode; no auto-discovery).",
+    )
+    parser.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay when --config is set (overrides GOVERNANCE_PROFILE).",
+    )
 
 
 def _add_mode_mapping_json(parser: argparse.ArgumentParser) -> None:
@@ -202,6 +314,37 @@ def _add_mode_mapping_json(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Emit machine-readable JSON on stdout.",
     )
+
+
+def _cmd_config(args: argparse.Namespace) -> int:
+    if getattr(args, "config_command", None) != "validate":
+        raise CliUsageError("usage: governance config validate [--config PATH]")
+    config_path = Path(args.config)
+    json_output = bool(args.json)
+    try:
+        _canonical, identity = validate_governance_config(
+            config_path,
+            profile=getattr(args, "profile", None),
+        )
+    except ConfigContractError as exc:
+        payload = diagnostics_failure(exc.errors)
+        if json_output:
+            _print_json(payload)
+        else:
+            print("ok=false")
+            for item in exc.errors:
+                print(f"error path={item.path or '/'} code={item.code} message={item.message}")
+        return 1
+
+    payload = diagnostics_success(identity)
+    if json_output:
+        _print_json(payload)
+    else:
+        print("ok=true")
+        print(f"algorithm={identity['algorithm']}")
+        print(f"hashing_contract_version={identity['hashing_contract_version']}")
+        print(f"digest={identity['digest']}")
+    return 0
 
 
 def _resolve_mode(settings: Settings, cli_mode: str | None) -> Mode:
@@ -224,6 +367,37 @@ def _validate_sync_flags(*, mode: Mode, apply: bool, confirm_live: bool) -> None
         raise CliUsageError("live apply requires --confirm-live")
 
 
+def _resolve_cli_mapping_path(
+    canonical: CanonicalConfig | None,
+    cli_mapping: str | None,
+) -> str | None:
+    if cli_mapping is not None:
+        return cli_mapping
+    if canonical is None:
+        return None
+    mapped = resolve_mapping_path(canonical)
+    return str(mapped) if mapped is not None else None
+
+
+def _resolve_export_output(
+    settings: Settings,
+    *,
+    canonical: CanonicalConfig | None,
+    artifact: ArtifactKind,
+    cli_output: str | None,
+) -> str:
+    if cli_output is not None:
+        return cli_output
+    if canonical is not None:
+        if artifact == "snapshot":
+            return str(resolve_snapshot_path(canonical))
+        return str(resolve_inventory_path(canonical))
+    if artifact == "snapshot":
+        inventory = Path(settings.inventory_output_path)
+        return str(inventory.with_name("governance-snapshot.json"))
+    return settings.inventory_output_path
+
+
 def _cmd_scan(settings: Settings, *, json_output: bool) -> int:
     model = _scan_model(settings)
     summary = _scan_summary(model)
@@ -234,8 +408,20 @@ def _cmd_scan(settings: Settings, *, json_output: bool) -> int:
     return 0
 
 
-def _cmd_export(settings: Settings, *, output_path: str) -> int:
+def _cmd_export(
+    settings: Settings,
+    *,
+    output_path: str,
+    artifact: ArtifactKind,
+) -> int:
     model = _scan_model(settings)
+    if artifact == "snapshot":
+        from governance.snapshots import GovernanceSnapshot, write_snapshot
+
+        snapshot = GovernanceSnapshot.from_model(model)
+        written = write_snapshot(snapshot, output_path)
+        print(f"snapshot_written={written}")
+        return 0
     inventory = MetadataInventory.from_model(model)
     written = write_inventory(inventory, output_path)
     print(f"inventory_written={written}")
