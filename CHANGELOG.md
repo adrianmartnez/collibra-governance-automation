@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Governance-as-Code foundation: optional `governance.yaml` v1 contract with packaged JSON Schema, profile overlays, and `governance config validate`
+- Canonical `GovernanceSnapshot` artifact (`export --artifact snapshot`) distinct from the v1.0 metadata inventory
+- Versioned content identities (`config_identity`, `snapshot_identity`, `mapping_identity`) using SHA-256 with domain separation
+- Sample config at `sample/governance.example.yaml` (secrets remain environment references only)
+
 ## 1.0.0
 
 ### Added

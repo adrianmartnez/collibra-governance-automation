@@ -1,0 +1,44 @@
+# Example Governance-as-Code configuration (v1).
+# Paths are relative to this file's directory (sample/).
+# Secrets must remain in environment variables, never in this file.
+schema_version: "1"
+
+sources:
+  - id: primary
+    provider: postgresql
+    config:
+      source_name: governance-demo
+      connection:
+        database_url_env: DATABASE_URL
+        # XOR discrete refs (do not mix with database_url_env):
+        # host_env: POSTGRES_HOST
+        # port_env: POSTGRES_PORT
+        # db_env: POSTGRES_DB
+        # user_env: POSTGRES_USER
+        # password_env: POSTGRES_PASSWORD
+
+targets:
+  - id: collibra
+    provider: collibra
+    config:
+      mode_env: COLLIBRA_MODE
+      mapping:
+        path: collibra-mapping.example.json
+      auth:
+        base_url_env: COLLIBRA_BASE_URL
+        username_env: COLLIBRA_USERNAME
+        password_env: COLLIBRA_PASSWORD
+        bearer_token_env: COLLIBRA_BEARER_TOKEN
+        timeout_seconds_env: COLLIBRA_TIMEOUT_SECONDS
+
+artifacts:
+  inventory_path: artifacts/metadata-inventory.json
+  snapshot_path: artifacts/governance-snapshot.json
+
+policies:
+  files: []
+
+profiles:
+  ci:
+    artifacts:
+      snapshot_path: artifacts/ci-governance-snapshot.json
