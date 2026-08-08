@@ -14,6 +14,7 @@ ALGORITHM = "sha256"
 _PREFIX_CONFIG = b"gov-config-v1\n"
 _PREFIX_SNAPSHOT = b"gov-snapshot-v1\n"
 _PREFIX_MAPPING = b"gov-mapping-v1\n"
+_PREFIX_POLICY = b"gov-policy-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,3 +58,8 @@ def snapshot_identity(canonical_snapshot_without_identity: dict[str, Any]) -> Co
 def mapping_identity(normalized_mapping: dict[str, Any]) -> ContentIdentity:
     """Identity for normalized mapping content (not file path)."""
     return _sha256_identity(_PREFIX_MAPPING, canonical_json_bytes(normalized_mapping))
+
+
+def policy_identity(normalized_policy_set: dict[str, Any]) -> ContentIdentity:
+    """Identity for normalized policy semantics (not file paths)."""
+    return _sha256_identity(_PREFIX_POLICY, canonical_json_bytes(normalized_policy_set))

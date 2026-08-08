@@ -1,0 +1,11 @@
+policy_schema: governance-policy
+policy_version: "1"
+
+policies:
+  - id: tables-require-description
+    severity: warning
+    description: Tables should have a description.
+    rule:
+      type: require_description
+      select:
+        kind: table

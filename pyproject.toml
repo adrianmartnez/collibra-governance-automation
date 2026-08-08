@@ -33,6 +33,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "governance.config_contract.schemas" = ["*.json"]
+"governance.policy.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

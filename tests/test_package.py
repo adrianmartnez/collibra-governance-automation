@@ -37,6 +37,7 @@ def test_entry_point_module_help() -> None:
     assert "diff" in result.stdout
     assert "sync" in result.stdout
     assert "config" in result.stdout
+    assert "check" in result.stdout
     assert "password=" not in result.stdout
 
 
