@@ -4,7 +4,7 @@ Discover PostgreSQL technical metadata, export a deterministic governance invent
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
-**Release candidate:** package version `1.1.0`. See [CHANGELOG.md](CHANGELOG.md). The Git tag `v1.1.0` and GitHub Release are created only after merge to `main`.
+**Package version:** `1.1.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases.
 
 ## What is implemented
 
@@ -393,7 +393,7 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 - Strongest: pin the Action to a full immutable commit SHA.
 - Release consumers may pin the immutable SemVer tag `v1.1.0` once that tag is published.
 - Do not use mutable `@main`.
-- This release candidate aligns Action metadata and package version at `1.1.0`; future releases must keep Action/package compatibility explicit.
+- Version `1.1.0` aligns Action metadata and package version; future releases must keep Action/package compatibility explicit.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
 
 ## Repository structure
