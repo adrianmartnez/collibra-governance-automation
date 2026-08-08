@@ -2,20 +2,41 @@
 
 ## [Unreleased]
 
+## 1.1.0 - 2026-08-08
+
 ### Added
 
-- Official root composite GitHub Action (`action.yml`) for read-only Governance-as-Code review workflows (`validate` / `check` / `plan`)
-- Packaged `governance-action-result` v1 machine contract and Action orchestration under `governance.github_ci`
-- Deterministic Markdown reports, `GITHUB_STEP_SUMMARY`, and bounded workflow annotations for CI review
-- Opt-in sticky pull request comments with fork-safe defaults and least-privilege permissions
-- Governance-as-Code foundation: optional `governance.yaml` v1 contract with packaged JSON Schema, profile overlays, and `governance config validate`
-- Canonical `GovernanceSnapshot` artifact (`export --artifact snapshot`) distinct from the v1.0 metadata inventory
+- Declarative `governance.yaml` v1 configuration with packaged JSON Schema, profile overlays, diagnostics, and `governance config validate`
+- Deterministic `GovernanceSnapshot` artifact (`export --artifact snapshot`), distinct from the v1.0 metadata inventory
 - Versioned content identities (`config_identity`, `snapshot_identity`, `mapping_identity`) using SHA-256 with domain separation
-- Sample config at `sample/governance.example.yaml` (secrets remain environment references only)
-- Native deterministic policy evaluation (`governance check`) with packaged policy schema, `policy_identity`, and machine-readable policy reports
+- Native deterministic policy evaluation via `governance check`, packaged policy schema, `policy_identity`, and machine-readable policy reports
 - Saved governance plan artifacts (`.gplan`) via `governance plan` / `governance plan inspect` / `governance apply`
 - Stale-plan protection with material input identities including `target_context_identity` and `remote_state_identity`
-- Additive exit codes for new GaC commands: policy failure (`3`), config/resolution/artifact validation (`4`), stale plan (`5`)
+- Official root composite GitHub Action (`action.yml`) for read-only Governance-as-Code review workflows (`validate` / `check` / `plan`)
+- Packaged `governance-action-result` v1 machine contract and Action orchestration under `governance.github_ci`
+- Deterministic Markdown PR reports, `GITHUB_STEP_SUMMARY`, and bounded workflow annotations for CI review
+- Opt-in sticky pull request comments with fork-safe defaults and least-privilege permissions
+- Sample config at `sample/governance.example.yaml` (secrets remain environment references only)
+- Additive exit codes for Governance-as-Code commands: policy failure (`3`), config/resolution/artifact validation (`4`), stale plan (`5`)
+
+### Safety
+
+- Official GitHub Action operations (`validate` / `check` / `plan`) perform zero remote writes (`writes_performed=0`)
+- Remote mutation remains explicit via `governance apply` (and existing sync `--apply` / `--confirm-live` controls)
+- Saved-plan apply validates staleness before any write
+- Fork and untrusted PR paths do not receive privileged sticky-comment delivery or provider credentials through Action inputs
+- Provider credentials remain environment references from `governance.yaml`; they are not Action inputs
+- No automatic remote deletes or destructive reconciliation
+
+### Limitations
+
+- No commercial Collibra tenant validation in this repository
+- No automatic destructive reconciliation
+- GitHub Action v1 is supported on GitHub-hosted Linux/Ubuntu runners
+- Collibra remote reads are not treated as a transactional snapshot
+- No large-scale performance benchmarks
+- Sticky pull request comments are opt-in
+- This package remains a technical governance automation project, not a hosted governance platform
 
 ## 1.0.0
 

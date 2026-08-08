@@ -4,7 +4,7 @@ Discover PostgreSQL technical metadata, export a deterministic governance invent
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
-**Release prep:** package version `1.0.0` is ready for tagging after merge. See [CHANGELOG.md](CHANGELOG.md). This repository state prepares `v1.0.0`; the Git tag and GitHub Release are created only after merge to `main`.
+**Release candidate:** package version `1.1.0`. See [CHANGELOG.md](CHANGELOG.md). The Git tag `v1.1.0` and GitHub Release are created only after merge to `main`.
 
 ## What is implemented
 
@@ -153,7 +153,7 @@ Additional exit codes for `check` / `plan` / `apply` only:
 ### Representative local output (mock demo)
 
 ```text
-governance 1.0.0
+governance 1.1.0
 ```
 
 ```text
@@ -391,9 +391,9 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 ### F. Version pinning
 
 - Strongest: pin the Action to a full immutable commit SHA.
-- After a separate release that bumps the package to `1.1.0` and creates tag `v1.1.0`, consumers may pin that immutable SemVer tag.
+- Release consumers may pin the immutable SemVer tag `v1.1.0` once that tag is published.
 - Do not use mutable `@main`.
-- This repository state remains package `1.0.0`; it does not create release tags.
+- This release candidate aligns Action metadata and package version at `1.1.0`; future releases must keep Action/package compatibility explicit.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
 
 ## Repository structure
