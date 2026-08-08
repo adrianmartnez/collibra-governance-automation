@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 from governance.config import load_settings
 from governance.exporters import MetadataInventory
 from governance.scanner import PostgresMetadataScanner
+from governance.snapshots import GovernanceSnapshot, snapshot_to_json
 
 pytestmark = pytest.mark.integration
 
@@ -169,6 +170,13 @@ def test_postgres_metadata_pipeline_discovery_determinism_and_mutation() -> None
 
         assert model1.to_json() == model2.to_json()
         assert inventory1.to_json().encode("utf-8") == inventory2.to_json().encode("utf-8")
+
+        snapshot1 = GovernanceSnapshot.from_model(model1)
+        snapshot2 = GovernanceSnapshot.from_model(model2)
+        assert snapshot_to_json(snapshot1).encode("utf-8") == snapshot_to_json(snapshot2).encode(
+            "utf-8"
+        )
+        assert snapshot1.content_identity() == snapshot2.content_identity()
 
         data_source = model1.data_sources[0]
         assert data_source.name == "governance-demo"
