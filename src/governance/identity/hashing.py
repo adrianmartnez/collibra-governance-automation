@@ -18,6 +18,7 @@ _PREFIX_POLICY = b"gov-policy-v1\n"
 _PREFIX_REMOTE_STATE = b"gov-remote-state-v1\n"
 _PREFIX_TARGET_CONTEXT = b"gov-target-context-v1\n"
 _PREFIX_PLAN = b"gov-plan-v1\n"
+_PREFIX_GRAPH = b"gov-graph-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,4 +90,16 @@ def plan_identity(canonical_plan_without_identity: dict[str, Any]) -> ContentIde
     return _sha256_identity(
         _PREFIX_PLAN,
         canonical_json_bytes(canonical_plan_without_identity),
+    )
+
+
+def graph_identity(canonical_graph_without_identity: dict[str, Any]) -> ContentIdentity:
+    """Identity for canonical governance graph content excluding content_identity.
+
+    Callers should pass ``GovernanceGraph.canonical_dict_without_identity()``.
+    This helper hashes the provided projection; it does not validate graph structure.
+    """
+    return _sha256_identity(
+        _PREFIX_GRAPH,
+        canonical_json_bytes(canonical_graph_without_identity),
     )

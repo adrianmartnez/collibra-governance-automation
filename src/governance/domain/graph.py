@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from governance.identity.canonicalize import canonical_json_bytes
+from governance.identity.hashing import ContentIdentity, graph_identity
 
 NODE_KIND_DATA_SOURCE = "data_source"
 NODE_KIND_DATASET = "dataset"
@@ -430,5 +431,10 @@ class GovernanceGraph:
             "nodes": [node.to_dict() for node in self.nodes],
         }
 
+    def content_identity(self) -> ContentIdentity:
+        return graph_identity(self.canonical_dict_without_identity())
+
     def to_dict(self) -> dict[str, Any]:
-        return self.canonical_dict_without_identity()
+        payload = self.canonical_dict_without_identity()
+        payload["content_identity"] = self.content_identity().to_dict()
+        return payload

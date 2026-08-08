@@ -682,3 +682,130 @@ def test_graph_rejects_non_node_and_non_edge_objects() -> None:
             nodes=(_node(_table_id()),),
             edges=("not-an-edge",),  # type: ignore[arg-type]
         )
+
+
+# --- F: Content identity ---
+
+
+def test_content_identity_identical_semantic_graphs() -> None:
+    table = _table_id()
+    g1 = GovernanceGraph.from_parts(
+        [
+            _node(
+                table,
+                attributes={"meta": {"a": 1, "b": [1, 2]}},
+                provenance=(_prov("postgresql", "pg://orders"), _prov("dbt", "m.orders", "1")),
+            )
+        ]
+    )
+    g2 = GovernanceGraph.from_parts(
+        [
+            _node(
+                GraphNodeIdentity(NS, NODE_KIND_TABLE, "orders"),
+                name="orders",
+                attributes={"meta": {"b": [1, 2], "a": 1}},
+                provenance=(
+                    _prov("dbt", "m.orders", "1"),
+                    _prov("postgresql", "pg://orders"),
+                ),
+            )
+        ]
+    )
+    assert g1.content_identity() == g2.content_identity()
+    assert "content_identity" not in g1.canonical_dict_without_identity()
+    assert g1.to_dict()["content_identity"]["digest"] == g1.content_identity().digest
+
+
+def test_content_identity_changes_on_material_node_and_edge() -> None:
+    a_id = _table_id("a")
+    b_id = _table_id("b")
+    base = GovernanceGraph.from_parts(
+        [_node(a_id), _node(b_id)],
+        [GraphEdge(source=a_id, target=b_id, kind=EDGE_KIND_DEPENDS_ON)],
+    )
+    changed_node = GovernanceGraph.from_parts(
+        [_node(a_id, attributes={"x": 1}), _node(b_id)],
+        [GraphEdge(source=a_id, target=b_id, kind=EDGE_KIND_DEPENDS_ON)],
+    )
+    changed_edge = GovernanceGraph.from_parts(
+        [_node(a_id), _node(b_id)],
+        [
+            GraphEdge(
+                source=a_id,
+                target=b_id,
+                kind=EDGE_KIND_DEPENDS_ON,
+                attributes={"w": 1},
+            )
+        ],
+    )
+    assert base.content_identity() != changed_node.content_identity()
+    assert base.content_identity() != changed_edge.content_identity()
+
+
+def test_content_identity_object_vs_array_and_bool_vs_int() -> None:
+    obj = GovernanceGraph.from_parts([_node(_table_id("t"), attributes={"v": {"a": 1}})])
+    arr = GovernanceGraph.from_parts([_node(_table_id("t"), attributes={"v": [["a", 1]]})])
+    assert obj.content_identity() != arr.content_identity()
+
+    as_bool = GovernanceGraph.from_parts([_node(_table_id("t"), attributes={"flag": True})])
+    as_int = GovernanceGraph.from_parts([_node(_table_id("t"), attributes={"flag": 1})])
+    assert as_bool.content_identity() != as_int.content_identity()
+
+
+def test_content_identity_insertion_order_and_mutation_independence() -> None:
+    nested: dict[str, Any] = {"k": 1, "list": [1, 2]}
+    attrs: dict[str, Any] = {"nested": nested}
+    n1 = _node(_table_id(), attributes=attrs, provenance=(_prov("postgresql", "pg://o"),))
+    n2 = _node(
+        _table_id(),
+        attributes={"nested": {"list": [1, 2], "k": 1}},
+        provenance=(_prov("dbt", "m.o", "1"),),
+    )
+    g1 = GovernanceGraph.from_parts([n1, n2])
+    g2 = GovernanceGraph.from_parts([n2, n1])
+    digest = g1.content_identity()
+    assert digest == g2.content_identity()
+
+    attrs["nested"] = {"k": 99}
+    nested["list"].append(9)
+    assert g1.content_identity() == digest
+
+
+def test_node_provenance_union_same_digest_regardless_of_order() -> None:
+    identity = _table_id()
+    n_pg = _node(
+        identity,
+        attributes={"grain": "daily"},
+        provenance=(_prov("postgresql", "pg://orders"),),
+    )
+    n_dbt = _node(
+        identity,
+        attributes={"grain": "daily"},
+        provenance=(_prov("dbt", "model.orders", "1", "declared"),),
+    )
+    assert (
+        GovernanceGraph.from_parts([n_pg, n_dbt]).content_identity()
+        == GovernanceGraph.from_parts([n_dbt, n_pg]).content_identity()
+    )
+
+
+def test_direct_constructor_semantic_equality_same_content_identity() -> None:
+    z = _node(GraphNodeIdentity(NS, NODE_KIND_TABLE, "zeta"))
+    a = _node(GraphNodeIdentity(NS, NODE_KIND_TABLE, "alpha"))
+    g1 = GovernanceGraph(nodes=(z, a))
+    g2 = GovernanceGraph(nodes=(a, z))
+    g3 = GovernanceGraph.from_parts([z, a])
+    assert g1.content_identity() == g2.content_identity() == g3.content_identity()
+
+
+def test_direct_constructor_edge_permutation_same_content_identity() -> None:
+    a_id = _table_id("a")
+    b_id = _table_id("b")
+    c_id = _table_id("c")
+    nodes = (_node(a_id), _node(b_id), _node(c_id))
+    e1 = GraphEdge(source=a_id, target=b_id, kind=EDGE_KIND_DEPENDS_ON)
+    e2 = GraphEdge(source=a_id, target=c_id, kind=EDGE_KIND_CONTAINS)
+    assert (
+        GovernanceGraph(nodes=nodes, edges=(e1, e2)).content_identity()
+        == GovernanceGraph(nodes=nodes, edges=(e2, e1)).content_identity()
+    )
