@@ -22,8 +22,13 @@ from governance.domain import (
 from governance.identity import (
     HASHING_CONTRACT_VERSION,
     config_identity,
+    graph_identity,
     mapping_identity,
+    plan_identity,
+    policy_identity,
+    remote_state_identity,
     snapshot_identity,
+    target_context_identity,
 )
 from governance.integrations.collibra import load_mapping_config_file, mock_mapping_config
 from governance.snapshots import GovernanceSnapshot
@@ -47,9 +52,20 @@ def test_order_invariance_of_canonical_json() -> None:
 
 def test_domain_separation_between_components() -> None:
     payload = {"x": 1}
-    assert config_identity(payload) != snapshot_identity(payload)
-    assert config_identity(payload) != mapping_identity(payload)
-    assert snapshot_identity(payload) != mapping_identity(payload)
+    identities = [
+        config_identity(payload),
+        snapshot_identity(payload),
+        mapping_identity(payload),
+        policy_identity(payload),
+        plan_identity(payload),
+        remote_state_identity(payload),
+        target_context_identity(payload),
+        graph_identity(payload),
+    ]
+    digests = [identity.digest for identity in identities]
+    assert len(set(digests)) == len(digests)
+    assert config_identity(payload) != graph_identity(payload)
+    assert snapshot_identity(payload) != graph_identity(payload)
 
 
 def test_mapping_identity_ignores_path(tmp_path: Path) -> None:
