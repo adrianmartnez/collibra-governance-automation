@@ -1,4 +1,4 @@
-"""Governance CLI: scan, export, diff, sync, and check orchestration."""
+"""Governance CLI: scan, export, diff, sync, check, and plan orchestration."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from governance.config_contract import (
     resolve_mapping_path,
     resolve_settings,
     resolve_snapshot_path,
+    runtime_invalid_diagnostic,
     unresolved_env_diagnostic,
     validate_governance_config,
 )
@@ -33,6 +34,7 @@ from governance.exporters import (
     write_inventory,
 )
 from governance.identity import (
+    config_identity,
     policy_identity,
 )
 from governance.integrations.collibra import (
@@ -53,6 +55,16 @@ from governance.integrations.collibra import (
     mock_mapping_config,
 )
 from governance.operation_diagnostics import operation_diagnostics_failure
+from governance.plans import (
+    PlanError,
+    SavedGovernancePlan,
+    build_saved_plan,
+    compute_remote_state_identity_value,
+    load_saved_plan,
+    plan_diagnostics_failure,
+    write_saved_plan,
+)
+from governance.plans.target_context import build_target_context_projection
 from governance.policy import (
     PolicyError,
     build_policy_report,
@@ -72,8 +84,10 @@ _SAFE_UNEXPECTED = "unexpected error"
 _SAFE_MAPPING = "invalid Collibra mapping configuration"
 _SAFE_PLACEHOLDER = "Collibra mapping configuration contains example placeholders"
 _SAFE_MAPPING_REQUIRED = "live mode requires --mapping-config"
+_SAFE_MAPPING_REQUIRED_GAC = "live mode requires a Collibra mapping path in governance.yaml"
 _SAFE_SYNC_FAILED = "synchronization failed"
 _SAFE_TARGET_REQUIRED = "governance.yaml must define a target for diff/sync"
+_SAFE_TARGET_REQUIRED_PLAN = "governance.yaml must define a target for plan/apply"
 _SAFE_CONFIG = "invalid governance configuration"
 _SAFE_RESOLUTION = "required environment reference could not be resolved"
 
@@ -147,6 +161,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_config(args)
     if command == "check":
         return _cmd_check(args)
+    if command == "plan":
+        return _cmd_plan(args)
 
     canonical: CanonicalConfig | None = None
     config_path = getattr(args, "config", None)
@@ -209,7 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="governance",
         description=(
             "Discover PostgreSQL technical metadata, export inventory, evaluate "
-            "policies, and run Collibra diff/sync. Dry-run means "
+            "policies, and run plan-driven Collibra diff/sync/apply. Dry-run means "
             "zero remote mutations (live mode may still perform GET reads)."
         ),
     )
@@ -295,6 +311,40 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Named profile overlay (overrides GOVERNANCE_PROFILE).",
     )
     _add_format(check)
+
+    plan = subparsers.add_parser(
+        "plan",
+        help="Generate or inspect a saved governance plan (.gplan).",
+    )
+    plan_sub = plan.add_subparsers(dest="plan_command")
+    plan_sub.required = False
+    plan.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Path to governance.yaml (required for plan generation).",
+    )
+    plan.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay when generating a plan.",
+    )
+    plan.add_argument(
+        "--output",
+        metavar="FILE",
+        help="Output .gplan path (required for plan generation).",
+    )
+    _add_format(plan)
+
+    inspect = plan_sub.add_parser(
+        "inspect",
+        help="Inspect a saved .gplan without PostgreSQL or Collibra I/O.",
+    )
+    inspect.add_argument(
+        "plan_file",
+        metavar="FILE",
+        help="Path to a saved .gplan artifact.",
+    )
+    _add_format(inspect)
 
     config = subparsers.add_parser(
         "config",
@@ -432,6 +482,118 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 0 if report["ok"] else 3
 
 
+def _cmd_plan(args: argparse.Namespace) -> int:
+    if getattr(args, "plan_command", None) == "inspect":
+        return _cmd_plan_inspect(args)
+    return _cmd_plan_generate(args)
+
+
+def _cmd_plan_inspect(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    try:
+        plan = load_saved_plan(args.plan_file)
+    except PlanError as exc:
+        return _emit_plan_error(exc, fmt)
+
+    if fmt == "json":
+        _print_json(plan.to_dict())
+    else:
+        sys.stdout.write(_format_plan_inspect_human(plan))
+    return 0
+
+
+def _cmd_plan_generate(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    if not getattr(args, "config", None):
+        raise CliUsageError("plan generation requires --config")
+    if not getattr(args, "output", None):
+        raise CliUsageError("plan generation requires --output")
+
+    loaded = _load_canonical_and_settings(
+        config_path=args.config,
+        profile=getattr(args, "profile", None),
+        fmt=fmt,
+    )
+    if isinstance(loaded, int):
+        return loaded
+    canonical, settings = loaded
+
+    try:
+        policy_set = load_normalized_policies(canonical)
+    except PolicyError as exc:
+        return _emit_policy_error(exc, fmt)
+
+    try:
+        model = _scan_model(settings)
+    except Exception as exc:
+        if _is_operational_error(exc):
+            return _emit_operational(exc, fmt)
+        raise
+
+    snapshot = GovernanceSnapshot.from_model(model)
+    violations = evaluate_policies(model, policy_set)
+    report = build_policy_report(
+        violations=violations,
+        policy_identity=policy_identity(policy_set.to_identity_dict()),
+        snapshot_identity=snapshot.content_identity(),
+    )
+    if not report["ok"]:
+        if fmt == "json":
+            _print_json(report)
+        else:
+            sys.stdout.write(format_policy_report_human(report))
+        return 3
+
+    if not canonical.targets:
+        return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
+
+    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    if isinstance(mode, int):
+        return mode
+    try:
+        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+    except CliOperationalError as exc:
+        return _emit_operational_message(str(exc), fmt)
+
+    try:
+        build_target_context_projection(settings)
+    except ValueError as exc:
+        return _emit_runtime_invalid(exc, fmt, canonical=canonical)
+
+    try:
+        desired = map_to_desired_state(model, mapping_config)
+        adapter = build_collibra_adapter(settings, mapping_config)
+        remote = adapter.read_remote_state(desired)
+        sync_plan = build_sync_plan(desired, remote)
+        remote_identity = compute_remote_state_identity_value(remote)
+    except Exception as exc:
+        if _is_operational_error(exc):
+            return _emit_operational(exc, fmt)
+        raise
+
+    saved = build_saved_plan(
+        settings=settings,
+        sync_plan=sync_plan,
+        config_identity=config_identity(canonical.identity_projection()),
+        snapshot=snapshot,
+        policy_set=policy_set,
+        mapping_config=mapping_config,
+        remote_state_identity_value=remote_identity,
+    )
+    written = write_saved_plan(saved, args.output)
+    if fmt == "json":
+        _print_json(saved.to_dict())
+    else:
+        sys.stdout.write(
+            _format_plan_generate_human(
+                saved,
+                path=written,
+                warning_count=sum(1 for item in violations if item.severity == "warning"),
+            )
+        )
+    return 0
+
+
 
 def _load_canonical_and_settings(
     *,
@@ -485,6 +647,27 @@ def _emit_resolution_error(
     return 4
 
 
+def _emit_runtime_invalid(
+    exc: BaseException,
+    fmt: OutputFormat,
+    *,
+    canonical: CanonicalConfig | None,
+) -> int:
+    path = ""
+    if canonical is not None and canonical.targets:
+        auth = canonical.targets[0].config.auth
+        if auth is not None and auth.base_url_env is not None:
+            path = "/targets/0/config/auth/base_url_env"
+    message = _safe_error_message(exc)
+    payload = runtime_invalid_diagnostic(path=path, message=message)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        print(f"error: {message}", file=sys.stderr)
+        if path:
+            print(f"  path={path}", file=sys.stderr)
+    return 4
+
 
 def _emit_policy_error(exc: PolicyError, fmt: OutputFormat) -> int:
     payload = policy_diagnostics_failure(exc.errors)
@@ -500,6 +683,19 @@ def _emit_policy_error(exc: PolicyError, fmt: OutputFormat) -> int:
             )
     return 4
 
+
+def _emit_plan_error(exc: PlanError, fmt: OutputFormat) -> int:
+    payload = plan_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        print("ok=false", file=sys.stderr)
+        for item in exc.errors:
+            print(
+                f"error path={item.path or '/'} code={item.code} message={item.message}",
+                file=sys.stderr,
+            )
+    return 4
 
 
 def _emit_operational(exc: BaseException, fmt: OutputFormat) -> int:
@@ -523,6 +719,21 @@ def _resolve_mode(settings: Settings, cli_mode: str | None) -> Mode:
         raise CliOperationalError("collibra_mode must be 'mock' or 'live'")
     return mode  # type: ignore[return-value]
 
+
+def _effective_mode_or_invalid(
+    settings: Settings,
+    *,
+    fmt: OutputFormat,
+    canonical: CanonicalConfig,
+) -> Mode | int:
+    mode = settings.collibra_mode.strip().lower()
+    if mode not in {"mock", "live"}:
+        return _emit_runtime_invalid(
+            ValueError("collibra_mode must be 'mock' or 'live'"),
+            fmt,
+            canonical=canonical,
+        )
+    return mode  # type: ignore[return-value]
 
 
 def _validate_sync_flags(*, mode: Mode, apply: bool, confirm_live: bool) -> None:
@@ -663,6 +874,23 @@ def _resolve_mapping_config(
     return config
 
 
+def _resolve_mapping_config_from_canonical(
+    mode: Mode,
+    canonical: CanonicalConfig,
+) -> CollibraMappingConfig:
+    if mode == "mock":
+        return mock_mapping_config()
+    mapped = resolve_mapping_path(canonical)
+    if mapped is None:
+        raise CliOperationalError(_SAFE_MAPPING_REQUIRED_GAC)
+    try:
+        config = load_mapping_config_file(str(mapped))
+    except CollibraMappingError as exc:
+        raise CliOperationalError(_SAFE_MAPPING) from exc
+    if mapping_contains_example_placeholders(config):
+        raise CliOperationalError(_SAFE_PLACEHOLDER)
+    return config
+
 
 def _scan_model(settings: Settings) -> GovernanceModel:
     return PostgresMetadataScanner(settings).scan()
@@ -733,6 +961,57 @@ def _action_dict(action: SyncAction) -> dict[str, Any]:
     return payload
 
 
+def _format_plan_generate_human(
+    plan: SavedGovernancePlan,
+    *,
+    path: Path,
+    warning_count: int,
+) -> str:
+    sync = plan.sync_plan
+    lines = [
+        f"plan_written={path}",
+        f"create={len(sync.creates)}",
+        f"update={len(sync.updates)}",
+        f"unchanged={len(sync.unchanged)}",
+        f"remote_only={len(sync.remote_only)}",
+        f"warnings={warning_count}",
+        f"config_identity={plan.config_identity.digest}",
+        f"snapshot_identity={plan.snapshot_identity.digest}",
+        f"policy_identity={plan.policy_identity.digest}",
+        f"mapping_identity={plan.mapping_identity.digest}",
+        f"target_context_identity={plan.target_context_identity.digest}",
+        f"remote_state_identity={plan.remote_state_identity.digest}",
+        f"content_identity={plan.content_identity().digest}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _format_plan_inspect_human(plan: SavedGovernancePlan) -> str:
+    sync = plan.sync_plan
+    lines = [
+        f"plan_schema={plan.plan_schema}",
+        f"plan_version={plan.plan_version}",
+        f"planner_contract_version={plan.planner_contract_version}",
+        f"scanner_contract_version={plan.scanner_contract_version}",
+        f"target_context provider={plan.target_context.get('provider')} "
+        f"mode={plan.target_context.get('mode')}",
+        f"create={len(sync.creates)}",
+        f"update={len(sync.updates)}",
+        f"unchanged={len(sync.unchanged)}",
+        f"remote_only={len(sync.remote_only)}",
+        f"config_identity={plan.config_identity.digest}",
+        f"snapshot_identity={plan.snapshot_identity.digest}",
+        f"policy_identity={plan.policy_identity.digest}",
+        f"mapping_identity={plan.mapping_identity.digest}",
+        f"target_context_identity={plan.target_context_identity.digest}",
+        f"remote_state_identity={plan.remote_state_identity.digest}",
+        f"content_identity={plan.content_identity().digest}",
+    ]
+    for action in sync.actions:
+        if action.action_type is SyncActionType.UNCHANGED:
+            continue
+        lines.append(_format_action_line(action))
+    return "\n".join(lines) + "\n"
 
 
 def _print_scan_human(summary: dict[str, Any]) -> None:

@@ -5,8 +5,11 @@ from governance.identity.hashing import (
     ContentIdentity,
     config_identity,
     mapping_identity,
+    plan_identity,
     policy_identity,
+    remote_state_identity,
     snapshot_identity,
+    target_context_identity,
 )
 
 __all__ = [
@@ -14,6 +17,9 @@ __all__ = [
     "ContentIdentity",
     "config_identity",
     "mapping_identity",
+    "plan_identity",
     "policy_identity",
+    "remote_state_identity",
     "snapshot_identity",
+    "target_context_identity",
 ]

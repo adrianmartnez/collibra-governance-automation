@@ -32,6 +32,15 @@ class CollibraAttributeSpec:
             "value": self.value,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> CollibraAttributeSpec:
+        if not isinstance(payload, dict):
+            raise ValueError("attribute payload must be a mapping")
+        return cls(
+            attribute_type_ref=str(payload["attribute_type_ref"]),
+            value=str(payload["value"]),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CollibraAssetSpec:
@@ -72,6 +81,24 @@ class CollibraAssetSpec:
             "name": self.name,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> CollibraAssetSpec:
+        if not isinstance(payload, dict):
+            raise ValueError("desired_asset payload must be a mapping")
+        attributes_raw = payload.get("attributes") or []
+        if not isinstance(attributes_raw, list):
+            raise ValueError("attributes must be an array")
+        attributes = tuple(CollibraAttributeSpec.from_dict(item) for item in attributes_raw)
+        display_name = payload.get("display_name")
+        return cls(
+            local_id=str(payload["local_id"]),
+            name=str(payload["name"]),
+            asset_type_ref=str(payload["asset_type_ref"]),
+            domain_ref=str(payload["domain_ref"]),
+            display_name=None if display_name is None else str(display_name),
+            attributes=attributes,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class CollibraRelationshipSpec:
@@ -95,6 +122,17 @@ class CollibraRelationshipSpec:
             "source_local_id": self.source_local_id,
             "target_local_id": self.target_local_id,
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> CollibraRelationshipSpec:
+        if not isinstance(payload, dict):
+            raise ValueError("desired_relationship payload must be a mapping")
+        return cls(
+            local_key=str(payload["local_key"]),
+            source_local_id=str(payload["source_local_id"]),
+            target_local_id=str(payload["target_local_id"]),
+            relation_type_ref=str(payload["relation_type_ref"]),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,6 +386,47 @@ class SyncAction:
             "remote_id": self.remote_id,
         }
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SyncAction:
+        if not isinstance(payload, dict):
+            raise ValueError("action payload must be a mapping")
+        action_type_raw = payload.get("action_type")
+        if action_type_raw == "delete":
+            raise ValueError("DELETE actions are unsupported")
+        try:
+            action_type = SyncActionType(str(action_type_raw))
+        except ValueError as exc:
+            raise ValueError(f"unsupported action_type: {action_type_raw}") from exc
+        try:
+            object_kind = SyncObjectKind(str(payload.get("object_kind")))
+        except ValueError as exc:
+            raise ValueError(f"unsupported object_kind: {payload.get('object_kind')}") from exc
+
+        desired_asset_raw = payload.get("desired_asset")
+        desired_relationship_raw = payload.get("desired_relationship")
+        changed_fields_raw = payload.get("changed_fields") or []
+        if not isinstance(changed_fields_raw, list):
+            raise ValueError("changed_fields must be an array")
+
+        return cls(
+            action_type=action_type,
+            object_kind=object_kind,
+            local_id=None if payload.get("local_id") is None else str(payload["local_id"]),
+            remote_id=(None if payload.get("remote_id") is None else str(payload["remote_id"])),
+            reason="" if payload.get("reason") is None else str(payload["reason"]),
+            desired_asset=(
+                None
+                if desired_asset_raw is None
+                else CollibraAssetSpec.from_dict(desired_asset_raw)
+            ),
+            desired_relationship=(
+                None
+                if desired_relationship_raw is None
+                else CollibraRelationshipSpec.from_dict(desired_relationship_raw)
+            ),
+            changed_fields=tuple(str(item) for item in changed_fields_raw),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class SyncPlan:
@@ -399,6 +478,15 @@ class SyncPlan:
             )
             + "\n"
         )
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> SyncPlan:
+        if not isinstance(payload, dict):
+            raise ValueError("plan payload must be a mapping")
+        actions_raw = payload.get("actions")
+        if not isinstance(actions_raw, list):
+            raise ValueError("actions must be an array")
+        return cls(actions=tuple(SyncAction.from_dict(item) for item in actions_raw))
 
 
 @dataclass(frozen=True, slots=True)

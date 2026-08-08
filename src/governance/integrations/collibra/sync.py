@@ -15,6 +15,9 @@ from governance.integrations.collibra.models import (
     SyncResult,
 )
 
+# Compatibility boundary for saved-plan planning/mapping/execution semantics.
+PLANNER_CONTRACT_VERSION = "1"
+
 _ASSET_CREATE_ORDER = ("db:", "sch:", "tbl:", "col:")
 
 
