@@ -1,0 +1,4 @@
+# Keep vendored ODCS schema bytes identical to upstream (LF).
+src/governance/integrations/odcs/schemas/odcs-json-schema-v3.1.0.json text eol=lf
+src/governance/integrations/odcs/schemas/LICENSE-Apache-2.0.txt text eol=lf
+src/governance/integrations/odcs/schemas/ODCS-SCHEMA-NOTICE.txt text eol=lf
