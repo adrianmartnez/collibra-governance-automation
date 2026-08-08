@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "collibra-governance-automation"
-version = "1.0.0"
+version = "1.1.0"
 description = "Technical metadata governance tooling with Python and PostgreSQL, using a vendor-neutral model and explicit boundaries for Collibra integration."
 readme = "README.md"
 license = "MIT"
