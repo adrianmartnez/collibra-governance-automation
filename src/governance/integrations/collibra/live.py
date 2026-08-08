@@ -22,11 +22,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
-from urllib.parse import urlparse
 
 import httpx
 
 from governance.integrations.collibra.adapters import CollibraAdapterError
+from governance.integrations.collibra.endpoint import normalize_base_url
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
     CollibraAssetSpec,
@@ -60,7 +60,7 @@ class LiveCollibraAdapter:
         page_size: int = DEFAULT_PAGE_SIZE,
     ) -> None:
         self._config = mapping_config
-        self._base_url = _normalize_base_url(base_url)
+        self._base_url = normalize_base_url(base_url)
         self._timeout_seconds = timeout_seconds
         self._page_size = page_size
         self._username = username
@@ -447,17 +447,6 @@ def _with_pagination(params: QueryParams, *, offset: int, limit: int) -> QueryPa
     if isinstance(params, Mapping):
         return {**params, "offset": offset, "limit": limit}
     return [*params, ("offset", offset), ("limit", limit)]
-
-
-def _normalize_base_url(base_url: str) -> str:
-    if not isinstance(base_url, str) or not base_url.strip():
-        raise ValueError("collibra_base_url is required for live mode")
-    parsed = urlparse(base_url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("collibra_base_url must be an absolute http(s) URL")
-    if parsed.username or parsed.password:
-        raise ValueError("collibra_base_url must not embed credentials")
-    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _resolve_auth_mode(

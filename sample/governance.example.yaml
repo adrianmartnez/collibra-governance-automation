@@ -36,7 +36,8 @@ artifacts:
   snapshot_path: artifacts/governance-snapshot.json
 
 policies:
-  files: []
+  files:
+    - policies/tables-require-description.warning.yaml
 
 profiles:
   ci:

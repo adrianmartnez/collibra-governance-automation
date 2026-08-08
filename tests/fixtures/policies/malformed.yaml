@@ -1,0 +1,11 @@
+policy_schema: governance-policy
+policy_version: "1"
+
+policies:
+  - id: broken
+    severity: error
+    rule:
+      type: require_owner
+      select:
+        kind: table
+    this is not: valid: yaml: [

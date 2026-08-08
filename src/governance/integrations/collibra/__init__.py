@@ -5,6 +5,7 @@ from governance.integrations.collibra.adapters import (
     CollibraAdapterError,
     build_collibra_adapter,
 )
+from governance.integrations.collibra.endpoint import normalize_base_url
 from governance.integrations.collibra.live import LiveCollibraAdapter
 from governance.integrations.collibra.mapping import (
     CollibraMappingConfig,
@@ -30,7 +31,11 @@ from governance.integrations.collibra.models import (
     SyncPlan,
     SyncResult,
 )
-from governance.integrations.collibra.sync import build_sync_plan, execute_sync_plan
+from governance.integrations.collibra.sync import (
+    PLANNER_CONTRACT_VERSION,
+    build_sync_plan,
+    execute_sync_plan,
+)
 
 __all__ = [
     "CollibraAdapter",
@@ -47,6 +52,7 @@ __all__ = [
     "CollibraRemoteState",
     "LiveCollibraAdapter",
     "MockCollibraAdapter",
+    "PLANNER_CONTRACT_VERSION",
     "SyncAction",
     "SyncActionType",
     "SyncObjectKind",
@@ -60,4 +66,5 @@ __all__ = [
     "mapping_contains_example_placeholders",
     "mock_mapping_config",
     "mock_remote_id",
+    "normalize_base_url",
 ]

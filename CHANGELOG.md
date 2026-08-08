@@ -8,6 +8,10 @@
 - Canonical `GovernanceSnapshot` artifact (`export --artifact snapshot`) distinct from the v1.0 metadata inventory
 - Versioned content identities (`config_identity`, `snapshot_identity`, `mapping_identity`) using SHA-256 with domain separation
 - Sample config at `sample/governance.example.yaml` (secrets remain environment references only)
+- Native deterministic policy evaluation (`governance check`) with packaged policy schema, `policy_identity`, and machine-readable policy reports
+- Saved governance plan artifacts (`.gplan`) via `governance plan` / `governance plan inspect` / `governance apply`
+- Stale-plan protection with material input identities including `target_context_identity` and `remote_state_identity`
+- Additive exit codes for new GaC commands: policy failure (`3`), config/resolution/artifact validation (`4`), stale plan (`5`)
 
 ## 1.0.0
 

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-plan:1",
+  "title": "Saved governance plan v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_schema",
+    "plan_version",
+    "planner_contract_version",
+    "scanner_contract_version",
+    "config_identity",
+    "snapshot_identity",
+    "policy_identity",
+    "mapping_identity",
+    "target_context",
+    "target_context_identity",
+    "remote_state_identity",
+    "actions",
+    "content_identity"
+  ],
+  "properties": {
+    "plan_schema": { "type": "string", "const": "governance-plan" },
+    "plan_version": { "type": "string", "const": "1" },
+    "planner_contract_version": { "type": "string", "minLength": 1 },
+    "scanner_contract_version": { "type": "string", "minLength": 1 },
+    "config_identity": { "$ref": "#/$defs/contentIdentity" },
+    "snapshot_identity": { "$ref": "#/$defs/contentIdentity" },
+    "policy_identity": { "$ref": "#/$defs/contentIdentity" },
+    "mapping_identity": { "$ref": "#/$defs/contentIdentity" },
+    "target_context": { "$ref": "#/$defs/targetContext" },
+    "target_context_identity": { "$ref": "#/$defs/contentIdentity" },
+    "remote_state_identity": { "$ref": "#/$defs/contentIdentity" },
+    "actions": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "targetContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "mode"],
+      "properties": {
+        "provider": { "type": "string", "const": "collibra" },
+        "mode": { "type": "string", "enum": ["mock", "live"] }
+      }
+    }
+  }
+}
