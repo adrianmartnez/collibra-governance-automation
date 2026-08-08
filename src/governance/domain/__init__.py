@@ -1,5 +1,21 @@
 """Vendor-neutral governance domain model."""
 
+from governance.domain.graph import (
+    EDGE_KIND_CONTAINS,
+    EDGE_KIND_DEPENDS_ON,
+    EDGE_KIND_GOVERNS,
+    NODE_KIND_COLUMN,
+    NODE_KIND_CONTRACT,
+    NODE_KIND_DATA_SOURCE,
+    NODE_KIND_DATASET,
+    NODE_KIND_TABLE,
+    NODE_KIND_TRANSFORMATION,
+    GovernanceGraph,
+    GraphEdge,
+    GraphNode,
+    GraphNodeIdentity,
+    ProvenanceRecord,
+)
 from governance.domain.models import (
     Column,
     Database,
@@ -22,13 +38,27 @@ from governance.domain.models import (
 )
 
 __all__ = [
+    "EDGE_KIND_CONTAINS",
+    "EDGE_KIND_DEPENDS_ON",
+    "EDGE_KIND_GOVERNS",
+    "NODE_KIND_COLUMN",
+    "NODE_KIND_CONTRACT",
+    "NODE_KIND_DATA_SOURCE",
+    "NODE_KIND_DATASET",
+    "NODE_KIND_TABLE",
+    "NODE_KIND_TRANSFORMATION",
     "Column",
     "Database",
     "DataSource",
     "ForeignKey",
+    "GovernanceGraph",
     "GovernanceModel",
+    "GraphEdge",
+    "GraphNode",
+    "GraphNodeIdentity",
     "Ownership",
     "PrimaryKey",
+    "ProvenanceRecord",
     "Relationship",
     "Schema",
     "Table",
