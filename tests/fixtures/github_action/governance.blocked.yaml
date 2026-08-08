@@ -28,4 +28,4 @@ artifacts:
 
 policies:
   files:
-    - policies/tables-require-owner.yaml
+    - policies/data-source-require-description.yaml

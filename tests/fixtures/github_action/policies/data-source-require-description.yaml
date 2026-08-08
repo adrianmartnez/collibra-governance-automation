@@ -1,0 +1,11 @@
+policy_schema: governance-policy
+policy_version: "1"
+
+policies:
+  - id: data-source-require-description
+    severity: error
+    description: The data source must have a description.
+    rule:
+      type: require_description
+      select:
+        kind: data_source
