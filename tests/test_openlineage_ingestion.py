@@ -686,37 +686,6 @@ def test_duplicate_sibling_field_name_rejected() -> None:
     assert "duplicate" in exc.value.errors[0].message
 
 
-def test_column_lineage_does_not_create_edges() -> None:
-    facets = {
-        "columnLineage": {
-            **_facet_base(),
-            "fields": {
-                "out_col": {
-                    "inputFields": [
-                        {
-                            "namespace": "n",
-                            "name": "in",
-                            "field": "in_col",
-                        }
-                    ]
-                }
-            },
-        }
-    }
-    inputs = [_dataset(name="in")]
-    outputs = [_dataset(name="out", facets=facets)]
-    graph = map_openlineage_events(
-        [_run_event(inputs=inputs, outputs=outputs)],
-        namespace=NS,
-    )
-    assert len(_edges_by_kind(graph, EDGE_KIND_DEPENDS_ON)) == 1
-    assert all(
-        edge.source.kind != NODE_KIND_COLUMN and edge.target.kind != NODE_KIND_COLUMN
-        for edge in graph.edges
-        if edge.kind == EDGE_KIND_DEPENDS_ON
-    )
-
-
 # --- H: datasetType / storage / ownership ---
 
 
@@ -1259,3 +1228,805 @@ def test_load_graph_end_to_end(tmp_path: Path) -> None:
     )
     graph = load_openlineage_graph(path, namespace=NS)
     assert len(_edges_by_kind(graph, EDGE_KIND_DEPENDS_ON)) == 1
+
+
+# --- Q: columnLineage facet 1-2-0 ---
+
+COLUMN_LINEAGE_URL = "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json"
+OL_NS = "postgres://host"
+
+
+def _column_lineage_facet(
+    fields: dict[str, Any],
+    *,
+    producer: str = PRODUCER,
+    schema_url: str = COLUMN_LINEAGE_URL,
+    dataset: list[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    facet: dict[str, Any] = {
+        "_producer": producer,
+        "_schemaURL": schema_url,
+        "fields": fields,
+    }
+    if dataset is not None:
+        facet["dataset"] = dataset
+    if extra:
+        facet.update(extra)
+    return facet
+
+
+def _input_field(
+    namespace: str,
+    name: str,
+    field: str,
+    *,
+    transformations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {"namespace": namespace, "name": name, "field": field}
+    if transformations is not None:
+        item["transformations"] = transformations
+    return item
+
+
+def _column_deps(graph: Any) -> list[Any]:
+    return [
+        edge
+        for edge in _edges_by_kind(graph, EDGE_KIND_DEPENDS_ON)
+        if edge.source.kind == NODE_KIND_COLUMN and edge.target.kind == NODE_KIND_COLUMN
+    ]
+
+
+def test_column_lineage_exact_120_accepted() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field(OL_NS, "in", "a")]}}
+        )
+    }
+    validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+
+
+@pytest.mark.parametrize(
+    "schema_url",
+    [
+        "https://openlineage.io/spec/facets/1-1-0/ColumnLineageDatasetFacet.json",
+        "https://openlineage.io/spec/facets/1-3-0/ColumnLineageDatasetFacet.json",
+        "https://openlineage.io/spec/facets/ColumnLineageDatasetFacet.json",
+        "https://raw.githubusercontent.com/OpenLineage/OpenLineage/main/spec/facets/ColumnLineageDatasetFacet.json",
+        "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+    ],
+)
+def test_column_lineage_wrong_schema_url_rejected(schema_url: str) -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field(OL_NS, "in", "a")]}},
+            schema_url=schema_url,
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].code == CODE_VALIDATION
+    assert exc.value.errors[0].path.endswith("/_schemaURL")
+    assert "unsupported columnLineage facet schemaURL" in exc.value.errors[0].message
+
+
+def test_column_lineage_missing_fields_rejected() -> None:
+    facets = {"columnLineage": {"_producer": PRODUCER, "_schemaURL": COLUMN_LINEAGE_URL}}
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].path.endswith("/fields")
+
+
+def test_column_lineage_fields_wrong_type_rejected() -> None:
+    facets = {
+        "columnLineage": {
+            "_producer": PRODUCER,
+            "_schemaURL": COLUMN_LINEAGE_URL,
+            "fields": [],
+        }
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert "mapping" in exc.value.errors[0].message
+
+
+def test_column_lineage_missing_input_fields_rejected() -> None:
+    facets = {"columnLineage": _column_lineage_facet({"c": {}})}
+    # rebuild without inputFields
+    facets["columnLineage"]["fields"] = {"c": {}}
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].path.endswith("/inputFields")
+
+
+def test_column_lineage_empty_namespace_name_field_rejected() -> None:
+    for bad in (
+        _input_field("  ", "in", "a"),
+        _input_field(OL_NS, "", "a"),
+        _input_field(OL_NS, "in", "   "),
+    ):
+        facets = {"columnLineage": _column_lineage_facet({"c": {"inputFields": [bad]}})}
+        with pytest.raises(OpenLineageValidationError):
+            validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+
+
+def test_column_lineage_transformation_type_required() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field(
+                            OL_NS,
+                            "in",
+                            "a",
+                            transformations=[{"subtype": "IDENTITY"}],
+                        )
+                    ]
+                }
+            }
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].path.endswith("/type")
+
+
+def test_column_lineage_transformation_optional_types() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field(
+                            OL_NS,
+                            "in",
+                            "a",
+                            transformations=[
+                                {
+                                    "type": "DIRECT",
+                                    "subtype": "IDENTITY",
+                                    "description": "copy",
+                                    "masking": False,
+                                }
+                            ],
+                        )
+                    ]
+                }
+            }
+        )
+    }
+    validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+
+
+def test_column_lineage_transformation_subtype_null_rejected() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field(
+                            OL_NS,
+                            "in",
+                            "a",
+                            transformations=[{"type": "DIRECT", "subtype": None}],
+                        )
+                    ]
+                }
+            }
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].path.endswith("/subtype")
+
+
+def test_column_lineage_masking_non_bool_rejected() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field(
+                            OL_NS,
+                            "in",
+                            "a",
+                            transformations=[{"type": "DIRECT", "masking": "yes"}],
+                        )
+                    ]
+                }
+            }
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].path.endswith("/masking")
+
+
+def test_column_lineage_legacy_fields_non_string_rejected() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [_input_field(OL_NS, "in", "a")],
+                    "transformationDescription": 1,
+                }
+            }
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert exc.value.errors[0].path.endswith("/transformationDescription")
+
+
+def test_column_lineage_dataset_optional_valid_and_wrong_shape() -> None:
+    ok = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field(OL_NS, "in", "a")]}},
+            dataset=[_input_field(OL_NS, "in", "filter_col")],
+        )
+    }
+    validate_openlineage_events([_dataset_event(dataset=_dataset(facets=ok))])
+    bad = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field(OL_NS, "in", "a")]}},
+            dataset=[{"namespace": OL_NS, "name": "in"}],
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=bad))])
+    assert "field" in exc.value.errors[0].path
+
+
+def test_column_lineage_deleted_true_rejected() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field(OL_NS, "in", "a")]}},
+            extra={"_deleted": True},
+        )
+    }
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert "temporal authority" in exc.value.errors[0].message
+
+
+def test_column_lineage_pointer_escapes_tilde_and_slash() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"a~/b": {"inputFields": [_input_field(OL_NS, "in", "x")]}}
+        )
+    }
+    # Force invalid inputFields type to surface the field pointer.
+    facets["columnLineage"]["fields"]["a~/b"] = {"inputFields": "bad"}
+    with pytest.raises(OpenLineageValidationError) as exc:
+        validate_openlineage_events([_dataset_event(dataset=_dataset(facets=facets))])
+    assert "/fields/a~0~1b/inputFields" in exc.value.errors[0].path
+
+
+def test_column_lineage_physical_simple_mapping() -> None:
+    in_facets = {"hierarchy": _physical_hierarchy_facet("analytics", "raw", "customers")}
+    out_facets = {
+        "hierarchy": _physical_hierarchy_facet("analytics", "marts", "orders"),
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field(OL_NS, "in_tbl", "a")]}},
+        ),
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace=OL_NS, name="in_tbl", facets=in_facets)],
+                outputs=[_dataset(namespace=OL_NS, name="out_tbl", facets=out_facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    col_deps = _column_deps(graph)
+    assert len(col_deps) == 1
+    assert col_deps[0].source.logical_id == "c"
+    assert col_deps[0].target.logical_id == "a"
+    assert col_deps[0].source.parent is not None
+    assert col_deps[0].source.parent.logical_id == "orders"
+    assert col_deps[0].target.parent is not None
+    assert col_deps[0].target.parent.logical_id == "customers"
+
+
+def test_column_lineage_generic_target_and_source() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"out_col": {"inputFields": [_input_field("n", "in", "in_col")]}}
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    col_deps = _column_deps(graph)
+    assert len(col_deps) == 1
+    out_parent = col_deps[0].source.parent
+    in_parent = col_deps[0].target.parent
+    assert out_parent is not None and out_parent.kind == NODE_KIND_DATASET
+    assert in_parent is not None and in_parent.kind == NODE_KIND_DATASET
+    assert out_parent.logical_id == canonical_json_bytes(["n", "out"]).decode("utf-8")
+    assert in_parent.logical_id == canonical_json_bytes(["n", "in"]).decode("utf-8")
+
+
+def test_column_lineage_reference_only_input_dataset_creates_minimal_nodes() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "only_ref", "a")]}}
+        )
+    }
+    graph = map_openlineage_events(
+        [_dataset_event(dataset=_dataset(namespace="n", name="out", facets=facets))],
+        namespace=NS,
+    )
+    datasets = {node.identity.logical_id: node for node in _nodes_by_kind(graph, NODE_KIND_DATASET)}
+    ref_id = canonical_json_bytes(["n", "only_ref"]).decode("utf-8")
+    assert ref_id in datasets
+    assert any(prov.provider_type == "openlineage" for prov in datasets[ref_id].provenance)
+    col_deps = _column_deps(graph)
+    assert len(col_deps) == 1
+    assert col_deps[0].target.logical_id == "a"
+
+
+def test_column_lineage_event_ordering_invariant() -> None:
+    lineage = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+        )
+    }
+    hierarchy = {"hierarchy": _physical_hierarchy_facet("db", "sch", "tbl")}
+    early_ref = _dataset_event(dataset=_dataset(namespace="n", name="out", facets=lineage))
+    later_physical = _dataset_event(dataset=_dataset(namespace="n", name="in", facets=hierarchy))
+    g1 = map_openlineage_events([early_ref, later_physical], namespace=NS)
+    g2 = map_openlineage_events([later_physical, early_ref], namespace=NS)
+    assert g1.content_identity() == g2.content_identity()
+    assert _column_deps(g1)[0].target.parent is not None
+    assert _column_deps(g1)[0].target.parent.kind == NODE_KIND_TABLE
+
+
+def test_column_lineage_field_absent_from_schema_creates_minimal_column() -> None:
+    facets = {
+        "schema": {
+            **_facet_base(
+                schema_url="https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json"
+            ),
+            "fields": [{"name": "other"}],
+        },
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+        ),
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    columns = {node.identity.logical_id: node for node in _nodes_by_kind(graph, NODE_KIND_COLUMN)}
+    assert "c" in columns
+    assert columns["c"].description is None
+    assert columns["c"].to_dict()["attributes"] == {}
+
+
+def test_column_lineage_field_present_in_schema_preserves_material_and_unions_provenance() -> None:
+    schema_producer = "https://schema.producer/1"
+    lineage_producer = "https://lineage.producer/1"
+    facets = {
+        "schema": {
+            "_producer": schema_producer,
+            "_schemaURL": "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json",
+            "fields": [{"name": "c", "type": "string", "description": "out col"}],
+        },
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}},
+            producer=lineage_producer,
+        ),
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    columns = [
+        node for node in _nodes_by_kind(graph, NODE_KIND_COLUMN) if node.identity.logical_id == "c"
+    ]
+    assert len(columns) == 1
+    column = columns[0]
+    assert column.description == "out col"
+    assert column.to_dict()["attributes"]["data_type"] == "string"
+    producers = {prov.source_ref for prov in column.provenance}
+    assert any(schema_producer in ref for ref in producers)
+    assert any(lineage_producer in ref for ref in producers)
+
+
+def test_column_lineage_duplicate_input_fields_single_edge() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field("n", "in", "a"),
+                        _input_field("n", "in", "a"),
+                    ]
+                }
+            }
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    assert len(_column_deps(graph)) == 1
+
+
+def test_column_lineage_multiple_producers_union_provenance() -> None:
+    f1 = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}},
+            producer="https://producer/a",
+        )
+    }
+    f2 = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}},
+            producer="https://producer/b",
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _dataset_event(dataset=_dataset(namespace="n", name="out", facets=f1)),
+            _dataset_event(dataset=_dataset(namespace="n", name="out", facets=f2)),
+            _dataset_event(dataset=_dataset(namespace="n", name="in")),
+        ],
+        namespace=NS,
+    )
+    deps = _column_deps(graph)
+    assert len(deps) == 1
+    assert len(deps[0].provenance) == 2
+
+
+def test_column_lineage_disagreement_retains_multiple_edges() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field("n", "in", "a"),
+                        _input_field("n", "in", "b"),
+                    ]
+                }
+            }
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    deps = _column_deps(graph)
+    assert {(d.source.logical_id, d.target.logical_id) for d in deps} == {("c", "a"), ("c", "b")}
+
+
+def test_column_lineage_one_to_many_and_many_to_one() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {
+                "c": {
+                    "inputFields": [
+                        _input_field("n", "in", "a"),
+                        _input_field("n", "in", "b"),
+                    ]
+                },
+                "d": {"inputFields": [_input_field("n", "in", "a")]},
+            }
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    pairs = {(d.source.logical_id, d.target.logical_id) for d in _column_deps(graph)}
+    assert pairs == {("c", "a"), ("c", "b"), ("d", "a")}
+
+
+def test_column_lineage_transformations_do_not_affect_hash() -> None:
+    base_fields = {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+    with_transform = {
+        "c": {
+            "inputFields": [
+                _input_field(
+                    "n",
+                    "in",
+                    "a",
+                    transformations=[{"type": "DIRECT", "description": "changed"}],
+                )
+            ]
+        }
+    }
+    g1 = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[
+                    _dataset(
+                        namespace="n",
+                        name="out",
+                        facets={"columnLineage": _column_lineage_facet(base_fields)},
+                    )
+                ],
+            )
+        ],
+        namespace=NS,
+    )
+    g2 = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[
+                    _dataset(
+                        namespace="n",
+                        name="out",
+                        facets={"columnLineage": _column_lineage_facet(with_transform)},
+                    )
+                ],
+            )
+        ],
+        namespace=NS,
+    )
+    assert g1.content_identity() == g2.content_identity()
+
+
+def test_column_lineage_legacy_transformation_metadata_hash_invariant() -> None:
+    base = {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+    legacy = {
+        "c": {
+            "inputFields": [_input_field("n", "in", "a")],
+            "transformationDescription": "x",
+            "transformationType": "IDENTITY",
+        }
+    }
+    g1 = map_openlineage_events(
+        [
+            _dataset_event(
+                dataset=_dataset(
+                    namespace="n", name="out", facets={"columnLineage": _column_lineage_facet(base)}
+                )
+            )
+        ],
+        namespace=NS,
+    )
+    g2 = map_openlineage_events(
+        [
+            _dataset_event(
+                dataset=_dataset(
+                    namespace="n",
+                    name="out",
+                    facets={"columnLineage": _column_lineage_facet(legacy)},
+                )
+            )
+        ],
+        namespace=NS,
+    )
+    assert g1.content_identity() == g2.content_identity()
+
+
+def test_column_lineage_dataset_influences_hash_invariant() -> None:
+    fields = {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+    g1 = map_openlineage_events(
+        [
+            _dataset_event(
+                dataset=_dataset(
+                    namespace="n",
+                    name="out",
+                    facets={"columnLineage": _column_lineage_facet(fields)},
+                )
+            )
+        ],
+        namespace=NS,
+    )
+    g2 = map_openlineage_events(
+        [
+            _dataset_event(
+                dataset=_dataset(
+                    namespace="n",
+                    name="out",
+                    facets={
+                        "columnLineage": _column_lineage_facet(
+                            fields,
+                            dataset=[_input_field("n", "in", "filter_col")],
+                        )
+                    },
+                )
+            )
+        ],
+        namespace=NS,
+    )
+    assert g1.content_identity() == g2.content_identity()
+    assert len(_column_deps(g2)) == 1
+
+
+def test_column_lineage_run_metadata_hash_invariant() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+        )
+    }
+    inputs = [_dataset(namespace="n", name="in")]
+    outputs = [_dataset(namespace="n", name="out", facets=facets)]
+    g1 = map_openlineage_events(
+        [_run_event(eventType="START", inputs=inputs, outputs=outputs)],
+        namespace=NS,
+    )
+    g2 = map_openlineage_events(
+        [
+            _run_event(
+                eventType="COMPLETE",
+                eventTime="2025-01-01T00:00:00Z",
+                run={"runId": "22222222-2222-2222-2222-222222222222"},
+                inputs=inputs,
+                outputs=outputs,
+            )
+        ],
+        namespace=NS,
+    )
+    assert g1.content_identity() == g2.content_identity()
+
+
+def test_column_lineage_coexists_with_table_lineage() -> None:
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "in", "a")]}}
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    deps = _edges_by_kind(graph, EDGE_KIND_DEPENDS_ON)
+    table_deps = [
+        e for e in deps if e.source.kind != NODE_KIND_COLUMN and e.target.kind != NODE_KIND_COLUMN
+    ]
+    assert len(table_deps) == 1
+    assert len(_column_deps(graph)) == 1
+
+
+def test_column_lineage_no_transitive_edges() -> None:
+    # out.c <- mid.b and mid.b <- in.a should not invent out.c <- in.a
+    mid_facets = {
+        "columnLineage": _column_lineage_facet(
+            {"b": {"inputFields": [_input_field("n", "in", "a")]}}
+        )
+    }
+    out_facets = {
+        "columnLineage": _column_lineage_facet(
+            {"c": {"inputFields": [_input_field("n", "mid", "b")]}}
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="in")],
+                outputs=[_dataset(namespace="n", name="mid", facets=mid_facets)],
+            ),
+            _run_event(
+                run={"runId": "33333333-3333-3333-3333-333333333333"},
+                inputs=[_dataset(namespace="n", name="mid")],
+                outputs=[_dataset(namespace="n", name="out", facets=out_facets)],
+            ),
+        ],
+        namespace=NS,
+    )
+    pairs = {(d.source.logical_id, d.target.logical_id) for d in _column_deps(graph)}
+    assert pairs == {("b", "a"), ("c", "b")}
+    assert ("c", "a") not in pairs
+
+
+def test_column_lineage_opaque_field_and_dataset_names() -> None:
+    dotted = "schema.table.col"
+    facets = {
+        "columnLineage": _column_lineage_facet(
+            {dotted: {"inputFields": [_input_field("n", "db.schema.table", "a.b")]}}
+        )
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace="n", name="db.schema.table")],
+                outputs=[_dataset(namespace="n", name="out", facets=facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    deps = _column_deps(graph)
+    assert len(deps) == 1
+    assert deps[0].source.logical_id == dotted
+    assert deps[0].target.logical_id == "a.b"
+    assert deps[0].source.parent is not None
+    assert deps[0].source.parent.kind == NODE_KIND_DATASET
+
+
+def test_column_lineage_physical_identity_compatible_with_dbt() -> None:
+    in_facets = {"hierarchy": _physical_hierarchy_facet("analytics", "raw", "customers")}
+    out_facets = {
+        "hierarchy": _physical_hierarchy_facet("analytics", "marts", "orders"),
+        "columnLineage": _column_lineage_facet(
+            {"customer_id": {"inputFields": [_input_field(OL_NS, "customers_src", "customer_id")]}}
+        ),
+    }
+    graph = map_openlineage_events(
+        [
+            _run_event(
+                inputs=[_dataset(namespace=OL_NS, name="customers_src", facets=in_facets)],
+                outputs=[_dataset(namespace=OL_NS, name="orders_src", facets=out_facets)],
+            )
+        ],
+        namespace=NS,
+    )
+    deps = _column_deps(graph)
+    assert len(deps) == 1
+    expected_out = GraphNodeIdentity(
+        NS,
+        NODE_KIND_COLUMN,
+        "customer_id",
+        parent=GraphNodeIdentity(
+            NS,
+            NODE_KIND_TABLE,
+            "orders",
+            parent=GraphNodeIdentity(
+                NS,
+                NODE_KIND_DATASET,
+                "marts",
+                parent=GraphNodeIdentity(NS, NODE_KIND_DATA_SOURCE, "analytics"),
+            ),
+        ),
+    )
+    expected_in = GraphNodeIdentity(
+        NS,
+        NODE_KIND_COLUMN,
+        "customer_id",
+        parent=GraphNodeIdentity(
+            NS,
+            NODE_KIND_TABLE,
+            "customers",
+            parent=GraphNodeIdentity(
+                NS,
+                NODE_KIND_DATASET,
+                "raw",
+                parent=GraphNodeIdentity(NS, NODE_KIND_DATA_SOURCE, "analytics"),
+            ),
+        ),
+    )
+    assert deps[0].source == expected_out
+    assert deps[0].target == expected_in

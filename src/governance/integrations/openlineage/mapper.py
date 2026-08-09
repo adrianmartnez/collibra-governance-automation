@@ -20,6 +20,10 @@ from governance.domain.graph import (
     GraphNodeIdentity,
     ProvenanceRecord,
 )
+from governance.domain.lineage import (
+    ColumnLineageAssertion,
+    materialize_column_lineage_edges,
+)
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.openlineage.errors import (
     CODE_MAPPING,
@@ -31,6 +35,8 @@ from governance.integrations.openlineage.validate import (
     SUPPORTED_DATASET_FACETS,
     validate_openlineage_events,
 )
+
+_ColumnLineageKey = tuple[str, str, str, str, str, str]
 
 _RUN_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
 _JOB_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/JobEvent"
@@ -249,6 +255,65 @@ def _ol_key(dataset: Mapping[str, Any]) -> tuple[str, str]:
     return (_norm_id(str(dataset["namespace"])), _norm_id(str(dataset["name"])))
 
 
+def _ingest_column_lineage_facet(
+    states: dict[tuple[str, str], _DatasetState],
+    registry: dict[_ColumnLineageKey, list[ProvenanceRecord]],
+    dataset: Mapping[str, Any],
+) -> None:
+    """Collect columnLineage assertions without static-facet conflict semantics."""
+    facets = dataset.get("facets")
+    if not isinstance(facets, Mapping):
+        return
+    facet = facets.get("columnLineage")
+    if not isinstance(facet, Mapping):
+        return
+
+    target_ns, target_name = _ol_key(dataset)
+    facet_prov = _facet_provenance(
+        str(facet["_producer"]),
+        target_ns,
+        target_name,
+        "columnLineage",
+        str(facet["_schemaURL"]),
+    )
+    fields = facet.get("fields")
+    if not isinstance(fields, Mapping):
+        return
+
+    for output_field, entry in fields.items():
+        if not isinstance(entry, Mapping):
+            continue
+        output_name = _norm_id(str(output_field))
+        input_fields = entry.get("inputFields")
+        if not isinstance(input_fields, list):
+            continue
+        for input_field in input_fields:
+            if not isinstance(input_field, Mapping):
+                continue
+            input_ns = _norm_id(str(input_field["namespace"]))
+            input_name = _norm_id(str(input_field["name"]))
+            input_field_name = _norm_id(str(input_field["field"]))
+            key: _ColumnLineageKey = (
+                target_ns,
+                target_name,
+                output_name,
+                input_ns,
+                input_name,
+                input_field_name,
+            )
+            bucket = registry.setdefault(key, [])
+            if facet_prov not in bucket:
+                bucket.append(facet_prov)
+
+            input_key = (input_ns, input_name)
+            input_state = states.get(input_key)
+            if input_state is None:
+                input_state = _DatasetState(ol_ns=input_ns, ol_name=input_name)
+                states[input_key] = input_state
+            if facet_prov not in input_state.dataset_provenances:
+                input_state.dataset_provenances.append(facet_prov)
+
+
 def _merge_dataset_observation(
     states: dict[tuple[str, str], _DatasetState],
     dataset: Mapping[str, Any],
@@ -256,6 +321,7 @@ def _merge_dataset_observation(
     producer: str,
     schema_url: str,
     path: str,
+    column_lineage: dict[_ColumnLineageKey, list[ProvenanceRecord]] | None = None,
 ) -> tuple[str, str]:
     key = _ol_key(dataset)
     ol_ns, ol_name = key
@@ -270,6 +336,8 @@ def _merge_dataset_observation(
 
     facets = dataset.get("facets")
     if not isinstance(facets, Mapping):
+        if column_lineage is not None:
+            _ingest_column_lineage_facet(states, column_lineage, dataset)
         return key
 
     for facet_key, facet in facets.items():
@@ -296,6 +364,9 @@ def _merge_dataset_observation(
             )
         if facet_prov not in existing.provenances:
             existing.provenances.append(facet_prov)
+
+    if column_lineage is not None:
+        _ingest_column_lineage_facet(states, column_lineage, dataset)
     return key
 
 
@@ -306,6 +377,7 @@ def _collect_datasets_from_list(
     producer: str,
     schema_url: str,
     path: str,
+    column_lineage: dict[_ColumnLineageKey, list[ProvenanceRecord]] | None = None,
 ) -> set[tuple[str, str]]:
     keys: set[tuple[str, str]] = set()
     if not isinstance(datasets, list):
@@ -320,6 +392,7 @@ def _collect_datasets_from_list(
                 producer=producer,
                 schema_url=schema_url,
                 path=_pointer(path, index),
+                column_lineage=column_lineage,
             )
         )
     return keys
@@ -512,12 +585,114 @@ def _emit_lineage_edges(
             )
 
 
+def _ensure_lineage_column(
+    *,
+    column_identity: GraphNodeIdentity,
+    parent_identity: GraphNodeIdentity,
+    provenances: Sequence[ProvenanceRecord],
+    columns: dict[GraphNodeIdentity, GraphNode],
+    nodes: list[GraphNode],
+    edges: list[GraphEdge],
+) -> None:
+    existing = columns.get(column_identity)
+    if existing is None:
+        node = GraphNode(
+            identity=column_identity,
+            name=column_identity.logical_id,
+            description=None,
+            attributes={},
+            provenance=tuple(provenances),
+        )
+        nodes.append(node)
+        columns[column_identity] = node
+        edges.append(
+            GraphEdge(
+                source=parent_identity,
+                target=column_identity,
+                kind=EDGE_KIND_CONTAINS,
+                attributes={},
+                provenance=(),
+            )
+        )
+        return
+
+    merged = GraphNode(
+        identity=existing.identity,
+        name=existing.name,
+        description=existing.description,
+        attributes=existing.to_dict()["attributes"],
+        provenance=existing.provenance + tuple(provenances),
+    )
+    nodes.append(merged)
+    columns[column_identity] = merged
+
+
+def _emit_column_lineage_edges(
+    *,
+    namespace: str,
+    registry: Mapping[_ColumnLineageKey, Sequence[ProvenanceRecord]],
+    identities: Mapping[tuple[str, str], GraphNodeIdentity],
+    nodes: list[GraphNode],
+    edges: list[GraphEdge],
+) -> None:
+    if not registry:
+        return
+
+    columns: dict[GraphNodeIdentity, GraphNode] = {
+        node.identity: node for node in nodes if node.identity.kind == NODE_KIND_COLUMN
+    }
+    assertions: list[ColumnLineageAssertion] = []
+    for key in sorted(registry.keys()):
+        (
+            target_ns,
+            target_name,
+            output_field,
+            input_ns,
+            input_name,
+            input_field,
+        ) = key
+        provenances = tuple(registry[key])
+        output_parent = identities[(target_ns, target_name)]
+        input_parent = identities[(input_ns, input_name)]
+        output_column = GraphNodeIdentity(
+            namespace, NODE_KIND_COLUMN, output_field, parent=output_parent
+        )
+        input_column = GraphNodeIdentity(
+            namespace, NODE_KIND_COLUMN, input_field, parent=input_parent
+        )
+        _ensure_lineage_column(
+            column_identity=output_column,
+            parent_identity=output_parent,
+            provenances=provenances,
+            columns=columns,
+            nodes=nodes,
+            edges=edges,
+        )
+        _ensure_lineage_column(
+            column_identity=input_column,
+            parent_identity=input_parent,
+            provenances=provenances,
+            columns=columns,
+            nodes=nodes,
+            edges=edges,
+        )
+        assertions.append(
+            ColumnLineageAssertion(
+                output_column=output_column,
+                input_column=input_column,
+                provenance=provenances,
+            )
+        )
+    edges.extend(materialize_column_lineage_edges(assertions))
+
+
 def _build_graph(
     events: Sequence[Mapping[str, Any]],
     *,
     namespace: str,
 ) -> GovernanceGraph:
     dataset_states: dict[tuple[str, str], _DatasetState] = {}
+    column_lineage: dict[_ColumnLineageKey, list[ProvenanceRecord]] = {}
     run_states: dict[str, _RunState] = {}
     job_lineages: list[
         tuple[set[tuple[str, str]], set[tuple[str, str]], list[ProvenanceRecord]]
@@ -537,6 +712,7 @@ def _build_graph(
                 producer=producer,
                 schema_url=schema_url,
                 path=_pointer(path, "dataset"),
+                column_lineage=column_lineage,
             )
             continue
 
@@ -551,6 +727,7 @@ def _build_graph(
                 producer=producer,
                 schema_url=schema_url,
                 path=_pointer(path, "inputs"),
+                column_lineage=column_lineage,
             )
             outputs = _collect_datasets_from_list(
                 dataset_states,
@@ -558,6 +735,7 @@ def _build_graph(
                 producer=producer,
                 schema_url=schema_url,
                 path=_pointer(path, "outputs"),
+                column_lineage=column_lineage,
             )
             job_lineages.append(
                 (
@@ -582,6 +760,7 @@ def _build_graph(
                 producer=producer,
                 schema_url=schema_url,
                 path=_pointer(path, "inputs"),
+                column_lineage=column_lineage,
             )
             outputs = _collect_datasets_from_list(
                 dataset_states,
@@ -589,6 +768,7 @@ def _build_graph(
                 producer=producer,
                 schema_url=schema_url,
                 path=_pointer(path, "outputs"),
+                column_lineage=column_lineage,
             )
             existing_run = run_states.get(run_id)
             edge_prov = _edge_provenance(producer, job_ns, job_name, schema_url)
@@ -666,6 +846,14 @@ def _build_graph(
                     nodes=nodes,
                     edges=edges,
                 )
+
+    _emit_column_lineage_edges(
+        namespace=namespace,
+        registry=column_lineage,
+        identities=identities,
+        nodes=nodes,
+        edges=edges,
+    )
 
     for run_state in run_states.values():
         _emit_lineage_edges(
