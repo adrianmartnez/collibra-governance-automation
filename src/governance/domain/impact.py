@@ -18,6 +18,11 @@ from governance.domain.graph import (
     EDGE_KIND_CONTAINS,
     EDGE_KIND_DEPENDS_ON,
     EDGE_KIND_GOVERNS,
+    NODE_KIND_COLUMN,
+    NODE_KIND_CONTRACT,
+    NODE_KIND_DATA_SOURCE,
+    NODE_KIND_DATASET,
+    NODE_KIND_TABLE,
     GovernanceGraph,
     GraphEdge,
     GraphNodeIdentity,
@@ -25,6 +30,15 @@ from governance.domain.graph import (
 from governance.identity.canonicalize import canonical_json_bytes
 
 TraversalMode = Literal["forward", "reverse"]
+
+_POLICY_RELEVANT_KINDS = frozenset(
+    {
+        NODE_KIND_DATA_SOURCE,
+        NODE_KIND_DATASET,
+        NODE_KIND_TABLE,
+        NODE_KIND_COLUMN,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +163,65 @@ class ImpactPath:
         }
 
 
+def _normalize_identity_tuple(
+    values: Sequence[GraphNodeIdentity],
+    field_name: str,
+) -> tuple[GraphNodeIdentity, ...]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise TypeError(f"{field_name} must be a sequence of GraphNodeIdentity")
+    unique: dict[GraphNodeIdentity, None] = {}
+    for value in values:
+        if not isinstance(value, GraphNodeIdentity):
+            raise TypeError(f"{field_name} entries must be GraphNodeIdentity")
+        unique[value] = None
+    return tuple(sorted(unique.keys(), key=_node_sort_key))
+
+
+def _normalize_affected_edges(values: Sequence[GraphEdge]) -> tuple[GraphEdge, ...]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise TypeError("affected_edges must be a sequence of GraphEdge")
+    groups: dict[tuple[GraphNodeIdentity, str, GraphNodeIdentity], list[GraphEdge]] = {}
+    for edge in values:
+        if not isinstance(edge, GraphEdge):
+            raise TypeError("affected_edges entries must be GraphEdge")
+        groups.setdefault(edge.logical_identity(), []).append(edge)
+
+    merged: list[GraphEdge] = []
+    for key, group in groups.items():
+        base = group[0]
+        for other in group[1:]:
+            if other.attributes_canonical != base.attributes_canonical:
+                source, kind, target = key
+                raise ValueError(
+                    "conflicting GraphEdge attributes for logical edge "
+                    f"{[source.to_canonical_list(), kind, target.to_canonical_list()]!r}"
+                )
+        provenance = [record for edge in group for record in edge.provenance]
+        merged.append(
+            GraphEdge(
+                source=base.source,
+                target=base.target,
+                kind=base.kind,
+                attributes=base.attributes,
+                provenance=tuple(provenance),
+            )
+        )
+    return tuple(sorted(merged, key=lambda edge: edge.logical_sort_key()))
+
+
+def _normalize_paths(values: Sequence[ImpactPath]) -> tuple[ImpactPath, ...]:
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+        raise TypeError("paths must be a sequence of ImpactPath")
+    by_target: dict[GraphNodeIdentity, ImpactPath] = {}
+    for path in values:
+        if not isinstance(path, ImpactPath):
+            raise TypeError("paths entries must be ImpactPath")
+        if path.target in by_target:
+            raise ValueError(f"duplicate impact path target: {path.target.to_canonical_list()!r}")
+        by_target[path.target] = path
+    return tuple(sorted(by_target.values(), key=lambda path: path.target.canonical_bytes()))
+
+
 @dataclass(frozen=True, slots=True)
 class GovernanceImpactResult:
     """Deterministic downstream blast-radius analysis result."""
@@ -161,6 +234,36 @@ class GovernanceImpactResult:
     associated_contracts: tuple[GraphNodeIdentity, ...]
     governance_assets: tuple[GraphNodeIdentity, ...]
     policy_relevant_nodes: tuple[GraphNodeIdentity, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "changed_nodes", _normalize_identity_tuple(self.changed_nodes, "changed_nodes")
+        )
+        object.__setattr__(
+            self, "direct_nodes", _normalize_identity_tuple(self.direct_nodes, "direct_nodes")
+        )
+        object.__setattr__(
+            self,
+            "transitive_nodes",
+            _normalize_identity_tuple(self.transitive_nodes, "transitive_nodes"),
+        )
+        object.__setattr__(self, "affected_edges", _normalize_affected_edges(self.affected_edges))
+        object.__setattr__(self, "paths", _normalize_paths(self.paths))
+        object.__setattr__(
+            self,
+            "associated_contracts",
+            _normalize_identity_tuple(self.associated_contracts, "associated_contracts"),
+        )
+        object.__setattr__(
+            self,
+            "governance_assets",
+            _normalize_identity_tuple(self.governance_assets, "governance_assets"),
+        )
+        object.__setattr__(
+            self,
+            "policy_relevant_nodes",
+            _normalize_identity_tuple(self.policy_relevant_nodes, "policy_relevant_nodes"),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -198,10 +301,7 @@ def _build_effective_adjacency(
             continue
         buckets.setdefault(hop.from_node, []).append(hop)
 
-    return {
-        node: tuple(sorted(hops, key=_hop_neighbor_sort_key))
-        for node, hops in buckets.items()
-    }
+    return {node: tuple(sorted(hops, key=_hop_neighbor_sort_key)) for node, hops in buckets.items()}
 
 
 def _normalize_changed_roots(
@@ -225,9 +325,7 @@ def _normalize_changed_roots(
     present = {graph_node.identity for graph_node in graph.nodes}
     for node in unique:
         if node not in present:
-            raise ValueError(
-                f"changed node not present in graph: {node.to_canonical_list()!r}"
-            )
+            raise ValueError(f"changed node not present in graph: {node.to_canonical_list()!r}")
 
     return tuple(sorted(unique.keys(), key=_node_sort_key))
 
@@ -266,6 +364,57 @@ def _collect_affected_edges(
             if hop.to_node in closure:
                 edges[hop.edge.logical_identity()] = hop.edge
     return tuple(sorted(edges.values(), key=lambda edge: edge.logical_sort_key()))
+
+
+def _associate_governance_assets(
+    graph: GovernanceGraph,
+    impact_core: set[GraphNodeIdentity],
+) -> tuple[GraphNodeIdentity, ...]:
+    present = {node.identity for node in graph.nodes}
+    assets: dict[GraphNodeIdentity, None] = {}
+    for node in impact_core:
+        if node.kind == NODE_KIND_CONTRACT:
+            continue
+        assets[node] = None
+        for ancestor in node.ancestors():
+            if ancestor in present and ancestor.kind != NODE_KIND_CONTRACT:
+                assets[ancestor] = None
+    return tuple(sorted(assets.keys(), key=_node_sort_key))
+
+
+def _associate_contracts(
+    graph: GovernanceGraph,
+    impact_core: set[GraphNodeIdentity],
+) -> tuple[GraphNodeIdentity, ...]:
+    contracts: dict[GraphNodeIdentity, None] = {}
+    for node in impact_core:
+        if node.kind == NODE_KIND_CONTRACT:
+            contracts[node] = None
+
+    governs_by_target: dict[GraphNodeIdentity, list[GraphNodeIdentity]] = {}
+    present = {graph_node.identity for graph_node in graph.nodes}
+    for edge in graph.edges:
+        if edge.kind != EDGE_KIND_GOVERNS:
+            continue
+        if edge.source.kind != NODE_KIND_CONTRACT:
+            continue
+        if edge.source not in present:
+            continue
+        governs_by_target.setdefault(edge.target, []).append(edge.source)
+
+    for node in impact_core:
+        for identity in (node, *node.ancestors()):
+            for contract in governs_by_target.get(identity, ()):
+                contracts[contract] = None
+
+    return tuple(sorted(contracts.keys(), key=_node_sort_key))
+
+
+def _policy_relevant_nodes(
+    governance_assets: Sequence[GraphNodeIdentity],
+) -> tuple[GraphNodeIdentity, ...]:
+    relevant = [node for node in governance_assets if node.kind in _POLICY_RELEVANT_KINDS]
+    return tuple(sorted(relevant, key=_node_sort_key))
 
 
 def analyze_downstream_impact(
@@ -348,14 +497,17 @@ def analyze_downstream_impact(
         )
     )
 
+    governance_assets = _associate_governance_assets(graph, impact_core)
+    associated_contracts = _associate_contracts(graph, impact_core)
+    policy_relevant = _policy_relevant_nodes(governance_assets)
+
     return GovernanceImpactResult(
         changed_nodes=roots,
         direct_nodes=direct_nodes,
         transitive_nodes=transitive_nodes,
         affected_edges=affected_edges,
         paths=paths,
-        # Associations populated in blast-radius context commit.
-        associated_contracts=(),
-        governance_assets=(),
-        policy_relevant_nodes=(),
+        associated_contracts=associated_contracts,
+        governance_assets=governance_assets,
+        policy_relevant_nodes=policy_relevant,
     )

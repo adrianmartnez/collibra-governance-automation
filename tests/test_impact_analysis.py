@@ -7,24 +7,24 @@ from typing import Any
 
 import pytest
 
-from governance.domain.graph import (
+from governance.domain import (
     EDGE_KIND_CONTAINS,
     EDGE_KIND_DEPENDS_ON,
     EDGE_KIND_GOVERNS,
     NODE_KIND_COLUMN,
     NODE_KIND_CONTRACT,
+    NODE_KIND_DATA_SOURCE,
     NODE_KIND_DATASET,
     NODE_KIND_TABLE,
+    NODE_KIND_TRANSFORMATION,
     GovernanceGraph,
+    GovernanceImpactResult,
     GraphEdge,
     GraphNode,
     GraphNodeIdentity,
-    ProvenanceRecord,
-)
-from governance.domain.impact import (
-    GovernanceImpactResult,
     ImpactPath,
     ImpactStep,
+    ProvenanceRecord,
     analyze_downstream_impact,
 )
 
@@ -229,9 +229,10 @@ def test_mixed_table_column_graph_deterministic() -> None:
     ]
     g1 = _graph([t_a, t_b, col_a, col_b], edges)
     g2 = _graph([col_b, col_a, t_b, t_a], list(reversed(edges)))
-    assert analyze_downstream_impact(g1, [t_a, col_a]).to_dict() == analyze_downstream_impact(
-        g2, [col_a, t_a]
-    ).to_dict()
+    assert (
+        analyze_downstream_impact(g1, [t_a, col_a]).to_dict()
+        == analyze_downstream_impact(g2, [col_a, t_a]).to_dict()
+    )
 
 
 # --- II. Direction semantics ---
@@ -328,9 +329,9 @@ def test_duplicate_equivalent_edges_normalized_same() -> None:
     e2 = GraphEdge(source=b, target=a, kind=EDGE_KIND_DEPENDS_ON, provenance=(p2,))
     g1 = GovernanceGraph.from_parts([_node(a), _node(b)], [e1, e2])
     g2 = GovernanceGraph.from_parts([_node(b), _node(a)], [e2, e1])
-    assert analyze_downstream_impact(g1, [a]).to_dict() == analyze_downstream_impact(
-        g2, [a]
-    ).to_dict()
+    assert (
+        analyze_downstream_impact(g1, [a]).to_dict() == analyze_downstream_impact(g2, [a]).to_dict()
+    )
 
 
 def test_diamond_canonical_shortest_path_stable() -> None:
@@ -370,9 +371,7 @@ def test_diamond_canonical_shortest_path_stable() -> None:
     from governance.domain.impact import _path_sort_key
 
     expected = via_left if _path_sort_key(via_left) < _path_sort_key(via_right) else via_right
-    assert [step.to_node for step in sink_path.steps] == [
-        step.to_node for step in expected.steps
-    ]
+    assert [step.to_node for step in sink_path.steps] == [step.to_node for step in expected.steps]
     # Alternate diamond edges remain in affected_edges.
     assert len(result.affected_edges) == 4
 
@@ -438,9 +437,10 @@ def test_provenance_order_does_not_alter_reachability() -> None:
 def test_repeated_execution_same_output() -> None:
     a, b, c = _table("a"), _table("b"), _table("c")
     graph = _graph([a, b, c], [_depends(b, a), _depends(c, b)])
-    assert analyze_downstream_impact(graph, [a]).to_dict() == analyze_downstream_impact(
-        graph, [a]
-    ).to_dict()
+    assert (
+        analyze_downstream_impact(graph, [a]).to_dict()
+        == analyze_downstream_impact(graph, [a]).to_dict()
+    )
 
 
 # --- IV. Cycles ---
@@ -613,3 +613,543 @@ def test_impact_step_rejects_incompatible_traversal() -> None:
     edge = _depends(b, a)
     with pytest.raises(ValueError, match="impact step traversal incompatible"):
         ImpactStep(from_node=a, to_node=b, edge=edge, traversal="forward")
+
+
+# --- V. Containment blast radius ---
+
+
+def test_dataset_table_change_propagates_to_descendants() -> None:
+    ds = _id(NODE_KIND_DATASET, "sales")
+    table = _table("orders")
+    col = _column("id", table)
+    # parent chain: dataset is not automatic parent of table unless identity.parent set.
+    # Use contains edges for hierarchy propagation.
+    graph = _graph([ds, table, col], [_contains(ds, table), _contains(table, col)])
+    result = analyze_downstream_impact(graph, [ds])
+    assert table in result.direct_nodes
+    assert col in result.transitive_nodes
+
+
+def test_column_change_does_not_promote_parent_or_sibling() -> None:
+    table = _table("orders")
+    col_a = _column("a", table)
+    col_b = _column("b", table)
+    graph = _graph([table, col_a, col_b], [_contains(table, col_a), _contains(table, col_b)])
+    result = analyze_downstream_impact(graph, [col_a])
+    assert result.direct_nodes == ()
+    assert result.transitive_nodes == ()
+    assert table in result.governance_assets
+    assert col_a in result.governance_assets
+    assert col_b not in result.governance_assets
+
+
+def test_nested_column_parents_in_governance_assets() -> None:
+    source = _id(NODE_KIND_DATA_SOURCE, "pg")
+    dataset = GraphNodeIdentity(NS, NODE_KIND_DATASET, "sales", parent=source)
+    table = GraphNodeIdentity(NS, NODE_KIND_TABLE, "orders", parent=dataset)
+    col = GraphNodeIdentity(NS, NODE_KIND_COLUMN, "id", parent=table)
+    graph = _graph(
+        [source, dataset, table, col],
+        [_contains(source, dataset), _contains(dataset, table), _contains(table, col)],
+    )
+    result = analyze_downstream_impact(graph, [col])
+    assert set(result.governance_assets) >= {col, table, dataset, source}
+
+
+def test_container_child_downstream_column_path_explainable() -> None:
+    t_in = _table("orders")
+    t_out = _table("orders_enriched")
+    col_in = _column("amount", t_in)
+    col_out = _column("amount", t_out)
+    graph = _graph(
+        [t_in, t_out, col_in, col_out],
+        [
+            _contains(t_in, col_in),
+            _contains(t_out, col_out),
+            _depends(col_out, col_in),
+        ],
+    )
+    result = analyze_downstream_impact(graph, [t_in])
+    assert col_in in result.direct_nodes
+    assert col_out in result.transitive_nodes
+    path = next(path for path in result.paths if path.target == col_out)
+    assert [step.traversal for step in path.steps] == ["forward", "reverse"]
+    assert [step.to_node for step in path.steps] == [col_in, col_out]
+
+
+# --- VI. Contracts ---
+
+
+def test_contract_root_governs_dataset_direct() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    col = GraphNodeIdentity(NS, NODE_KIND_COLUMN, "id", parent=dataset)
+    graph = _graph(
+        [contract, dataset, col],
+        [_governs(contract, dataset), _contains(dataset, col)],
+    )
+    result = analyze_downstream_impact(graph, [contract])
+    assert result.direct_nodes == (dataset,)
+    assert col in result.transitive_nodes
+    assert contract in result.associated_contracts
+
+
+def test_contract_root_continues_into_downstream_lineage() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    col_in = GraphNodeIdentity(NS, NODE_KIND_COLUMN, "amount", parent=dataset)
+    t_out = _table("mart")
+    col_out = _column("amount", t_out)
+    graph = _graph(
+        [contract, dataset, col_in, t_out, col_out],
+        [
+            _governs(contract, dataset),
+            _contains(dataset, col_in),
+            _contains(t_out, col_out),
+            _depends(col_out, col_in),
+        ],
+    )
+    result = analyze_downstream_impact(graph, [contract])
+    assert col_out in result.transitive_nodes
+    assert contract in result.associated_contracts
+
+
+def test_dataset_root_governing_contract_associated_only() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    graph = _graph([contract, dataset], [_governs(contract, dataset)])
+    result = analyze_downstream_impact(graph, [dataset])
+    assert contract not in result.direct_nodes
+    assert contract not in result.transitive_nodes
+    assert result.associated_contracts == (contract,)
+
+
+def test_affected_column_associates_ancestor_governing_contract() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    table = GraphNodeIdentity(NS, NODE_KIND_TABLE, "orders_tbl", parent=dataset)
+    col = GraphNodeIdentity(NS, NODE_KIND_COLUMN, "id", parent=table)
+    graph = _graph(
+        [contract, dataset, table, col],
+        [
+            _governs(contract, dataset),
+            _contains(dataset, table),
+            _contains(table, col),
+        ],
+    )
+    result = analyze_downstream_impact(graph, [col])
+    assert result.associated_contracts == (contract,)
+    assert dataset in result.governance_assets
+    assert table in result.governance_assets
+
+
+def test_multiple_contracts_dedup_and_canonical_sort() -> None:
+    c1 = _id(NODE_KIND_CONTRACT, "contract_a")
+    c2 = _id(NODE_KIND_CONTRACT, "contract_b")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    graph = _graph(
+        [c1, c2, dataset],
+        [_governs(c1, dataset), _governs(c2, dataset)],
+    )
+    result = analyze_downstream_impact(graph, [dataset])
+    assert result.associated_contracts == tuple(
+        sorted((c1, c2), key=lambda node: node.canonical_bytes())
+    )
+
+
+def test_contract_association_does_not_alter_distances() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    downstream = _table("mart")
+    graph = _graph(
+        [contract, dataset, downstream],
+        [_governs(contract, dataset), _depends(downstream, dataset)],
+    )
+    result = analyze_downstream_impact(graph, [dataset])
+    assert result.direct_nodes == (downstream,)
+    assert result.transitive_nodes == ()
+    assert result.associated_contracts == (contract,)
+    assert contract not in result.direct_nodes
+
+
+def test_downstream_output_associates_governing_contract() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "mart_contract")
+    dataset = _id(NODE_KIND_DATASET, "mart")
+    table = GraphNodeIdentity(NS, NODE_KIND_TABLE, "mart_tbl", parent=dataset)
+    upstream = _table("orders")
+    graph = _graph(
+        [contract, dataset, table, upstream],
+        [
+            _governs(contract, dataset),
+            _contains(dataset, table),
+            _depends(table, upstream),
+        ],
+    )
+    result = analyze_downstream_impact(graph, [upstream])
+    assert table in result.direct_nodes
+    assert contract in result.associated_contracts
+
+
+# --- VII. Context ---
+
+
+def test_governance_assets_include_impact_core_non_contracts() -> None:
+    a, b = _table("a"), _table("b")
+    graph = _graph([a, b], [_depends(b, a)])
+    result = analyze_downstream_impact(graph, [a])
+    assert set(result.governance_assets) >= {a, b}
+
+
+def test_governance_assets_include_ancestors_as_context() -> None:
+    table = _table("orders")
+    col = _column("id", table)
+    downstream = _table("mart")
+    graph = _graph(
+        [table, col, downstream],
+        [_contains(table, col), _depends(downstream, col)],
+    )
+    result = analyze_downstream_impact(graph, [col])
+    assert downstream in result.direct_nodes
+    assert table in result.governance_assets
+    assert table not in result.direct_nodes
+    assert table not in result.transitive_nodes
+
+
+def test_context_ancestors_do_not_open_traversal() -> None:
+    table = _table("orders")
+    col_a = _column("a", table)
+    col_b = _column("b", table)
+    # Sibling reachable only via reverse-contains through parent — must NOT happen.
+    graph = _graph([table, col_a, col_b], [_contains(table, col_a), _contains(table, col_b)])
+    result = analyze_downstream_impact(graph, [col_a])
+    assert col_b not in result.direct_nodes
+    assert col_b not in result.transitive_nodes
+    assert table in result.governance_assets
+
+
+def test_policy_relevant_nodes_structural_subset() -> None:
+    source = _id(NODE_KIND_DATA_SOURCE, "pg")
+    dataset = GraphNodeIdentity(NS, NODE_KIND_DATASET, "sales", parent=source)
+    table = GraphNodeIdentity(NS, NODE_KIND_TABLE, "orders", parent=dataset)
+    col = GraphNodeIdentity(NS, NODE_KIND_COLUMN, "id", parent=table)
+    graph = _graph(
+        [source, dataset, table, col],
+        [_contains(source, dataset), _contains(dataset, table), _contains(table, col)],
+    )
+    result = analyze_downstream_impact(graph, [col])
+    kinds = {node.kind for node in result.policy_relevant_nodes}
+    assert kinds <= {
+        NODE_KIND_DATA_SOURCE,
+        NODE_KIND_DATASET,
+        NODE_KIND_TABLE,
+        NODE_KIND_COLUMN,
+    }
+    assert set(result.policy_relevant_nodes) >= {source, dataset, table, col}
+
+
+def test_contract_excluded_from_policy_relevant() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    graph = _graph([contract, dataset], [_governs(contract, dataset)])
+    result = analyze_downstream_impact(graph, [contract])
+    assert contract in result.associated_contracts
+    assert contract not in result.policy_relevant_nodes
+    assert contract not in result.governance_assets
+
+
+def test_transformation_excluded_from_policy_relevant_but_may_be_governance_asset() -> None:
+    transform = _id(NODE_KIND_TRANSFORMATION, "orders_xf")
+    downstream = _table("mart")
+    graph = _graph([transform, downstream], [_depends(downstream, transform)])
+    result = analyze_downstream_impact(graph, [transform])
+    assert transform in result.governance_assets
+    assert transform not in result.policy_relevant_nodes
+    assert downstream in result.policy_relevant_nodes
+
+
+def test_associated_contracts_separate_from_governance_assets() -> None:
+    contract = _id(NODE_KIND_CONTRACT, "orders_v1")
+    dataset = _id(NODE_KIND_DATASET, "orders")
+    graph = _graph([contract, dataset], [_governs(contract, dataset)])
+    result = analyze_downstream_impact(graph, [dataset])
+    assert contract in result.associated_contracts
+    assert contract not in result.governance_assets
+    assert dataset in result.governance_assets
+
+
+# --- GovernanceImpactResult constructor normalization ---
+
+
+def _sample_path(root: GraphNodeIdentity, target: GraphNodeIdentity) -> ImpactPath:
+    edge = _depends(target, root)
+    return ImpactPath(
+        root=root,
+        target=target,
+        steps=(ImpactStep(root, target, edge, "reverse"),),
+    )
+
+
+def test_result_constructor_converts_lists_to_tuples() -> None:
+    a, b, c = _table("a"), _table("b"), _table("c")
+    edge = _depends(b, a)
+    path = _sample_path(a, b)
+    result = GovernanceImpactResult(
+        changed_nodes=[a],
+        direct_nodes=[b],
+        transitive_nodes=[c],
+        affected_edges=[edge],
+        paths=[path],
+        associated_contracts=[],
+        governance_assets=[a, b, c],
+        policy_relevant_nodes=[a, b, c],
+    )
+    assert isinstance(result.changed_nodes, tuple)
+    assert isinstance(result.direct_nodes, tuple)
+    assert isinstance(result.transitive_nodes, tuple)
+    assert isinstance(result.affected_edges, tuple)
+    assert isinstance(result.paths, tuple)
+    assert isinstance(result.associated_contracts, tuple)
+    assert isinstance(result.governance_assets, tuple)
+    assert isinstance(result.policy_relevant_nodes, tuple)
+
+
+def test_result_constructor_canonical_ordering() -> None:
+    a, b, c = _table("a"), _table("b"), _table("c")
+    ordered = tuple(sorted((a, b, c), key=lambda node: node.canonical_bytes()))
+    result = GovernanceImpactResult(
+        changed_nodes=[c, b, a],
+        direct_nodes=[c, a, b],
+        transitive_nodes=[b, c, a],
+        affected_edges=[],
+        paths=[],
+        associated_contracts=[c, a],
+        governance_assets=[b, a, c],
+        policy_relevant_nodes=[c, b, a],
+    )
+    assert result.changed_nodes == ordered
+    assert result.direct_nodes == ordered
+    assert result.transitive_nodes == ordered
+    assert result.associated_contracts == tuple(
+        sorted((a, c), key=lambda node: node.canonical_bytes())
+    )
+    assert result.governance_assets == ordered
+    assert result.policy_relevant_nodes == ordered
+
+
+def test_result_constructor_dedups_node_identities() -> None:
+    a, b = _table("a"), _table("b")
+    result = GovernanceImpactResult(
+        changed_nodes=[a, a, a],
+        direct_nodes=[b, b],
+        transitive_nodes=[a, b, a],
+        affected_edges=[],
+        paths=[],
+        associated_contracts=[a, a],
+        governance_assets=[b, a, b],
+        policy_relevant_nodes=[a, b, a],
+    )
+    assert result.changed_nodes == (a,)
+    assert result.direct_nodes == (b,)
+    assert result.transitive_nodes == tuple(sorted((a, b), key=lambda n: n.canonical_bytes()))
+    assert result.associated_contracts == (a,)
+
+
+def test_result_constructor_affected_edges_dedup_and_sort() -> None:
+    a, b, c = _table("a"), _table("b"), _table("c")
+    e1 = _depends(b, a)
+    e2 = _depends(c, a)
+    result = GovernanceImpactResult(
+        changed_nodes=[a],
+        direct_nodes=[b, c],
+        transitive_nodes=[],
+        affected_edges=[e2, e1, e2, e1],
+        paths=[],
+        associated_contracts=[],
+        governance_assets=[a, b, c],
+        policy_relevant_nodes=[a, b, c],
+    )
+    assert result.affected_edges == tuple(
+        sorted((e1, e2), key=lambda edge: edge.logical_sort_key())
+    )
+
+
+def test_result_constructor_affected_edges_conflict_raises() -> None:
+    a, b = _table("a"), _table("b")
+    e1 = GraphEdge(source=b, target=a, kind=EDGE_KIND_DEPENDS_ON, attributes={"k": 1})
+    e2 = GraphEdge(source=b, target=a, kind=EDGE_KIND_DEPENDS_ON, attributes={"k": 2})
+    with pytest.raises(ValueError, match="conflicting GraphEdge attributes"):
+        GovernanceImpactResult(
+            changed_nodes=[a],
+            direct_nodes=[b],
+            transitive_nodes=[],
+            affected_edges=[e1, e2],
+            paths=[],
+            associated_contracts=[],
+            governance_assets=[a, b],
+            policy_relevant_nodes=[a, b],
+        )
+
+
+def test_result_constructor_affected_edges_unions_provenance() -> None:
+    a, b = _table("a"), _table("b")
+    prov_a = _prov("dbt", "model_a")
+    prov_b = _prov("openlineage", "run_b")
+    e1 = GraphEdge(
+        source=b, target=a, kind=EDGE_KIND_DEPENDS_ON, attributes={}, provenance=(prov_a,)
+    )
+    e2 = GraphEdge(
+        source=b, target=a, kind=EDGE_KIND_DEPENDS_ON, attributes={}, provenance=(prov_b,)
+    )
+    result = GovernanceImpactResult(
+        changed_nodes=[a],
+        direct_nodes=[b],
+        transitive_nodes=[],
+        affected_edges=[e1, e2],
+        paths=[],
+        associated_contracts=[],
+        governance_assets=[a, b],
+        policy_relevant_nodes=[a, b],
+    )
+    assert len(result.affected_edges) == 1
+    expected = tuple(sorted((prov_a, prov_b), key=lambda record: record.canonical_sort_key()))
+    assert result.affected_edges[0].provenance == expected
+
+
+def test_result_constructor_affected_edges_provenance_order_invariant() -> None:
+    a, b = _table("a"), _table("b")
+    e1 = GraphEdge(
+        source=b,
+        target=a,
+        kind=EDGE_KIND_DEPENDS_ON,
+        attributes={},
+        provenance=(_prov("dbt", "model_a"),),
+    )
+    e2 = GraphEdge(
+        source=b,
+        target=a,
+        kind=EDGE_KIND_DEPENDS_ON,
+        attributes={},
+        provenance=(_prov("openlineage", "run_b"),),
+    )
+    kwargs = dict(
+        changed_nodes=[a],
+        direct_nodes=[b],
+        transitive_nodes=[],
+        paths=[],
+        associated_contracts=[],
+        governance_assets=[a, b],
+        policy_relevant_nodes=[a, b],
+    )
+    r1 = GovernanceImpactResult(affected_edges=[e1, e2], **kwargs)
+    r2 = GovernanceImpactResult(affected_edges=[e2, e1], **kwargs)
+    assert r1.to_dict() == r2.to_dict()
+
+
+def test_result_constructor_affected_edges_exact_duplicate_provenance_once() -> None:
+    a, b = _table("a"), _table("b")
+    prov = _prov("dbt", "model_a")
+    edge = GraphEdge(
+        source=b, target=a, kind=EDGE_KIND_DEPENDS_ON, attributes={}, provenance=(prov,)
+    )
+    result = GovernanceImpactResult(
+        changed_nodes=[a],
+        direct_nodes=[b],
+        transitive_nodes=[],
+        affected_edges=[edge, edge],
+        paths=[],
+        associated_contracts=[],
+        governance_assets=[a, b],
+        policy_relevant_nodes=[a, b],
+    )
+    assert len(result.affected_edges) == 1
+    assert result.affected_edges[0].provenance == (prov,)
+
+
+def test_result_constructor_paths_sorted_by_target() -> None:
+    a, b, c = _table("a"), _table("b"), _table("c")
+    path_b = _sample_path(a, b)
+    path_c = _sample_path(a, c)
+    expected = tuple(sorted((path_b, path_c), key=lambda path: path.target.canonical_bytes()))
+    result = GovernanceImpactResult(
+        changed_nodes=[a],
+        direct_nodes=[b, c],
+        transitive_nodes=[],
+        affected_edges=[],
+        paths=[path_c, path_b],
+        associated_contracts=[],
+        governance_assets=[a, b, c],
+        policy_relevant_nodes=[a, b, c],
+    )
+    assert result.paths == expected
+
+
+def test_result_constructor_duplicate_path_target_raises() -> None:
+    a, b = _table("a"), _table("b")
+    path = _sample_path(a, b)
+    with pytest.raises(ValueError, match="duplicate impact path target"):
+        GovernanceImpactResult(
+            changed_nodes=[a],
+            direct_nodes=[b],
+            transitive_nodes=[],
+            affected_edges=[],
+            paths=[path, path],
+            associated_contracts=[],
+            governance_assets=[a, b],
+            policy_relevant_nodes=[a, b],
+        )
+
+
+def test_result_constructor_invalid_element_types() -> None:
+    a, b = _table("a"), _table("b")
+    path = _sample_path(a, b)
+    edge = _depends(b, a)
+    with pytest.raises(TypeError, match="changed_nodes entries must be GraphNodeIdentity"):
+        GovernanceImpactResult(
+            changed_nodes=[a, "bad"],  # type: ignore[list-item]
+            direct_nodes=[],
+            transitive_nodes=[],
+            affected_edges=[],
+            paths=[],
+            associated_contracts=[],
+            governance_assets=[],
+            policy_relevant_nodes=[],
+        )
+    with pytest.raises(TypeError, match="affected_edges entries must be GraphEdge"):
+        GovernanceImpactResult(
+            changed_nodes=[a],
+            direct_nodes=[],
+            transitive_nodes=[],
+            affected_edges=[edge, "bad"],  # type: ignore[list-item]
+            paths=[],
+            associated_contracts=[],
+            governance_assets=[],
+            policy_relevant_nodes=[],
+        )
+    with pytest.raises(TypeError, match="paths entries must be ImpactPath"):
+        GovernanceImpactResult(
+            changed_nodes=[a],
+            direct_nodes=[b],
+            transitive_nodes=[],
+            affected_edges=[],
+            paths=[path, "bad"],  # type: ignore[list-item]
+            associated_contracts=[],
+            governance_assets=[],
+            policy_relevant_nodes=[],
+        )
+
+
+def test_analyze_result_stable_after_constructor_normalization() -> None:
+    a, b, c = _table("a"), _table("b"), _table("c")
+    graph = _graph([a, b, c], [_depends(b, a), _depends(c, b)])
+    analyzed = analyze_downstream_impact(graph, [a])
+    rebuilt = GovernanceImpactResult(
+        changed_nodes=list(reversed(analyzed.changed_nodes)),
+        direct_nodes=list(reversed(analyzed.direct_nodes)),
+        transitive_nodes=list(reversed(analyzed.transitive_nodes)),
+        affected_edges=list(reversed(analyzed.affected_edges)),
+        paths=list(reversed(analyzed.paths)),
+        associated_contracts=list(reversed(analyzed.associated_contracts)),
+        governance_assets=list(reversed(analyzed.governance_assets)),
+        policy_relevant_nodes=list(reversed(analyzed.policy_relevant_nodes)),
+    )
+    assert rebuilt.to_dict() == analyzed.to_dict()
