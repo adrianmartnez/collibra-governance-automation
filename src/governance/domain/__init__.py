@@ -16,6 +16,10 @@ from governance.domain.graph import (
     GraphNodeIdentity,
     ProvenanceRecord,
 )
+from governance.domain.lineage import (
+    ColumnLineageAssertion,
+    materialize_column_lineage_edges,
+)
 from governance.domain.models import (
     Column,
     Database,
@@ -48,6 +52,7 @@ __all__ = [
     "NODE_KIND_TABLE",
     "NODE_KIND_TRANSFORMATION",
     "Column",
+    "ColumnLineageAssertion",
     "Database",
     "DataSource",
     "ForeignKey",
@@ -70,4 +75,5 @@ __all__ = [
     "make_relationship_id",
     "make_schema_id",
     "make_table_id",
+    "materialize_column_lineage_edges",
 ]
