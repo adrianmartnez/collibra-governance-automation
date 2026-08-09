@@ -88,16 +88,16 @@ jobs:
           . .venv-package/bin/activate
           python -m pip install --upgrade pip
           python -m pip install dist/*.whl
-          python -c "import governance; from importlib import metadata; assert governance.__version__ == '1.1.0'; assert metadata.version('collibra-governance-automation') == '1.1.0'"
+          python -c "import governance; from importlib import metadata; assert governance.__version__ == '1.2.0'; assert metadata.version('collibra-governance-automation') == '1.2.0'"
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
           python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, load_mapping_config_file, map_to_desired_state, mapping_contains_example_placeholders, mock_mapping_config"
           python -c "from importlib.resources import files; c=files('governance.config_contract.schemas').joinpath('governance-config.v1.schema.json'); p=files('governance.policy.schemas').joinpath('governance-policy.v1.schema.json'); g=files('governance.plans.schemas').joinpath('governance-plan.v1.schema.json'); a=files('governance.github_ci.schemas').joinpath('governance-action-result.v1.schema.json'); ct=c.read_text(encoding='utf-8'); pt=p.read_text(encoding='utf-8'); gt=g.read_text(encoding='utf-8'); at=a.read_text(encoding='utf-8'); assert c.is_file() and p.is_file() and g.is_file() and a.is_file(); assert 'urn:collibra-governance-automation:schema:governance-config:1' in ct; assert 'urn:collibra-governance-automation:schema:governance-policy:1' in pt; assert 'urn:collibra-governance-automation:schema:governance-plan:1' in gt; assert 'urn:collibra-governance-automation:schema:governance-action-result:1' in at; assert 'schema_version' in ct; assert 'policy_version' in pt; assert 'plan_version' in gt; assert 'result_version' in at"
           python -c "from governance.policy import load_normalized_policies, evaluate_policies; from governance.plans import load_saved_plan, SavedGovernancePlan; from governance.integrations.collibra import PLANNER_CONTRACT_VERSION, normalize_base_url"
           governance --help
-          test "$(governance --version)" = "governance 1.1.0"
+          test "$(governance --version)" = "governance 1.2.0"
           python -m governance --help
-          ls dist/*-1.1.0-*.whl dist/*-1.1.0.tar.gz
+          ls dist/*-1.2.0-*.whl dist/*-1.2.0.tar.gz
 
   postgres-integration:
     name: postgres-integration
