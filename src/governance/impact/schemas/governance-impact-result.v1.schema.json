@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-impact-result:1",
+  "title": "Governance impact result artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema",
+    "result_version",
+    "status",
+    "impact_detected",
+    "writes_performed",
+    "graph_identity",
+    "policy_identity",
+    "impact",
+    "affected_policies",
+    "content_identity"
+  ],
+  "properties": {
+    "result_schema": { "type": "string", "const": "governance-impact-result" },
+    "result_version": { "type": "string", "const": "1" },
+    "status": { "type": "string", "enum": ["clear", "impacted"] },
+    "impact_detected": { "type": "boolean" },
+    "writes_performed": { "type": "integer", "const": 0 },
+    "graph_identity": { "$ref": "#/$defs/contentIdentity" },
+    "policy_identity": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/contentIdentity" }
+      ]
+    },
+    "impact": { "$ref": "#/$defs/impactPayload" },
+    "affected_policies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/affectedPolicy" }
+    },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "graphNodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "logical_id", "parent"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data_source",
+            "dataset",
+            "table",
+            "column",
+            "contract",
+            "transformation"
+          ]
+        },
+        "logical_id": { "type": "string", "minLength": 1 },
+        "parent": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/graphNodeIdentity" }
+          ]
+        }
+      }
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type", "source_ref", "source_version", "observation_mode"],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": ["declared", "observed", "derived"]
+        }
+      }
+    },
+    "graphEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attributes", "kind", "provenance", "source", "target"],
+      "properties": {
+        "attributes": { "type": "object" },
+        "kind": { "type": "string", "minLength": 1 },
+        "provenance": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/provenanceRecord" }
+        },
+        "source": { "$ref": "#/$defs/graphNodeIdentity" },
+        "target": { "$ref": "#/$defs/graphNodeIdentity" }
+      }
+    },
+    "impactStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["edge", "from_node", "to_node", "traversal"],
+      "properties": {
+        "edge": { "$ref": "#/$defs/graphEdge" },
+        "from_node": { "$ref": "#/$defs/graphNodeIdentity" },
+        "to_node": { "$ref": "#/$defs/graphNodeIdentity" },
+        "traversal": { "type": "string", "enum": ["forward", "reverse"] }
+      }
+    },
+    "impactPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distance", "root", "steps", "target"],
+      "properties": {
+        "distance": { "type": "integer", "minimum": 1 },
+        "root": { "$ref": "#/$defs/graphNodeIdentity" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/impactStep" }
+        },
+        "target": { "$ref": "#/$defs/graphNodeIdentity" }
+      }
+    },
+    "impactPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "affected_edges",
+        "associated_contracts",
+        "changed_nodes",
+        "direct_nodes",
+        "governance_assets",
+        "paths",
+        "policy_relevant_nodes",
+        "transitive_nodes"
+      ],
+      "properties": {
+        "affected_edges": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphEdge" }
+        },
+        "associated_contracts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphNodeIdentity" }
+        },
+        "changed_nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphNodeIdentity" }
+        },
+        "direct_nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphNodeIdentity" }
+        },
+        "governance_assets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphNodeIdentity" }
+        },
+        "paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/impactPath" }
+        },
+        "policy_relevant_nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphNodeIdentity" }
+        },
+        "transitive_nodes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/graphNodeIdentity" }
+        }
+      }
+    },
+    "matchedObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_kind", "object_id", "node"],
+      "properties": {
+        "object_kind": {
+          "type": "string",
+          "enum": ["database", "schema", "table", "column"]
+        },
+        "object_id": { "type": "string", "minLength": 1 },
+        "node": { "$ref": "#/$defs/graphNodeIdentity" }
+      }
+    },
+    "affectedPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_id", "severity", "rule_type", "matched_objects"],
+      "properties": {
+        "policy_id": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["error", "warning"] },
+        "rule_type": {
+          "type": "string",
+          "enum": ["require_owner", "require_description", "require_relationship"]
+        },
+        "matched_objects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/matchedObject" }
+        }
+      }
+    }
+  }
+}
