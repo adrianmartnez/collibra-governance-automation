@@ -1,4 +1,4 @@
-"""Governance CLI: scan, export, diff, sync, check, plan, and apply orchestration."""
+"""Governance CLI: scan, export, diff, sync, check, plan, apply, and impact."""
 
 from __future__ import annotations
 
@@ -29,7 +29,8 @@ from governance.config_contract import (
     validate_governance_config,
 )
 from governance.config_contract.resolution_diagnostics import CODE_ENV_UNRESOLVED
-from governance.domain import GovernanceModel
+from governance.domain import GovernanceGraph, GovernanceModel
+from governance.domain.impact import analyze_downstream_impact
 from governance.exporters import (
     SCANNER_CONTRACT_VERSION,
     InventoryExportError,
@@ -41,6 +42,24 @@ from governance.identity import (
     mapping_identity,
     policy_identity,
     target_context_identity,
+)
+from governance.impact import (
+    CODE_CHANGED_NODE,
+    CODE_GRAPH_CONFLICT,
+    CODE_SOURCE,
+    ImpactChangedNodeError,
+    ImpactDiagnosticError,
+    ImpactError,
+    ImpactGraphConflictError,
+    ImpactSourceError,
+    build_impact_result,
+    canonical_impact_json,
+    format_human_value,
+    format_impact_result_human,
+    impact_diagnostics_failure,
+    load_impact_changes,
+    match_affected_policies,
+    write_impact_result,
 )
 from governance.integrations.collibra import (
     PLANNER_CONTRACT_VERSION,
@@ -60,6 +79,9 @@ from governance.integrations.collibra import (
     mapping_contains_example_placeholders,
     mock_mapping_config,
 )
+from governance.integrations.dbt import DbtError, load_dbt_graph
+from governance.integrations.odcs import OdcsError, load_odcs_graph
+from governance.integrations.openlineage import OpenLineageError, load_openlineage_graph
 from governance.operation_diagnostics import operation_diagnostics_failure
 from governance.plans import (
     PlanError,
@@ -187,6 +209,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_plan(args)
     if command == "apply":
         return _cmd_apply(args)
+    if command == "impact":
+        return _cmd_impact(args)
 
     canonical: CanonicalConfig | None = None
     config_path = getattr(args, "config", None)
@@ -430,6 +454,69 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit machine-readable diagnostics JSON on stdout.",
     )
+
+    impact = subparsers.add_parser(
+        "impact",
+        help=(
+            "Analyze deterministic downstream governance impact from ODCS/dbt/"
+            "OpenLineage graphs (zero remote writes)."
+        ),
+    )
+    impact.add_argument(
+        "--namespace",
+        metavar="NAME",
+        required=True,
+        help="Shared logical namespace for all source graphs and changed nodes.",
+    )
+    impact.add_argument(
+        "--changes",
+        metavar="FILE",
+        required=True,
+        help="Path to governance-impact-changes v1 JSON input.",
+    )
+    impact.add_argument(
+        "--output",
+        metavar="FILE",
+        required=True,
+        help="Path for the canonical governance-impact-result JSON artifact.",
+    )
+    impact.add_argument(
+        "--odcs",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="ODCS data-contract path (repeatable).",
+    )
+    impact.add_argument(
+        "--dbt-manifest",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="dbt manifest.json path (repeatable).",
+    )
+    impact.add_argument(
+        "--openlineage",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="OpenLineage events JSON path (repeatable).",
+    )
+    impact.add_argument(
+        "--dbt-default-database",
+        metavar="NAME",
+        help="Optional default database fallback for every dbt manifest loader.",
+    )
+    impact.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Optional governance.yaml used only to load configured policies.",
+    )
+    impact.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay; valid only with --config.",
+    )
+    _add_format(impact)
     return parser
 
 
@@ -867,6 +954,177 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(format_apply_result_human(payload))
     return 0 if result.success else 1
+
+
+def _cmd_impact(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    namespace = str(args.namespace).strip()
+    if not namespace:
+        raise CliUsageError("--namespace must be a non-empty string")
+    if getattr(args, "profile", None) is not None and getattr(args, "config", None) is None:
+        raise CliUsageError("--profile requires --config")
+
+    odcs_paths = list(getattr(args, "odcs", None) or [])
+    dbt_paths = list(getattr(args, "dbt_manifest", None) or [])
+    openlineage_paths = list(getattr(args, "openlineage", None) or [])
+    if not odcs_paths and not dbt_paths and not openlineage_paths:
+        raise CliUsageError("at least one of --odcs, --dbt-manifest, or --openlineage is required")
+
+    try:
+        changed_nodes = load_impact_changes(args.changes, expected_namespace=namespace)
+    except ImpactError as exc:
+        return _emit_impact_error(exc, fmt)
+
+    try:
+        graph = _compose_impact_graph(
+            namespace=namespace,
+            odcs_paths=odcs_paths,
+            dbt_paths=dbt_paths,
+            openlineage_paths=openlineage_paths,
+            dbt_default_database=getattr(args, "dbt_default_database", None),
+        )
+    except ImpactError as exc:
+        return _emit_impact_error(exc, fmt)
+
+    try:
+        impact = analyze_downstream_impact(graph, changed_nodes)
+    except ValueError as exc:
+        return _emit_impact_error(
+            ImpactChangedNodeError(
+                [
+                    ImpactDiagnosticError(
+                        code=CODE_CHANGED_NODE,
+                        path="/changed_nodes",
+                        message=str(exc) or "changed nodes are invalid for composed graph",
+                    )
+                ]
+            ),
+            fmt,
+        )
+
+    policy_set = None
+    affected_policies = ()
+    config_path = getattr(args, "config", None)
+    if config_path is not None:
+        try:
+            canonical = load_canonical_config(
+                config_path,
+                profile=getattr(args, "profile", None),
+            )
+        except ConfigContractError as exc:
+            return _emit_config_contract_error(exc, fmt)
+        try:
+            policy_set = load_normalized_policies(canonical)
+        except PolicyError as exc:
+            return _emit_policy_error(exc, fmt)
+        affected_policies = match_affected_policies(policy_set, impact.policy_relevant_nodes)
+
+    payload = build_impact_result(
+        graph=graph,
+        impact=impact,
+        affected_policies=affected_policies,
+        policy_set=policy_set,
+    )
+
+    try:
+        write_impact_result(args.output, payload)
+    except OSError:
+        return _emit_operational_message("unable to write impact result artifact", fmt)
+
+    if fmt == "json":
+        _write_impact_json_stdout(canonical_impact_json(payload))
+    else:
+        sys.stdout.write(format_impact_result_human(payload, graph=graph, output_path=args.output))
+    return 6 if payload["impact_detected"] else 0
+
+
+def _write_impact_json_stdout(text: str) -> None:
+    """Write exact UTF-8 machine JSON bytes to stdout (LF preserved on Windows)."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        buffer.write(text.encode("utf-8"))
+        buffer.flush()
+        return
+    sys.stdout.write(text)
+
+
+def _compose_impact_graph(
+    *,
+    namespace: str,
+    odcs_paths: list[str],
+    dbt_paths: list[str],
+    openlineage_paths: list[str],
+    dbt_default_database: str | None,
+) -> GovernanceGraph:
+    specs: list[tuple[str, str]] = []
+    specs.extend(("dbt", path) for path in dbt_paths)
+    specs.extend(("odcs", path) for path in odcs_paths)
+    specs.extend(("openlineage", path) for path in openlineage_paths)
+    specs.sort(key=lambda item: (item[0], item[1]))
+
+    graphs: list[GovernanceGraph] = []
+    for kind, path in specs:
+        try:
+            if kind == "odcs":
+                graphs.append(load_odcs_graph(path, namespace=namespace))
+            elif kind == "dbt":
+                graphs.append(
+                    load_dbt_graph(
+                        path,
+                        namespace=namespace,
+                        default_database=dbt_default_database,
+                    )
+                )
+            else:
+                graphs.append(load_openlineage_graph(path, namespace=namespace))
+        except (OdcsError, DbtError, OpenLineageError) as exc:
+            raise ImpactSourceError(
+                [
+                    ImpactDiagnosticError(
+                        code=CODE_SOURCE,
+                        path=getattr(item, "path", "") or "",
+                        message=item.message,
+                        source_kind=kind,
+                    )
+                    for item in exc.errors
+                ]
+            ) from exc
+
+    try:
+        return GovernanceGraph.from_parts(
+            [node for graph in graphs for node in graph.nodes],
+            [edge for graph in graphs for edge in graph.edges],
+        )
+    except ValueError as exc:
+        raise ImpactGraphConflictError(
+            [
+                ImpactDiagnosticError(
+                    code=CODE_GRAPH_CONFLICT,
+                    path="",
+                    message=str(exc) or "composed governance graph is invalid",
+                )
+            ]
+        ) from exc
+
+
+def _emit_impact_error(exc: ImpactError, fmt: OutputFormat) -> int:
+    payload = impact_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        print("ok=false", file=sys.stderr)
+        for item in exc.errors:
+            path = format_human_value(item.path or "/")
+            code = format_human_value(item.code)
+            message = format_human_value(item.message)
+            source = ""
+            if item.source_kind is not None:
+                source = f" source_kind={format_human_value(item.source_kind)}"
+            print(
+                f"error path={path} code={code} message={message}{source}",
+                file=sys.stderr,
+            )
+    return 4
 
 
 def _load_canonical_and_settings(

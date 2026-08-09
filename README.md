@@ -103,11 +103,14 @@ governance check --config PATH [--profile NAME] [--format human|json]
 governance plan --config PATH --output FILE.gplan [--profile NAME] [--format human|json]
 governance plan inspect FILE.gplan [--format human|json]
 governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json] [--apply] [--confirm-live]
+governance impact --namespace NAME --changes FILE --output FILE [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--config PATH] [--profile NAME] [--format human|json]
 governance --help
 governance --version
 ```
 
 Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, and `apply` require explicit `--config` (except `plan inspect`).
+
+`governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
 
 ## Governance-as-Code (optional)
 
@@ -147,6 +150,13 @@ Additional exit codes for `check` / `plan` / `apply` only:
 - `3` — policy error violations (or plan blocked by policy errors)
 - `4` — config / runtime-resolution / policy / saved-plan validation failure
 - `5` — stale saved plan (apply refused before mutation)
+
+Additional exit code for `impact` only:
+
+- `6` — impact analysis completed with `status=impacted` (artifact written; not a failure)
+- `0` — impact analysis completed with `status=clear`
+- `4` — impact input / provider / graph / changes validation failure (same meaning as other GaC validation)
+- `3` / `5` — unused by `impact` (meanings above unchanged)
 
 `create` / `update` / `unchanged` / `remote_only` counts are plan actions, not completed remote writes. Dry-run means zero remote mutations (`applied=0`); it does not mean zero network in live mode.
 
