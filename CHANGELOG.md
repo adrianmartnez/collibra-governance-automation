@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+## 1.2.0 - 2026-08-09
+
+### Added
+
+- Vendor-neutral governance graph and provenance foundation for contracts, lineage, and related assets
+- Open Data Contract Standard (ODCS) document ingestion into the governance graph
+- dbt manifest metadata ingestion with dependency edges
+- OpenLineage event and dataset facet ingestion
+- Deterministic column-level lineage representation
+- Downstream traversal and governance blast-radius analysis
+- Versioned deterministic `governance-impact-changes` v1 and `governance-impact-result` v1 artifacts
+- `governance impact` CLI for read-only impact analysis with optional policy relevance matching
+- Official GitHub Action `operation: impact` with CLEAR / IMPACTED / FAILED semantics
+- Bounded deterministic PR / `GITHUB_STEP_SUMMARY` impact reports and explainable downstream paths
+- Real composite Action smokes for impact CLEAR / IMPACTED / ERROR paths
+
+### Safety
+
+- Impact analysis performs zero remote writes (`writes_performed=0`); no automatic apply or remediation
+- Source paths for ODCS / dbt / OpenLineage are never auto-discovered
+- Provider credentials remain environment references; they are not Action inputs
+- Fork-safe / least-privilege Action defaults preserved for impact and existing operations
+- Fail-last materialization of Action artifacts; CLI exit `6` (`impacted`) is domain success, not failure
+- Existing dry-run-by-default sync/apply controls and no-automatic-delete policy unchanged
+
+### Compatibility
+
+- Existing `validate` / `check` / `plan` Action operations and CLI behavior preserved
+- `governance-action-result` v1 unchanged
+- Package and runtime version are now `1.2.0` (distinct from contract versions, which remain v1)
+- Existing v1.0 / v1.1 workflows remain compatible where designed
+
+### Limitations
+
+- No commercial Collibra tenant validation in this repository
+- No production-scale Collibra provider hardening
+- No provider SDK
+- No authority / conflict resolution engine
+- No automatic destructive reconciliation
+- No large-scale performance benchmarks
+- This package remains a technical governance automation project, not a hosted governance platform
+
 ## 1.1.0 - 2026-08-08
 
 ### Added

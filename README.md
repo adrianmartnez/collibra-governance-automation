@@ -1,51 +1,72 @@
 # collibra-governance-automation
 
-Discover PostgreSQL technical metadata, export a deterministic governance inventory, map it into an inspectable Collibra-oriented desired state, compare against remote managed state, and apply safe plan-driven synchronization through a single CLI.
+Deterministic Governance-as-Code and governance change intelligence between metadata sources, open standards, policies, lineage, pull-request review, and governance platforms.
+
+Flow:
+
+```text
+metadata / contracts / lineage
+-> vendor-neutral governance graph
+-> governance change intelligence (check / impact / plan)
+-> CLI and GitHub PR review
+-> safe reconciliation (Collibra integration boundary)
+```
+
+This is not another data catalog, not only a crawler, and not a Collibra replacement. The core model is vendor-neutral. Collibra remains a first-class integration for mapping, mock/live adapters, and plan-driven synchronization. Impact analysis is read-only (`writes_performed=0`); it does not apply or remediate.
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
-**Package version:** `1.1.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases.
+**Package version:** `1.2.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases. Package SemVer is distinct from versioned machine contracts such as `governance-action-result` v1 and `governance-impact-result` v1.
 
 ## What is implemented
 
-```text
-PostgreSQL metadata discovery
--> deterministic governance inventory
--> Collibra mapping
--> mock/live adapter boundary
--> deterministic diff
--> safe sync
--> CLI
-```
-
 | Area | Status |
 | --- | --- |
-| PostgreSQL discovery + vendor-neutral model | Real against local demo |
-| Deterministic inventory export | Real |
-| Collibra mapping + sync planning | Real, local |
-| Mock Collibra adapter | Real, process-local, no external network |
-| Live Collibra Core REST API v2 adapter | Contract-tested; no commercial tenant validation claimed |
-| CLI (`scan` / `export` / `diff` / `sync` / `config validate`) | Real |
-| Governance-as-Code (`governance.yaml`, snapshots, content identities) | Real (opt-in via `--config`) |
-| Live tenant credentials / commercial validation | Not provided by this repository |
+| PostgreSQL technical metadata discovery | Real against local demo |
+| Vendor-neutral governance model | Real |
+| Governance graph + provenance foundation | Deterministic |
+| Deterministic inventory / snapshot artifacts | Real |
+| Governance-as-Code (`governance.yaml`, policies, saved plans) | Real (opt-in via `--config`) |
+| Open Data Contract Standard (ODCS) ingestion | Real |
+| dbt manifest metadata + dependency edges | Real |
+| OpenLineage events + dataset facets | Real |
+| Deterministic column-level lineage | Real |
+| Downstream traversal / blast-radius analysis | Deterministic |
+| `governance impact` CLI + impact changes/result v1 artifacts | Contract-tested |
+| GitHub Action `operation: impact` + PR/step-summary reports | Real (read-only) |
+| Collibra mapping + mock adapter | Real, local/offline |
+| Live Collibra Core REST API v2 adapter | Contract-tested |
+| Safe plan-driven reconciliation (dry-run by default) | Real |
+| Commercial Collibra tenant validation | Not claimed |
 
-Central safety: sync defaults to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. No automatic deletes.
+Central safety: sync/apply default to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. Impact performs zero remote writes. No automatic deletes. No automatic remediation from impact.
 
 ```mermaid
 flowchart LR
   PostgreSQL --> Scanner
-  Scanner --> GovernanceModel
-  GovernanceModel --> MetadataInventory
-  GovernanceModel --> CollibraMapping
-  CollibraMapping --> DesiredState
-  DesiredState --> RemoteState
-  RemoteState --> SyncPlan
-  SyncPlan --> DryRunOrApply
-  DryRunOrApply --> MockAdapter
-  DryRunOrApply --> LiveCoreRESTv2Adapter
+  ODCS --> OdcsIngest
+  dbtManifest --> DbtIngest
+  OpenLineage --> OlIngest
+  Scanner --> GovernanceGraph
+  OdcsIngest --> GovernanceGraph
+  DbtIngest --> GovernanceGraph
+  OlIngest --> GovernanceGraph
+  GovernanceGraph --> Provenance
+  GovernanceGraph --> Contracts
+  GovernanceGraph --> Lineage
+  GovernanceGraph --> Policies
+  GovernanceGraph --> ChangeIntelligence
+  ChangeIntelligence --> Check
+  ChangeIntelligence --> Impact
+  ChangeIntelligence --> Plan
+  Check --> CliAndPrReview
+  Impact --> CliAndPrReview
+  Plan --> CliAndPrReview
+  CliAndPrReview --> SafeReconciliation
+  SafeReconciliation --> CollibraAdapters
 ```
 
-Neutral core owns discovery, inventory, mapping, and plan construction. Adapters are the integration boundary. Plans are built before any write.
+Neutral core owns the governance graph, provenance, contracts, lineage, policies, and change intelligence. Collibra adapters are the integration boundary for desired-state mapping and plan-driven sync. Plans are built before any write.
 
 ## Quick start (clean checkout, mock)
 
@@ -90,6 +111,30 @@ docker compose down -v
 Copy `.env.example` to `.env` only when local overrides are needed. Defaults match the Docker Compose demo. Collibra defaults to mock mode.
 
 Optional Bash helper for the SQL demo contract: `bash sample/verify_demo.sh` (Bash / WSL / Git Bash).
+
+## Impact walkthrough (read-only)
+
+After `pip install -e ".[dev]"`, compose a dbt graph with a `governance-impact-changes` v1 file and write `governance-impact-result` v1:
+
+```bash
+# IMPACTED: changed table has a downstream model in the manifest
+governance impact \
+  --namespace analytics \
+  --changes tests/fixtures/github_action/impact/changes.json \
+  --dbt-manifest tests/fixtures/github_action/impact/manifest.impacted.json \
+  --output impact-result.json
+echo $?   # 6 — status=impacted; artifact written; not a failure
+
+# CLEAR: same change, no downstream edge
+governance impact \
+  --namespace analytics \
+  --changes tests/fixtures/github_action/impact/changes.json \
+  --dbt-manifest tests/fixtures/github_action/impact/manifest.clear.json \
+  --output impact-result.json
+echo $?   # 0 — status=clear
+```
+
+Inspect `impact-result.json` for `status` and `impact_detected`. Exit `6` means domain result `impacted`, not an operational failure. Analysis performs zero remote writes; source paths are never auto-discovered. The fixtures above are the stable CI inputs already in this repository (not a production dataset).
 
 ## CLI
 
@@ -163,7 +208,7 @@ Additional exit code for `impact` only:
 ### Representative local output (mock demo)
 
 ```text
-governance 1.1.0
+governance 1.2.0
 ```
 
 ```text
@@ -302,11 +347,11 @@ dry_run = execute_sync_plan(adapter, plan, apply=False)
 
 ## GitHub Action (Governance as Code)
 
-Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only.
+Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `1.2.0`.
 
 The Action installs this package into a fresh Action-owned virtualenv under `RUNNER_TEMP`, then runs the governance CLI with isolated Python (`python -I -m ...`). Consumer site-packages are not modified. Relative config paths resolve against `GITHUB_WORKSPACE` (the consumer must checkout their repository before `uses:`).
 
-**Writes performed: always 0.** The Action never calls `governance apply` or mutating `sync`.
+**Writes performed: always 0.** The Action never calls `governance apply` or mutating `sync`. Impact is read-only analysis.
 
 ### Inputs (v1)
 
@@ -427,25 +472,36 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 ### F. Version pinning
 
 - Strongest: pin the Action to a full immutable commit SHA.
-- Release consumers may pin the immutable SemVer tag `v1.1.0` once that tag is published.
+- Release consumers may pin the immutable SemVer tag `v1.2.0` once that tag is published.
+- Prior release tag `v1.1.0` remains available historically.
 - Do not use mutable `@main`.
-- Version `1.1.0` aligns Action metadata and package version; future releases must keep Action/package compatibility explicit.
+- Package version `1.2.0` ships with Action contract v1 and impact result contracts v1; keep Action/package compatibility explicit across releases.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
 
 ## Repository structure
 
 ```text
-action.yml                  official composite GitHub Action
+action.yml                       official composite GitHub Action
 src/governance/
-  domain/                   vendor-neutral governance model
-  scanner/                  PostgreSQL metadata discovery
-  exporters/                deterministic inventory JSON
-  integrations/collibra/    mapping, adapters, sync planning
-  github_ci/                Action runner, reporting, sticky comments
-  cli.py                    argparse CLI orchestration
-tests/
-sample/                     demo SQL, verification helper, mapping example
-.github/workflows/          CI quality gates
+  domain/                        vendor-neutral model, graph, lineage, impact helpers
+  scanner/                       PostgreSQL metadata discovery
+  exporters/                     deterministic inventory JSON
+  integrations/
+    collibra/                    mapping, adapters, sync planning
+    odcs/                        Open Data Contract Standard ingestion + schema
+    dbt/                         dbt manifest ingestion
+    openlineage/                 OpenLineage event ingestion
+  impact/                        impact CLI contracts + impact schemas
+  github_ci/                     Action runner, reporting, action-result schema
+  config_contract/               governance.yaml schema + resolution
+  policy/                        policy schema + evaluation
+  plans/                         saved .gplan artifacts
+  snapshots/                     governance snapshot artifacts
+  identity/                      content-identity hashing
+  cli.py                         argparse CLI orchestration
+tests/                           unit/integration + fixtures (incl. impact walkthrough inputs)
+sample/                          demo SQL, GaC example, Collibra mapping example
+.github/workflows/               CI quality gates
 ```
 
 ## Testing and CI
@@ -481,13 +537,17 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required.
 ## Limitations
 
 - No commercial Collibra tenant validation
+- No production-scale Collibra provider hardening
+- No provider SDK or authority/conflict resolution engine
 - No OAuth acquisition/refresh
-- No automatic deletes
+- No automatic deletes or destructive reconciliation
+- No automatic apply/remediation from impact analysis
 - No arbitrary tenant customization beyond configured refs
 - No transactional REST snapshot across concurrent mutations
 - No large-scale performance benchmark
 - Mock state is process-local demonstration state
 - Demo data is fictional
+- This package remains a technical governance automation project, not a hosted governance platform
 
 ## License
 
