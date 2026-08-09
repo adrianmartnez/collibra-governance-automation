@@ -19,6 +19,7 @@ _PREFIX_REMOTE_STATE = b"gov-remote-state-v1\n"
 _PREFIX_TARGET_CONTEXT = b"gov-target-context-v1\n"
 _PREFIX_PLAN = b"gov-plan-v1\n"
 _PREFIX_GRAPH = b"gov-graph-v1\n"
+_PREFIX_IMPACT_RESULT = b"gov-impact-result-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,4 +103,12 @@ def graph_identity(canonical_graph_without_identity: dict[str, Any]) -> ContentI
     return _sha256_identity(
         _PREFIX_GRAPH,
         canonical_json_bytes(canonical_graph_without_identity),
+    )
+
+
+def impact_result_identity(canonical_result_without_identity: dict[str, Any]) -> ContentIdentity:
+    """Identity for impact result payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_IMPACT_RESULT,
+        canonical_json_bytes(canonical_result_without_identity),
     )

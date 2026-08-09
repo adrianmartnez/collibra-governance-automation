@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-impact-changes:1",
+  "title": "Governance impact changed-nodes input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["changes_schema", "changes_version", "changed_nodes"],
+  "properties": {
+    "changes_schema": { "type": "string", "const": "governance-impact-changes" },
+    "changes_version": { "type": "string", "const": "1" },
+    "changed_nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/graphNodeIdentity" }
+    }
+  },
+  "$defs": {
+    "graphNodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "logical_id", "parent"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data_source",
+            "dataset",
+            "table",
+            "column",
+            "contract",
+            "transformation"
+          ]
+        },
+        "logical_id": { "type": "string", "minLength": 1 },
+        "parent": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/graphNodeIdentity" }
+          ]
+        }
+      }
+    }
+  }
+}

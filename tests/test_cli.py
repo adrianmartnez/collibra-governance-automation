@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
 from governance import __version__
-from governance.cli import main
+from governance.cli import _emit_impact_error, _write_impact_json_stdout, main
 from governance.domain import (
     Column,
     Database,
@@ -29,6 +31,7 @@ from governance.domain import (
     make_schema_id,
     make_table_id,
 )
+from governance.impact import ImpactDiagnosticError, ImpactParseError
 from governance.integrations.collibra import (
     CollibraAdapterError,
     CollibraMappingConfig,
@@ -611,3 +614,597 @@ def test_secrets_never_appear_on_streams(
     assert "super-secret-password" not in combined
     assert "secret-bearer-token" not in combined
     assert "Authorization" not in combined
+
+
+# --- governance impact ---
+
+
+def _impact_dbt_manifest() -> dict:
+    return {
+        "metadata": {
+            "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+            "dbt_version": "1.10.0",
+            "generated_at": "2024-01-01T00:00:00.000000Z",
+            "invocation_id": "inv",
+        },
+        "nodes": {
+            "model.pkg.orders": {
+                "unique_id": "model.pkg.orders",
+                "resource_type": "model",
+                "name": "orders",
+                "package_name": "pkg",
+                "database": "db",
+                "schema": "public",
+                "alias": "orders",
+                "fqn": ["pkg", "orders"],
+                "config": {"materialized": "table"},
+                "columns": {},
+                "tags": [],
+                "meta": {},
+                "description": "",
+            },
+            "model.pkg.downstream": {
+                "unique_id": "model.pkg.downstream",
+                "resource_type": "model",
+                "name": "downstream",
+                "package_name": "pkg",
+                "database": "db",
+                "schema": "public",
+                "alias": "downstream",
+                "fqn": ["pkg", "downstream"],
+                "config": {"materialized": "table"},
+                "columns": {},
+                "tags": [],
+                "meta": {},
+                "description": "",
+            },
+        },
+        "sources": {},
+        "parent_map": {
+            "model.pkg.downstream": ["model.pkg.orders"],
+            "model.pkg.orders": [],
+        },
+        "disabled": {},
+    }
+
+
+def _impact_workspace(tmp_path: Path, *, with_downstream: bool = True) -> tuple[Path, Path, Path]:
+    manifest = _impact_dbt_manifest()
+    if not with_downstream:
+        del manifest["nodes"]["model.pkg.downstream"]
+        manifest["parent_map"] = {"model.pkg.orders": []}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    changes = {
+        "changes_schema": "governance-impact-changes",
+        "changes_version": "1",
+        "changed_nodes": [
+            {
+                "namespace": "analytics",
+                "kind": "table",
+                "logical_id": "orders",
+                "parent": {
+                    "namespace": "analytics",
+                    "kind": "dataset",
+                    "logical_id": "public",
+                    "parent": {
+                        "namespace": "analytics",
+                        "kind": "data_source",
+                        "logical_id": "db",
+                        "parent": None,
+                    },
+                },
+            }
+        ],
+    }
+    changes_path = tmp_path / "changes.json"
+    changes_path.write_text(json.dumps(changes), encoding="utf-8")
+    output_path = tmp_path / "impact.json"
+    return manifest_path, changes_path, output_path
+
+
+def test_impact_help(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["impact", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "--namespace" in out
+    assert "--changes" in out
+    assert "--odcs" in out
+    assert "--dbt-manifest" in out
+    assert "--openlineage" in out
+
+
+def test_impact_required_args_and_usage() -> None:
+    assert main(["impact"]) == 2
+    assert main(["impact", "--namespace", "analytics"]) == 2
+    assert (
+        main(
+            [
+                "impact",
+                "--namespace",
+                "analytics",
+                "--changes",
+                "c.json",
+                "--output",
+                "o.json",
+            ]
+        )
+        == 2
+    )
+
+
+def test_impact_profile_without_config_exit_2(tmp_path: Path) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path)
+    assert (
+        main(
+            [
+                "impact",
+                "--namespace",
+                "analytics",
+                "--changes",
+                str(changes),
+                "--output",
+                str(output),
+                "--dbt-manifest",
+                str(manifest),
+                "--profile",
+                "ci",
+            ]
+        )
+        == 2
+    )
+
+
+def test_impact_empty_namespace_exit_2(tmp_path: Path) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path)
+    assert (
+        main(
+            [
+                "impact",
+                "--namespace",
+                "   ",
+                "--changes",
+                str(changes),
+                "--output",
+                str(output),
+                "--dbt-manifest",
+                str(manifest),
+            ]
+        )
+        == 2
+    )
+
+
+def test_impact_json_clear_exit_0(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path, with_downstream=False)
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 0
+    stdout = capsys.readouterr().out
+    artifact = output.read_text(encoding="utf-8")
+    assert stdout == artifact
+    payload = json.loads(artifact)
+    assert payload["status"] == "clear"
+    assert payload["writes_performed"] == 0
+
+
+def test_impact_json_impacted_exit_6(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path, with_downstream=True)
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 6
+    stdout = capsys.readouterr().out
+    artifact = output.read_text(encoding="utf-8")
+    assert stdout == artifact
+    payload = json.loads(artifact)
+    assert payload["status"] == "impacted"
+    assert payload["impact_detected"] is True
+
+
+def test_impact_human_impacted(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path, with_downstream=True)
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "human",
+        ]
+    )
+    assert code == 6
+    human = capsys.readouterr().out
+    assert "status=impacted" in human
+    assert "direct=1" in human
+    assert "writes=0" in human
+    assert f"artifact_written={output}" in human or "artifact_written=" in human
+    assert output.is_file()
+    assert json.loads(output.read_text(encoding="utf-8"))["status"] == "impacted"
+
+
+def test_impact_human_one_record_per_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path, with_downstream=True)
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+        ]
+    )
+    assert code == 6
+    human = capsys.readouterr().out
+    lines = human.splitlines()
+    assert human.endswith("\n")
+    assert any(line.startswith("status=") for line in lines)
+    assert any(line.startswith("DIRECT ") for line in lines)
+    assert any(line.startswith("PATH ") for line in lines)
+    assert all(line == line.splitlines()[0] for line in lines)
+
+
+def test_impact_validation_no_traceback(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest, _, output = _impact_workspace(tmp_path)
+    bad_changes = tmp_path / "bad.json"
+    bad_changes.write_text("{", encoding="utf-8")
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(bad_changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 4
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    payload = json.loads(captured.out)
+    assert payload["ok"] is False
+    assert payload["diagnostic_schema"] == "governance-impact-diagnostics"
+
+
+def test_impact_write_failure_exit_1(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest, changes, _ = _impact_workspace(tmp_path, with_downstream=False)
+    output_dir = tmp_path / "outdir"
+    output_dir.mkdir()
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(changes),
+            "--output",
+            str(output_dir),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["diagnostic_schema"] == "governance-operation-diagnostics"
+
+
+def test_impact_error_severity_policy_not_exit_3(tmp_path: Path) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path, with_downstream=False)
+    policies = tmp_path / "policies"
+    policies.mkdir()
+    (policies / "tables.yaml").write_text(
+        "\n".join(
+            [
+                "policy_schema: governance-policy",
+                'policy_version: "1"',
+                "policies:",
+                "  - id: tables-require-owner",
+                "    severity: error",
+                "    rule:",
+                "      type: require_owner",
+                "      select:",
+                "        kind: table",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = tmp_path / "governance.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                'schema_version: "1"',
+                "sources:",
+                "  - id: primary",
+                "    provider: postgresql",
+                "    config:",
+                "      source_name: governance-demo",
+                "      connection:",
+                "        database_url_env: DATABASE_URL",
+                "policies:",
+                "  files:",
+                "    - policies/tables.yaml",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--config",
+            str(config),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["affected_policies"]
+    assert payload["affected_policies"][0]["severity"] == "error"
+
+
+def test_impact_source_permutation_byte_identical(tmp_path: Path) -> None:
+    manifest, changes, output_a = _impact_workspace(tmp_path, with_downstream=True)
+    odcs = tmp_path / "c.odcs.yaml"
+    odcs.write_text(
+        "\n".join(
+            [
+                "apiVersion: v3.1.0",
+                "kind: DataContract",
+                "id: contract-orders",
+                "version: 1.0.0",
+                "status: active",
+                "name: Orders Contract",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_b = tmp_path / "impact-b.json"
+    args_a = [
+        "impact",
+        "--namespace",
+        "analytics",
+        "--changes",
+        str(changes),
+        "--output",
+        str(output_a),
+        "--dbt-manifest",
+        str(manifest),
+        "--odcs",
+        str(odcs),
+        "--format",
+        "json",
+    ]
+    args_b = [
+        "impact",
+        "--namespace",
+        "analytics",
+        "--changes",
+        str(changes),
+        "--output",
+        str(output_b),
+        "--odcs",
+        str(odcs),
+        "--dbt-manifest",
+        str(manifest),
+        "--format",
+        "json",
+    ]
+    assert main(args_a) == 6
+    assert main(args_b) == 6
+    assert output_a.read_bytes() == output_b.read_bytes()
+
+
+def test_impact_does_not_call_scanner_or_collibra(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, changes, output = _impact_workspace(tmp_path, with_downstream=False)
+
+    def boom_scan(*_args, **_kwargs):
+        raise AssertionError("scanner must not be called")
+
+    def boom_adapter(*_args, **_kwargs):
+        raise AssertionError("collibra adapter must not be called")
+
+    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", boom_scan)
+    monkeypatch.setattr("governance.cli.build_collibra_adapter", boom_adapter)
+    assert (
+        main(
+            [
+                "impact",
+                "--namespace",
+                "analytics",
+                "--changes",
+                str(changes),
+                "--output",
+                str(output),
+                "--dbt-manifest",
+                str(manifest),
+            ]
+        )
+        == 0
+    )
+
+
+def test_old_cli_commands_still_parse() -> None:
+    assert main(["not-a-command"]) == 2
+    assert main(["scan", "--unknown-flag"]) == 2
+
+
+def test_impact_invalid_utf8_changes_exit_4(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest, _, output = _impact_workspace(tmp_path)
+    bad_changes = tmp_path / "bad-utf8.json"
+    bad_changes.write_bytes(b"\xff\xfe{")
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(bad_changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 4
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+    payload = json.loads(captured.out)
+    assert payload["diagnostic_schema"] == "governance-impact-diagnostics"
+    assert payload["errors"][0]["code"] == "parse_error"
+    assert "UTF-8" in payload["errors"][0]["message"]
+
+
+def test_impact_invalid_utf8_changes_human_exit_4(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest, _, output = _impact_workspace(tmp_path)
+    bad_changes = tmp_path / "bad-utf8.json"
+    bad_changes.write_bytes(b"\xff\xfe{")
+    code = main(
+        [
+            "impact",
+            "--namespace",
+            "analytics",
+            "--changes",
+            str(bad_changes),
+            "--output",
+            str(output),
+            "--dbt-manifest",
+            str(manifest),
+            "--format",
+            "human",
+        ]
+    )
+    assert code == 4
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert "ok=false" in err
+    assert "parse_error" in err
+
+
+def test_emit_impact_error_human_line_safe(capsys: pytest.CaptureFixture[str]) -> None:
+    exc = ImpactParseError(
+        [
+            ImpactDiagnosticError(
+                code="parse_error",
+                path="/changed\nnodes",
+                message="bad\u2028message",
+                source_kind="dbt\u0085",
+            )
+        ]
+    )
+    assert _emit_impact_error(exc, "human") == 4
+    err = capsys.readouterr().err
+    lines = err.split("\n")
+    assert all("\u2028" not in line for line in lines)
+    assert all("\u0085" not in line for line in lines)
+    assert any("\\u2028" in line for line in lines)
+    assert any("\\x85" in line for line in lines)
+    assert any("\\n" in line for line in lines)
+
+
+def test_emit_impact_error_json_keeps_raw_values(capsys: pytest.CaptureFixture[str]) -> None:
+    exc = ImpactParseError(
+        [
+            ImpactDiagnosticError(
+                code="parse_error",
+                path="/changed\nnodes",
+                message="bad\u2028message",
+                source_kind="dbt\u0085",
+            )
+        ]
+    )
+    assert _emit_impact_error(exc, "json") == 4
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"][0]["path"] == "/changed\nnodes"
+    assert payload["errors"][0]["message"] == "bad\u2028message"
+    assert payload["errors"][0]["source_kind"] == "dbt\u0085"
+
+
+def test_write_impact_json_stdout_buffer_preserves_lf(monkeypatch: pytest.MonkeyPatch) -> None:
+    text = '{"status":"clear"}\n'
+    raw = io.BytesIO()
+    wrapper = io.TextIOWrapper(raw, encoding="utf-8", newline="\r\n", write_through=True)
+    monkeypatch.setattr(sys, "stdout", wrapper)
+    _write_impact_json_stdout(text)
+    wrapper.flush()
+    assert raw.getvalue() == text.encode("utf-8")
+    assert b"\r\n" not in raw.getvalue()
+
+
+def test_write_impact_json_stdout_fallback_without_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = '{"status":"clear"}\n'
+
+    class _NoBufferStdout:
+        def __init__(self) -> None:
+            self.chunks: list[str] = []
+
+        def write(self, data: str) -> int:
+            self.chunks.append(data)
+            return len(data)
+
+    sink = _NoBufferStdout()
+    monkeypatch.setattr(sys, "stdout", sink)
+    _write_impact_json_stdout(text)
+    assert "".join(sink.chunks) == text
