@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
 from governance.github_ci.paths import PathValidationError, WorkspacePaths
 from governance.github_ci.report import (
     build_annotations,
+    build_impact_annotations,
     render_human_summary,
+    render_impact_human_summary,
+    render_impact_report,
     render_report,
     write_annotations_file,
     write_report_file,
@@ -21,6 +26,8 @@ from governance.github_ci.report import (
 from governance.github_ci.result import (
     ACTION_RESULT_NAME,
     CONFIG_RESULT_NAME,
+    IMPACT_RESULT_NAME,
+    IMPACT_RESULT_VERSION,
     PLAN_RESULT_NAME,
     POLICY_RESULT_NAME,
     RESULT_VERSION,
@@ -33,10 +40,13 @@ from governance.github_ci.result import (
     empty_plan,
     empty_policy,
     empty_validation,
+    load_recognized_impact_result,
     parse_cli_payload,
+    parse_impact_stdout_diagnostic,
     write_action_result,
     write_canonical_json,
 )
+from governance.impact import ImpactError, canonical_impact_json, format_human_value
 
 _SCRUB_ENV_KEYS = frozenset(
     {
@@ -49,6 +59,57 @@ _SCRUB_ENV_KEYS = frozenset(
 )
 
 _PHASE_A_STDERR = "invalid action output directory"
+
+_SOURCE_KIND_FLAGS = (
+    ("dbt", "--dbt-manifest"),
+    ("odcs", "--odcs"),
+    ("openlineage", "--openlineage"),
+)
+
+
+@dataclass(slots=True)
+class ImpactRunState:
+    """Private in-memory orchestration state for operation=impact (not a public contract)."""
+
+    status: str
+    impact_status: str
+    failure_code: str | None
+    impact_result_path: str
+    impact_result_version: str
+    desired_exit_code: int
+    writes_performed: int = 0
+    impact_result: dict[str, Any] | None = None
+    diagnostic: dict[str, Any] | None = None
+    diagnostic_errors: list[dict[str, Any]] = field(default_factory=list)
+
+
+class ActionInputContractError(ValueError):
+    """Invalid Action input contract (Phase A)."""
+
+
+def parse_source_path_array(raw: str, *, field: str) -> list[str]:
+    """Parse a JSON array of workspace-relative path strings for impact sources."""
+    text = raw if isinstance(raw, str) else ""
+    if not text.strip():
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ActionInputContractError(f"{field} must be a JSON array of strings") from exc
+    if not isinstance(payload, list):
+        raise ActionInputContractError(f"{field} must be a JSON array of strings")
+    paths: list[str] = []
+    for index, item in enumerate(payload):
+        if not isinstance(item, str):
+            raise ActionInputContractError(f"{field}[{index}] must be a string")
+        if item == "":
+            raise ActionInputContractError(f"{field}[{index}] must be a non-empty path")
+        if "\x00" in item or "\r" in item or "\n" in item:
+            raise ActionInputContractError(
+                f"{field}[{index}] must not contain NUL, CR, or LF characters"
+            )
+        paths.append(item)
+    return paths
 
 
 def _parse_bool(raw: str, *, field: str) -> bool:
@@ -123,9 +184,10 @@ def desired_exit_code(*, status: str, fail_on_policy_error: bool) -> int:
     return 1
 
 
-def _phase_a_outputs() -> dict[str, str]:
+def _phase_a_outputs(*, operation: str = "") -> dict[str, str]:
+    contract_version = "" if operation == "impact" else RESULT_VERSION
     return {
-        "contract-version": RESULT_VERSION,
+        "contract-version": contract_version,
         "status": "failed",
         "validation-status": "not_run",
         "policy-status": "not_run",
@@ -142,6 +204,9 @@ def _phase_a_outputs() -> dict[str, str]:
         "result-path": "",
         "report-path": "",
         "artifacts-path": "",
+        "impact-status": "not_run",
+        "impact-result-path": "",
+        "impact-result-version": "",
         "desired-exit-code": "1",
         "phase-a-failed": "true",
         "annotations-path": "",
@@ -215,6 +280,302 @@ def _materialize_phase_b(
     else:
         stdout.write(render_human_summary(action_result))
     return 0
+
+
+def _materialize_impact_phase_b(
+    *,
+    output_rel: str,
+    output_abs: Path,
+    state: ImpactRunState,
+    output_format: str,
+    stdout: TextIO,
+) -> int:
+    output_abs.mkdir(parents=True, exist_ok=True)
+    report_text = render_impact_report(
+        impact_status=state.impact_status,
+        impact_result=state.impact_result,
+        impact_result_path=state.impact_result_path or None,
+        failure_code=state.failure_code,
+        diagnostic=state.diagnostic,
+        artifacts_relative=output_rel,
+    )
+    write_report_file(output_abs, report_text)
+    annotations = build_impact_annotations(
+        impact_status=state.impact_status,
+        impact_result=state.impact_result,
+        failure_code=state.failure_code,
+    )
+    write_annotations_file(output_abs, annotations)
+    _write_step_summary(report_text, os.environ)
+
+    report_rel = f"{output_rel}/report.md"
+    annotations_rel = f"{output_rel}/annotations.txt"
+    outputs = {
+        "contract-version": "",
+        "status": state.status,
+        "validation-status": "not_run",
+        "policy-status": "not_run",
+        "policy-violation-count": "0",
+        "policy-error-count": "0",
+        "policy-warning-count": "0",
+        "plan-status": "not_run",
+        "create-count": "0",
+        "update-count": "0",
+        "unchanged-count": "0",
+        "remote-only-count": "0",
+        "writes-performed": "0",
+        "plan-path": "",
+        "result-path": "",
+        "report-path": report_rel,
+        "artifacts-path": output_rel,
+        "impact-status": state.impact_status,
+        "impact-result-path": state.impact_result_path,
+        "impact-result-version": state.impact_result_version,
+        "desired-exit-code": str(state.desired_exit_code),
+        "phase-a-failed": "false",
+        "annotations-path": annotations_rel,
+    }
+    write_github_output(outputs)
+
+    if output_format == "json":
+        if state.impact_result is not None:
+            stdout.write(canonical_impact_json(state.impact_result))
+        elif state.diagnostic is not None:
+            stdout.write(
+                json.dumps(
+                    state.diagnostic,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                )
+                + "\n"
+            )
+        else:
+            # No public machine surface: keep stdout empty; never serialize ImpactRunState.
+            if state.failure_code:
+                print(
+                    format_human_value(f"governance impact failed: {state.failure_code}"),
+                    file=sys.stderr,
+                )
+    else:
+        stdout.write(
+            render_impact_human_summary(
+                impact_status=state.impact_status,
+                impact_result=state.impact_result,
+                impact_result_path=state.impact_result_path or None,
+                failure_code=state.failure_code,
+            )
+        )
+    return 0
+
+
+def _validate_contained_path(
+    paths: WorkspacePaths,
+    raw: str,
+    *,
+    field: str,
+) -> str:
+    relative = paths.normalize_relative(raw, field=field)
+    paths.resolve_under_workspace(relative, field=field)
+    return relative
+
+
+def _parse_impact_sources(
+    paths: WorkspacePaths,
+    *,
+    odcs_raw: str,
+    dbt_raw: str,
+    openlineage_raw: str,
+) -> list[tuple[str, str]]:
+    """Return canonical sorted (kind, relative_path) source specs."""
+    kind_paths: dict[str, list[str]] = {
+        "odcs": parse_source_path_array(odcs_raw, field="impact-odcs"),
+        "dbt": parse_source_path_array(dbt_raw, field="impact-dbt-manifest"),
+        "openlineage": parse_source_path_array(openlineage_raw, field="impact-openlineage"),
+    }
+    specs: list[tuple[str, str]] = []
+    for kind, raw_paths in kind_paths.items():
+        seen: set[str] = set()
+        normalized: list[str] = []
+        field_name = {
+            "odcs": "impact-odcs",
+            "dbt": "impact-dbt-manifest",
+            "openlineage": "impact-openlineage",
+        }[kind]
+        for raw_path in raw_paths:
+            relative = _validate_contained_path(paths, raw_path, field=field_name)
+            if relative in seen:
+                raise ActionInputContractError(f"{field_name} contains duplicate path {relative}")
+            seen.add(relative)
+            normalized.append(relative)
+        for relative in normalized:
+            specs.append((kind, relative))
+    if not specs:
+        raise ActionInputContractError(
+            "impact requires at least one ODCS, dbt-manifest, or OpenLineage source"
+        )
+    specs.sort(key=lambda item: (item[0], item[1]))
+    return specs
+
+
+def _build_impact_cli_argv(
+    *,
+    namespace: str,
+    changes_rel: str,
+    output_rel: str,
+    sources: Sequence[tuple[str, str]],
+    dbt_default_database: str,
+    config_rel: str | None,
+    profile: str,
+) -> list[str]:
+    argv = [
+        "impact",
+        "--namespace",
+        namespace,
+        "--changes",
+        changes_rel,
+        "--output",
+        output_rel,
+        "--format",
+        "json",
+    ]
+    flag_by_kind = {kind: flag for kind, flag in _SOURCE_KIND_FLAGS}
+    for kind, relative in sources:
+        argv.extend([flag_by_kind[kind], relative])
+    if dbt_default_database.strip():
+        argv.extend(["--dbt-default-database", dbt_default_database.strip()])
+    if config_rel is not None:
+        argv.extend(["--config", config_rel])
+        _append_profile(argv, profile)
+    return argv
+
+
+def _run_impact_operation(
+    *,
+    paths: WorkspacePaths,
+    args: argparse.Namespace,
+    output_rel: str,
+    output_abs: Path,
+    sources: Sequence[tuple[str, str]],
+    changes_rel: str,
+    config_rel: str | None,
+    output_format: str,
+    stdout: TextIO,
+) -> int:
+    impact_out_rel = f"{output_rel}/{IMPACT_RESULT_NAME}"
+    impact_out_abs = output_abs / IMPACT_RESULT_NAME
+    argv = _build_impact_cli_argv(
+        namespace=args.impact_namespace.strip(),
+        changes_rel=changes_rel,
+        output_rel=impact_out_rel,
+        sources=sources,
+        dbt_default_database=args.dbt_default_database or "",
+        config_rel=config_rel,
+        profile=args.profile or "",
+    )
+    completed = run_governance_cli(argv, workspace=paths.workspace)
+
+    if completed.returncode in {0, 6}:
+        try:
+            payload = load_recognized_impact_result(impact_out_abs)
+        except ImpactError:
+            state = ImpactRunState(
+                status="failed",
+                impact_status="failed",
+                failure_code="action_contract_invalid",
+                impact_result_path="",
+                impact_result_version="",
+                desired_exit_code=1,
+            )
+            return _materialize_impact_phase_b(
+                output_rel=output_rel,
+                output_abs=output_abs,
+                state=state,
+                output_format=output_format,
+                stdout=stdout,
+            )
+        impact_status = "impacted" if completed.returncode == 6 else "clear"
+        if str(payload.get("status")) != impact_status:
+            state = ImpactRunState(
+                status="failed",
+                impact_status="failed",
+                failure_code="action_contract_invalid",
+                impact_result_path="",
+                impact_result_version="",
+                desired_exit_code=1,
+            )
+            return _materialize_impact_phase_b(
+                output_rel=output_rel,
+                output_abs=output_abs,
+                state=state,
+                output_format=output_format,
+                stdout=stdout,
+            )
+        state = ImpactRunState(
+            status="passed",
+            impact_status=impact_status,
+            failure_code=None,
+            impact_result_path=impact_out_rel,
+            impact_result_version=IMPACT_RESULT_VERSION,
+            desired_exit_code=0,
+            impact_result=payload,
+        )
+        return _materialize_impact_phase_b(
+            output_rel=output_rel,
+            output_abs=output_abs,
+            state=state,
+            output_format=output_format,
+            stdout=stdout,
+        )
+
+    stdout_raw = completed.stdout or ""
+    stdout_nonempty = bool(stdout_raw.strip())
+    diagnostic: dict[str, Any] | None = None
+    parse_error = False
+    if stdout_nonempty:
+        try:
+            diagnostic = parse_impact_stdout_diagnostic(stdout_raw)
+        except CliContractError:
+            parse_error = True
+            diagnostic = None
+
+    code = completed.returncode
+    if code == 2:
+        failure_code = "action_contract_invalid"
+    elif code == 4:
+        # Exit 4 requires a recognized diagnostic machine surface.
+        failure_code = (
+            "configuration_failed" if diagnostic is not None else "action_contract_invalid"
+        )
+    elif code == 1:
+        if not stdout_nonempty:
+            failure_code = "operational_failure"
+        elif parse_error or diagnostic is None:
+            failure_code = "action_contract_invalid"
+        else:
+            failure_code = "operational_failure"
+    else:
+        if parse_error or (stdout_nonempty and diagnostic is None):
+            failure_code = "action_contract_invalid"
+        else:
+            failure_code = "operational_failure"
+
+    state = ImpactRunState(
+        status="failed",
+        impact_status="failed",
+        failure_code=failure_code,
+        impact_result_path="",
+        impact_result_version="",
+        desired_exit_code=1,
+        diagnostic=diagnostic,
+    )
+    return _materialize_impact_phase_b(
+        output_rel=output_rel,
+        output_abs=output_abs,
+        state=state,
+        output_format=output_format,
+        stdout=stdout,
+    )
 
 
 def _config_result_path(output_rel: str) -> str:
@@ -409,10 +770,14 @@ def _run_plan(
 
 def run_orchestration(args: argparse.Namespace, *, stdout: TextIO | None = None) -> int:
     out = sys.stdout if stdout is None else stdout
+    operation = ""
+    impact_sources: list[tuple[str, str]] = []
+    impact_changes_rel = ""
+    impact_config_rel: str | None = None
     try:
         operation = args.operation.strip()
-        if operation not in {"validate", "check", "plan"}:
-            raise ValueError("operation must be validate, check, or plan")
+        if operation not in {"validate", "check", "plan", "impact"}:
+            raise ValueError("operation must be validate, check, plan, or impact")
         output_format = args.output_format.strip()
         if output_format not in {"human", "json"}:
             raise ValueError("output-format must be human or json")
@@ -420,18 +785,58 @@ def run_orchestration(args: argparse.Namespace, *, stdout: TextIO | None = None)
         _parse_bool(args.pr_comment, field="pr-comment")
         paths = WorkspacePaths.from_env()
         output_rel, output_abs = paths.validate_output_directory(args.output_directory)
-    except (ValueError, PathValidationError) as exc:
+
+        config = args.config if isinstance(args.config, str) else ""
+        profile = args.profile or ""
+
+        if operation in {"validate", "check", "plan"} and not config.strip():
+            raise ActionInputContractError("config is required for validate, check, and plan")
+
+        if operation == "impact":
+            namespace = (args.impact_namespace or "").strip()
+            if not namespace:
+                raise ActionInputContractError("impact-namespace is required")
+            changes_raw = args.impact_changes or ""
+            if not str(changes_raw).strip():
+                raise ActionInputContractError("impact-changes is required")
+            impact_changes_rel = _validate_contained_path(
+                paths, str(changes_raw), field="impact-changes"
+            )
+            impact_sources = _parse_impact_sources(
+                paths,
+                odcs_raw=args.impact_odcs or "",
+                dbt_raw=args.impact_dbt_manifest or "",
+                openlineage_raw=args.impact_openlineage or "",
+            )
+            if profile.strip() and not config.strip():
+                raise ActionInputContractError("profile requires config for impact")
+            if config.strip():
+                impact_config_rel = _validate_contained_path(paths, config, field="config")
+    except (ValueError, PathValidationError, ActionInputContractError) as exc:
         message = _PHASE_A_STDERR
         if isinstance(exc, PathValidationError) and exc.code == "missing_workspace":
             message = "GITHUB_WORKSPACE is required"
-        elif isinstance(exc, ValueError):
+        elif isinstance(exc, (ValueError, ActionInputContractError)):
             message = str(exc) or _PHASE_A_STDERR
         print(message, file=sys.stderr)
-        write_github_output(_phase_a_outputs())
+        write_github_output(_phase_a_outputs(operation=operation))
         return 0
 
     # Phase B: safe artifact root.
     output_abs.mkdir(parents=True, exist_ok=True)
+
+    if operation == "impact":
+        return _run_impact_operation(
+            paths=paths,
+            args=args,
+            output_rel=output_rel,
+            output_abs=output_abs,
+            sources=impact_sources,
+            changes_rel=impact_changes_rel,
+            config_rel=impact_config_rel,
+            output_format=output_format,
+            stdout=out,
+        )
 
     plan_rel: str | None = None
     if operation == "plan":
@@ -815,7 +1220,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="Run governance Action orchestration")
-    run.add_argument("--config", required=True)
+    run.add_argument("--config", default="")
     run.add_argument("--profile", default="")
     run.add_argument("--operation", required=True)
     run.add_argument("--output-format", required=True)
@@ -823,6 +1228,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--output-directory", required=True)
     run.add_argument("--plan-path", required=True)
     run.add_argument("--pr-comment", required=True)
+    run.add_argument("--impact-namespace", default="")
+    run.add_argument("--impact-changes", default="")
+    run.add_argument("--impact-odcs", default="")
+    run.add_argument("--impact-dbt-manifest", default="")
+    run.add_argument("--impact-openlineage", default="")
+    run.add_argument("--dbt-default-database", default="")
 
     sub.add_parser(
         "emit-annotations-and-comment-state",

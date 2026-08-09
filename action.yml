@@ -1,7 +1,8 @@
 name: Governance as Code
 description: >
-  Run read-only Governance-as-Code validation, policy checks, and change planning
-  with deterministic Action outputs, Markdown summaries, and optional sticky PR comments.
+  Run read-only Governance-as-Code validation, policy checks, change planning,
+  and impact analysis with deterministic Action outputs, Markdown summaries,
+  and optional sticky PR comments.
 author: fgnfmackk
 
 branding:
@@ -10,14 +11,18 @@ branding:
 
 inputs:
   config:
-    description: Workspace-relative path to governance.yaml
-    required: true
+    description: >
+      Workspace-relative path to governance.yaml.
+      Required for validate/check/plan (enforced in Phase A).
+      Optional for impact (policy relevance only).
+    required: false
+    default: ""
   profile:
     description: Optional governance.yaml profile name
     required: false
     default: ""
   operation:
-    description: Action operation (validate, check, or plan)
+    description: Action operation (validate, check, plan, or impact)
     required: false
     default: plan
   output-format:
@@ -44,10 +49,34 @@ inputs:
     description: Token for sticky comment step only
     required: false
     default: ""
+  impact-namespace:
+    description: Shared logical namespace for impact analysis (required for operation=impact)
+    required: false
+    default: ""
+  impact-changes:
+    description: Workspace-relative governance-impact-changes v1 path (required for operation=impact)
+    required: false
+    default: ""
+  impact-odcs:
+    description: JSON array of workspace-relative ODCS paths (e.g. ["contracts/a.yaml"])
+    required: false
+    default: ""
+  impact-dbt-manifest:
+    description: JSON array of workspace-relative dbt manifest paths
+    required: false
+    default: ""
+  impact-openlineage:
+    description: JSON array of workspace-relative OpenLineage event paths
+    required: false
+    default: ""
+  dbt-default-database:
+    description: Optional default database forwarded to dbt manifest loading
+    required: false
+    default: ""
 
 outputs:
   contract-version:
-    description: Action result contract version
+    description: governance-action-result contract version; empty for impact
     value: ${{ steps.final.outputs.contract-version }}
   status:
     description: Overall governance status
@@ -89,7 +118,7 @@ outputs:
     description: Relative path to generated plan, or empty
     value: ${{ steps.final.outputs.plan-path }}
   result-path:
-    description: Relative path to action-result.json, or empty on Phase A failure
+    description: Relative path to action-result.json, or empty on Phase A failure / impact
     value: ${{ steps.final.outputs.result-path }}
   report-path:
     description: Relative path to report.md, or empty on Phase A failure
@@ -100,6 +129,15 @@ outputs:
   comment-status:
     description: Sticky comment delivery status
     value: ${{ steps.final.outputs.comment-status }}
+  impact-status:
+    description: Impact analysis status (not_run, clear, impacted, or failed)
+    value: ${{ steps.final.outputs.impact-status }}
+  impact-result-path:
+    description: Relative path to impact-result.json, or empty
+    value: ${{ steps.final.outputs.impact-result-path }}
+  impact-result-version:
+    description: governance-impact-result contract version; empty when not recognized / not run
+    value: ${{ steps.final.outputs.impact-result-version }}
 
 runs:
   using: composite
@@ -126,17 +164,37 @@ runs:
       env:
         # Intentionally omit github-token / GITHUB_TOKEN / GH_TOKEN / INPUT_GITHUB_TOKEN.
         GITHUB_WORKSPACE: ${{ github.workspace }}
+        GOV_ACTION_CONFIG: ${{ inputs.config }}
+        GOV_ACTION_PROFILE: ${{ inputs.profile }}
+        GOV_ACTION_OPERATION: ${{ inputs.operation }}
+        GOV_ACTION_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        GOV_ACTION_FAIL_ON_POLICY_ERROR: ${{ inputs.fail-on-policy-error }}
+        GOV_ACTION_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        GOV_ACTION_PLAN_PATH: ${{ inputs.plan-path }}
+        GOV_ACTION_PR_COMMENT: ${{ inputs.pr-comment }}
+        GOV_ACTION_IMPACT_NAMESPACE: ${{ inputs.impact-namespace }}
+        GOV_ACTION_IMPACT_CHANGES: ${{ inputs.impact-changes }}
+        GOV_ACTION_IMPACT_ODCS: ${{ inputs.impact-odcs }}
+        GOV_ACTION_IMPACT_DBT_MANIFEST: ${{ inputs.impact-dbt-manifest }}
+        GOV_ACTION_IMPACT_OPENLINEAGE: ${{ inputs.impact-openlineage }}
+        GOV_ACTION_DBT_DEFAULT_DATABASE: ${{ inputs.dbt-default-database }}
       run: |
         set -euo pipefail
         "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci run \
-          --config "${{ inputs.config }}" \
-          --profile "${{ inputs.profile }}" \
-          --operation "${{ inputs.operation }}" \
-          --output-format "${{ inputs.output-format }}" \
-          --fail-on-policy-error "${{ inputs.fail-on-policy-error }}" \
-          --output-directory "${{ inputs.output-directory }}" \
-          --plan-path "${{ inputs.plan-path }}" \
-          --pr-comment "${{ inputs.pr-comment }}"
+          --config "$GOV_ACTION_CONFIG" \
+          --profile "$GOV_ACTION_PROFILE" \
+          --operation "$GOV_ACTION_OPERATION" \
+          --output-format "$GOV_ACTION_OUTPUT_FORMAT" \
+          --fail-on-policy-error "$GOV_ACTION_FAIL_ON_POLICY_ERROR" \
+          --output-directory "$GOV_ACTION_OUTPUT_DIRECTORY" \
+          --plan-path "$GOV_ACTION_PLAN_PATH" \
+          --pr-comment "$GOV_ACTION_PR_COMMENT" \
+          --impact-namespace "$GOV_ACTION_IMPACT_NAMESPACE" \
+          --impact-changes "$GOV_ACTION_IMPACT_CHANGES" \
+          --impact-odcs "$GOV_ACTION_IMPACT_ODCS" \
+          --impact-dbt-manifest "$GOV_ACTION_IMPACT_DBT_MANIFEST" \
+          --impact-openlineage "$GOV_ACTION_IMPACT_OPENLINEAGE" \
+          --dbt-default-database "$GOV_ACTION_DBT_DEFAULT_DATABASE"
 
     - name: Emit annotations and comment state
       id: comment-state
@@ -200,6 +258,9 @@ runs:
         GOV_RESULT_PATH: ${{ steps.governance-run.outputs.result-path }}
         GOV_REPORT_PATH: ${{ steps.governance-run.outputs.report-path }}
         GOV_ARTIFACTS_PATH: ${{ steps.governance-run.outputs.artifacts-path }}
+        GOV_IMPACT_STATUS: ${{ steps.governance-run.outputs.impact-status }}
+        GOV_IMPACT_RESULT_PATH: ${{ steps.governance-run.outputs.impact-result-path }}
+        GOV_IMPACT_RESULT_VERSION: ${{ steps.governance-run.outputs.impact-result-version }}
       run: |
         set -euo pipefail
         "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci finalize

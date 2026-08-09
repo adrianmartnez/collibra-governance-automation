@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from importlib.resources import files
 from pathlib import Path
@@ -13,10 +14,24 @@ from governance.github_ci.finalize import _PUBLIC_COMMENT_STATUSES
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_YML = REPO_ROOT / "action.yml"
 SCHEMA_NAME = "governance-action-result.v1.schema.json"
+SCHEMA_PATH = REPO_ROOT / "src" / "governance" / "github_ci" / "schemas" / SCHEMA_NAME
+# governance-action-result v1 invariance pin (PR8 base 82192e5).
+# Git blob (authoritative, identical at base and PR HEAD): 9e544262cbeebdc3421bbb21f83279c06afd0593
+# Canonical LF content SHA-256 below; only CRLF→LF is normalized so Windows/Linux
+# checkout EOL differences do not false-fail the pin.
+EXPECTED_ACTION_RESULT_SCHEMA_CANONICAL_SHA256 = (
+    "ceb4b853d00d976df0f872d914951f202308f92b1ac4d2a909ca2e5e7b96cf88"
+)
 EXPECTED_SETUP_PYTHON = "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0"
 
+
+def _canonical_schema_bytes(raw: bytes) -> bytes:
+    """Normalize working-tree EOL only (CRLF → LF); no other transforms."""
+    return raw.replace(b"\r\n", b"\n")
+
+
 EXPECTED_INPUTS = {
-    "config": {"required": True},
+    "config": {"required": False, "default": ""},
     "profile": {"required": False, "default": ""},
     "operation": {"required": False, "default": "plan"},
     "output-format": {"required": False, "default": "human"},
@@ -25,6 +40,12 @@ EXPECTED_INPUTS = {
     "plan-path": {"required": False, "default": ".governance/governance.gplan"},
     "pr-comment": {"required": False, "default": "false"},
     "github-token": {"required": False, "default": ""},
+    "impact-namespace": {"required": False, "default": ""},
+    "impact-changes": {"required": False, "default": ""},
+    "impact-odcs": {"required": False, "default": ""},
+    "impact-dbt-manifest": {"required": False, "default": ""},
+    "impact-openlineage": {"required": False, "default": ""},
+    "dbt-default-database": {"required": False, "default": ""},
 }
 
 EXPECTED_OUTPUTS = (
@@ -46,6 +67,26 @@ EXPECTED_OUTPUTS = (
     "report-path",
     "artifacts-path",
     "comment-status",
+    "impact-status",
+    "impact-result-path",
+    "impact-result-version",
+)
+
+ORCHESTRATION_ENV_KEYS = (
+    "GOV_ACTION_CONFIG",
+    "GOV_ACTION_PROFILE",
+    "GOV_ACTION_OPERATION",
+    "GOV_ACTION_OUTPUT_FORMAT",
+    "GOV_ACTION_FAIL_ON_POLICY_ERROR",
+    "GOV_ACTION_OUTPUT_DIRECTORY",
+    "GOV_ACTION_PLAN_PATH",
+    "GOV_ACTION_PR_COMMENT",
+    "GOV_ACTION_IMPACT_NAMESPACE",
+    "GOV_ACTION_IMPACT_CHANGES",
+    "GOV_ACTION_IMPACT_ODCS",
+    "GOV_ACTION_IMPACT_DBT_MANIFEST",
+    "GOV_ACTION_IMPACT_OPENLINEAGE",
+    "GOV_ACTION_DBT_DEFAULT_DATABASE",
 )
 
 
@@ -149,6 +190,28 @@ def test_schema_packaged_via_importlib_resources() -> None:
     assert schema["$id"] == ("urn:collibra-governance-automation:schema:governance-action-result:1")
 
 
+def test_action_result_schema_bytes_and_sha_preserved() -> None:
+    raw = SCHEMA_PATH.read_bytes()
+    canonical = _canonical_schema_bytes(raw)
+    assert hashlib.sha256(canonical).hexdigest() == EXPECTED_ACTION_RESULT_SCHEMA_CANONICAL_SHA256
+    schema = json.loads(canonical.decode("utf-8"))
+    assert schema["$id"] == ("urn:collibra-governance-automation:schema:governance-action-result:1")
+    assert schema["properties"]["operation"]["enum"] == ["validate", "check", "plan"]
+    assert "impact" not in schema["properties"]["operation"]["enum"]
+
+
+def test_action_result_schema_canonical_sha_ignores_crlf_checkout() -> None:
+    raw = SCHEMA_PATH.read_bytes()
+    lf = _canonical_schema_bytes(raw)
+    crlf = lf.replace(b"\n", b"\r\n")
+    assert hashlib.sha256(_canonical_schema_bytes(lf)).hexdigest() == (
+        EXPECTED_ACTION_RESULT_SCHEMA_CANONICAL_SHA256
+    )
+    assert hashlib.sha256(_canonical_schema_bytes(crlf)).hexdigest() == (
+        EXPECTED_ACTION_RESULT_SCHEMA_CANONICAL_SHA256
+    )
+
+
 def test_schema_id_urn_and_enums_exclude_reporting_failure() -> None:
     schema = _load_schema()
     assert schema["$id"] == ("urn:collibra-governance-automation:schema:governance-action-result:1")
@@ -201,3 +264,17 @@ def test_runner_steps_use_isolated_python_dash_i() -> None:
     assert "GH_TOKEN" not in env
     assert "INPUT_GITHUB_TOKEN" not in env
     assert "Intentionally omit" in _action_text()
+
+
+def test_orchestration_uses_env_transport_not_input_interpolation_in_argv() -> None:
+    action = _load_action()
+    run_step = next(step for step in action["runs"]["steps"] if step.get("id") == "governance-run")
+    env = run_step.get("env") or {}
+    for key in ORCHESTRATION_ENV_KEYS:
+        assert key in env
+    run_script = run_step["run"]
+    assert "${{ inputs." not in run_script
+    assert '--impact-odcs "$GOV_ACTION_IMPACT_ODCS"' in run_script
+    assert '--config "$GOV_ACTION_CONFIG"' in run_script
+    assert "contract-version" in action["outputs"]
+    assert "empty for impact" in action["outputs"]["contract-version"]["description"].lower()

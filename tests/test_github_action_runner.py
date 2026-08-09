@@ -48,6 +48,12 @@ def _run_args(**overrides: Any) -> argparse.Namespace:
         "output_directory": ".governance",
         "plan_path": ".governance/governance.gplan",
         "pr_comment": "false",
+        "impact_namespace": "",
+        "impact_changes": "",
+        "impact_odcs": "",
+        "impact_dbt_manifest": "",
+        "impact_openlineage": "",
+        "dbt_default_database": "",
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)

@@ -41,6 +41,9 @@ _GOVERNANCE_OUTPUT_KEYS = (
     "result-path",
     "report-path",
     "artifacts-path",
+    "impact-status",
+    "impact-result-path",
+    "impact-result-version",
 )
 
 
@@ -203,7 +206,7 @@ def finalize_outputs() -> int:
         outputs[key] = _read_env(env_key, "")
 
     if phase_a_failed:
-        outputs.setdefault("contract-version", RESULT_VERSION)
+        # governance-run always emits contract-version ("" for impact, "1" for legacy).
         outputs["status"] = outputs.get("status") or "failed"
         outputs["validation-status"] = "not_run"
         outputs["policy-status"] = outputs.get("policy-status") or "not_run"
@@ -223,10 +226,13 @@ def finalize_outputs() -> int:
         outputs["result-path"] = ""
         outputs["report-path"] = ""
         outputs["artifacts-path"] = ""
+        outputs["impact-status"] = outputs.get("impact-status") or "not_run"
+        outputs["impact-result-path"] = ""
+        outputs["impact-result-version"] = ""
         desired = "1"
     else:
-        # Minimal hard-failure contract when essential outputs are missing.
-        if not outputs.get("result-path") and not outputs.get("status"):
+        # Impact runs intentionally leave result-path empty while status is set.
+        if not outputs.get("status"):
             outputs.update(
                 {
                     "contract-version": RESULT_VERSION,
@@ -246,11 +252,22 @@ def finalize_outputs() -> int:
                     "result-path": "",
                     "report-path": "",
                     "artifacts-path": "",
+                    "impact-status": "not_run",
+                    "impact-result-path": "",
+                    "impact-result-version": "",
                 }
             )
             desired = "1"
-        outputs.setdefault("contract-version", RESULT_VERSION)
+        # Do not force contract-version=1 over intentional empty impact value.
+        if outputs.get("impact-status") in {"clear", "impacted", "failed"}:
+            if "contract-version" not in outputs:
+                outputs["contract-version"] = ""
+        else:
+            outputs.setdefault("contract-version", RESULT_VERSION)
         outputs.setdefault("writes-performed", "0")
+        outputs.setdefault("impact-status", "not_run")
+        outputs.setdefault("impact-result-path", "")
+        outputs.setdefault("impact-result-version", "")
 
     final_exit = desired
     if comment_status == "failed":
