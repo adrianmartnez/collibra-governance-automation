@@ -16,6 +16,12 @@ from governance.domain.graph import (
     GraphNodeIdentity,
     ProvenanceRecord,
 )
+from governance.domain.impact import (
+    GovernanceImpactResult,
+    ImpactPath,
+    ImpactStep,
+    analyze_downstream_impact,
+)
 from governance.domain.lineage import (
     ColumnLineageAssertion,
     materialize_column_lineage_edges,
@@ -57,16 +63,20 @@ __all__ = [
     "DataSource",
     "ForeignKey",
     "GovernanceGraph",
+    "GovernanceImpactResult",
     "GovernanceModel",
     "GraphEdge",
     "GraphNode",
     "GraphNodeIdentity",
+    "ImpactPath",
+    "ImpactStep",
     "Ownership",
     "PrimaryKey",
     "ProvenanceRecord",
     "Relationship",
     "Schema",
     "Table",
+    "analyze_downstream_impact",
     "make_column_id",
     "make_database_id",
     "make_datasource_id",
