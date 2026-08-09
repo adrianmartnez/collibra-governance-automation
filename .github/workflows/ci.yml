@@ -272,9 +272,101 @@ jobs:
           test -f "${{ steps.gac-action-blocked.outputs.report-path }}"
           python -c "import json; p=json.load(open('${{ steps.gac-action-blocked.outputs.result-path }}',encoding='utf-8')); assert p['status']=='blocked'; assert p['failure_code']=='policy_blocked'; assert p['execution']['writes_performed']==0"
 
+      - name: Official Action impact CLEAR smoke
+        id: gac-action-impact-clear
+        uses: ./
+        with:
+          operation: impact
+          pr-comment: "false"
+          output-directory: .governance-ci-impact-clear
+          impact-namespace: analytics
+          impact-changes: tests/fixtures/github_action/impact/changes.json
+          impact-dbt-manifest: '["tests/fixtures/github_action/impact/manifest.clear.json"]'
+
+      - name: Assert impact CLEAR Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-impact-clear.outcome }}" = "success"
+          test "${{ steps.gac-action-impact-clear.outputs.status }}" = "passed"
+          test "${{ steps.gac-action-impact-clear.outputs.impact-status }}" = "clear"
+          test "${{ steps.gac-action-impact-clear.outputs.contract-version }}" = ""
+          test "${{ steps.gac-action-impact-clear.outputs.result-path }}" = ""
+          test "${{ steps.gac-action-impact-clear.outputs.impact-result-version }}" = "1"
+          test "${{ steps.gac-action-impact-clear.outputs.writes-performed }}" = "0"
+          test -f "${{ steps.gac-action-impact-clear.outputs.impact-result-path }}"
+          test -f "${{ steps.gac-action-impact-clear.outputs.report-path }}"
+          test ! -f "${{ steps.gac-action-impact-clear.outputs.artifacts-path }}/action-result.json"
+          test -f "${{ steps.gac-action-impact-clear.outputs.artifacts-path }}/annotations.txt"
+          test ! -s "${{ steps.gac-action-impact-clear.outputs.artifacts-path }}/annotations.txt"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-impact-clear.outputs.impact-result-path }}',encoding='utf-8')); assert p['result_schema']=='governance-impact-result'; assert p['result_version']=='1'; assert p['status']=='clear'; assert p['writes_performed']==0"
+
+      - name: Official Action impact IMPACTED smoke
+        id: gac-action-impact-impacted
+        uses: ./
+        with:
+          operation: impact
+          pr-comment: "false"
+          output-directory: .governance-ci-impact-impacted
+          impact-namespace: analytics
+          impact-changes: tests/fixtures/github_action/impact/changes.json
+          impact-dbt-manifest: '["tests/fixtures/github_action/impact/manifest.impacted.json"]'
+
+      - name: Assert impact IMPACTED Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-impact-impacted.outcome }}" = "success"
+          test "${{ steps.gac-action-impact-impacted.outputs.status }}" = "passed"
+          test "${{ steps.gac-action-impact-impacted.outputs.impact-status }}" = "impacted"
+          test "${{ steps.gac-action-impact-impacted.outputs.contract-version }}" = ""
+          test "${{ steps.gac-action-impact-impacted.outputs.result-path }}" = ""
+          test "${{ steps.gac-action-impact-impacted.outputs.impact-result-version }}" = "1"
+          test "${{ steps.gac-action-impact-impacted.outputs.writes-performed }}" = "0"
+          test -f "${{ steps.gac-action-impact-impacted.outputs.impact-result-path }}"
+          test -f "${{ steps.gac-action-impact-impacted.outputs.report-path }}"
+          grep -q "IMPACT: IMPACTED" "${{ steps.gac-action-impact-impacted.outputs.report-path }}"
+          ann="${{ steps.gac-action-impact-impacted.outputs.artifacts-path }}/annotations.txt"
+          test -f "${ann}"
+          test "$(grep -c '::warning::' "${ann}")" = "1"
+          grep -q "governance impact: impacted" "${ann}"
+          test "$(grep -c '::error::' "${ann}" || true)" = "0"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-impact-impacted.outputs.impact-result-path }}',encoding='utf-8')); assert p['result_schema']=='governance-impact-result'; assert p['status']=='impacted'; assert p['writes_performed']==0"
+
+      - name: Official Action impact ERROR smoke
+        id: gac-action-impact-error
+        continue-on-error: true
+        uses: ./
+        with:
+          operation: impact
+          pr-comment: "false"
+          output-directory: .governance-ci-impact-error
+          impact-namespace: analytics
+          impact-changes: tests/fixtures/github_action/impact/changes.invalid.json
+          impact-dbt-manifest: '["tests/fixtures/github_action/impact/manifest.clear.json"]'
+
+      - name: Assert impact ERROR Action finalization
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-impact-error.outcome }}" = "failure"
+          test "${{ steps.gac-action-impact-error.outputs.status }}" = "failed"
+          test "${{ steps.gac-action-impact-error.outputs.impact-status }}" = "failed"
+          test "${{ steps.gac-action-impact-error.outputs.impact-result-version }}" = ""
+          test "${{ steps.gac-action-impact-error.outputs.writes-performed }}" = "0"
+          test -n "${{ steps.gac-action-impact-error.outputs.report-path }}"
+          test -n "${{ steps.gac-action-impact-error.outputs.artifacts-path }}"
+          test -f "${{ steps.gac-action-impact-error.outputs.report-path }}"
+          test -d "${{ steps.gac-action-impact-error.outputs.artifacts-path }}"
+          ann="${{ steps.gac-action-impact-error.outputs.artifacts-path }}/annotations.txt"
+          test -f "${ann}"
+          test "$(grep -c '::error::' "${ann}")" = "1"
+          ! grep -q "changed_nodes" "${ann}"
+          ! grep -q "manifest.clear.json" "${ann}"
+
       - name: Cleanup Action smoke artifacts
         if: ${{ always() }}
-        run: rm -rf .governance-ci-action .governance-ci-blocked
+        run: rm -rf .governance-ci-action .governance-ci-blocked .governance-ci-impact-clear .governance-ci-impact-impacted .governance-ci-impact-error
 
       - name: Teardown
         if: always()

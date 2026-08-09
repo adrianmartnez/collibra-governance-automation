@@ -312,17 +312,25 @@ The Action installs this package into a fresh Action-owned virtualenv under `RUN
 
 | Input | Default | Notes |
 | --- | --- | --- |
-| `config` | required | Workspace-relative path to `governance.yaml` |
-| `profile` | `""` | Forwarded as `--profile` when non-empty |
-| `operation` | `plan` | `validate` \| `check` \| `plan` (Action mode, not Collibra `--mode`) |
+| `config` | `""` | Required for `validate`/`check`/`plan` (Phase A). Optional for `impact` (policy relevance only) |
+| `profile` | `""` | Forwarded as `--profile` when non-empty; for impact requires `config` |
+| `operation` | `plan` | `validate` \| `check` \| `plan` \| `impact` (Action mode, not Collibra `--mode`) |
 | `output-format` | `human` | Console only (`human` \| `json`); does not change artifacts or step summary |
 | `fail-on-policy-error` | `"true"` | Final gate exits `3` when status is blocked |
 | `output-directory` | `.governance` | Artifact root; must stay inside the workspace |
 | `plan-path` | `.governance/governance.gplan` | Must be under `output-directory` |
 | `pr-comment` | `"false"` | Opt-in sticky PR comment |
 | `github-token` | `""` | Comment step only; never passed to governance CLI |
+| `impact-namespace` | `""` | Required for `operation: impact` |
+| `impact-changes` | `""` | Workspace-relative `governance-impact-changes` v1 path |
+| `impact-odcs` | `""` | JSON array of ODCS paths, e.g. `["contracts/a.yaml"]` |
+| `impact-dbt-manifest` | `""` | JSON array of dbt manifest paths |
+| `impact-openlineage` | `""` | JSON array of OpenLineage event paths |
+| `dbt-default-database` | `""` | Optional default database for dbt loading |
 
 Provider credentials are **not** Action inputs. They remain environment variables referenced by governance.yaml `*_env` keys.
+
+For `operation: impact`, `contract-version` and `result-path` are empty. Use `impact-status`, `impact-result-path`, and `impact-result-version` instead. The machine blast-radius artifact is `governance-impact-result` v1 (`impact-result.json`). Impact is read-only (`writes-performed=0`). CLI exit `6` (`impacted`) is domain success and does not fail the Action by default.
 
 ### A. Fork-safe validation
 
@@ -348,6 +356,24 @@ Do not use `pull_request_target` with an untrusted PR checkout and secrets.
 ### B. Governance check
 
 `operation: check` evaluates policies against a PostgreSQL source. Set `DATABASE_URL` (or the discrete connection env vars from your config). No Collibra I/O is required for check.
+
+### B2. Governance impact (read-only)
+
+```yaml
+- id: gac-impact
+  uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+  with:
+    operation: impact
+    impact-namespace: analytics
+    impact-changes: changes/impact-changes.json
+    impact-dbt-manifest: '["dbt/target/manifest.json"]'
+    # impact-odcs: '["contracts/orders.yaml"]'
+    # impact-openlineage: '["lineage/events.json"]'
+    pr-comment: "false"
+    output-directory: .governance
+```
+
+At least one of `impact-odcs`, `impact-dbt-manifest`, or `impact-openlineage` is required. Source lists are JSON arrays (not comma-separated). Optional `config`/`profile` enable policy relevance matching only (not policy blocking). Upload `${{ steps.gac-impact.outputs.artifacts-path }}` to retain `impact-result.json` and `report.md`.
 
 ### C. Trusted deterministic planning
 
@@ -448,7 +474,7 @@ CI defines seven `ubuntu-latest` jobs:
 - `postgres-integration`
 - `metadata-integration`
 - `collibra-integration`
-- `cli-integration` (includes official Action `uses: ./` PASS and BLOCKED smokes)
+- `cli-integration` (includes official Action `uses: ./` PASS, BLOCKED, impact CLEAR/IMPACTED/ERROR smokes)
 
 No commercial Collibra tenant, self-hosted runners, or OS matrix is required.
 
