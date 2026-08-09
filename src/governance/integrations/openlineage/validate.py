@@ -37,6 +37,10 @@ _EVENT_TYPES = frozenset({"START", "RUNNING", "COMPLETE", "ABORT", "FAIL", "OTHE
 
 SUPPORTED_DATASET_FACETS = frozenset({"schema", "hierarchy", "datasetType", "storage", "ownership"})
 
+_COLUMN_LINEAGE_SCHEMA_URL = (
+    "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json"
+)
+
 
 def _validation_error(path: str, message: str) -> OpenLineageValidationError:
     return OpenLineageValidationError(
@@ -263,12 +267,96 @@ def _validate_supported_facet(key: str, facet: Mapping[str, Any], *, path: str) 
         return
 
 
+def _validate_column_lineage_input_field(value: object, *, path: str) -> None:
+    mapping = _require_mapping(value, path=path)
+    _require_non_empty_str(mapping.get("namespace"), path=_pointer(path, "namespace"))
+    _require_non_empty_str(mapping.get("name"), path=_pointer(path, "name"))
+    _require_non_empty_str(mapping.get("field"), path=_pointer(path, "field"))
+    if "transformations" not in mapping:
+        return
+    transformations = _require_list(
+        mapping["transformations"], path=_pointer(path, "transformations")
+    )
+    for index, transformation in enumerate(transformations):
+        t_path = _pointer(path, "transformations", index)
+        t_mapping = _require_mapping(transformation, path=t_path)
+        _require_non_empty_str(t_mapping.get("type"), path=_pointer(t_path, "type"))
+        if "subtype" in t_mapping and not isinstance(t_mapping["subtype"], str):
+            raise _validation_error(_pointer(t_path, "subtype"), "value must be a string")
+        if "description" in t_mapping and not isinstance(t_mapping["description"], str):
+            raise _validation_error(_pointer(t_path, "description"), "value must be a string")
+        if "masking" in t_mapping and not isinstance(t_mapping["masking"], bool):
+            raise _validation_error(_pointer(t_path, "masking"), "value must be a boolean")
+
+
+def _validate_column_lineage_facet(facet: Mapping[str, Any], *, path: str) -> None:
+    _require_uri_string(facet.get("_producer"), path=_pointer(path, "_producer"))
+    schema_url = facet.get("_schemaURL")
+    _require_uri_string(schema_url, path=_pointer(path, "_schemaURL"))
+    if schema_url != _COLUMN_LINEAGE_SCHEMA_URL:
+        raise _validation_error(
+            _pointer(path, "_schemaURL"),
+            "unsupported columnLineage facet schemaURL",
+        )
+    if "_deleted" in facet:
+        if not isinstance(facet["_deleted"], bool):
+            raise _validation_error(_pointer(path, "_deleted"), "value must be a boolean")
+        if facet["_deleted"] is True:
+            raise _validation_error(
+                _pointer(path, "_deleted"),
+                "supported facet deletion is not supported without temporal authority",
+            )
+
+    if "fields" not in facet:
+        raise _validation_error(_pointer(path, "fields"), "missing required property")
+    fields = _require_mapping(facet["fields"], path=_pointer(path, "fields"))
+    for field_name, field_value in fields.items():
+        field_path = _pointer(path, "fields", field_name)
+        if not isinstance(field_name, str) or not field_name.strip():
+            raise _validation_error(field_path, "value must be a non-empty string")
+        field_mapping = _require_mapping(field_value, path=field_path)
+        if "inputFields" not in field_mapping:
+            raise _validation_error(
+                _pointer(field_path, "inputFields"),
+                "missing required property",
+            )
+        input_fields = _require_list(
+            field_mapping["inputFields"], path=_pointer(field_path, "inputFields")
+        )
+        for index, input_field in enumerate(input_fields):
+            _validate_column_lineage_input_field(
+                input_field,
+                path=_pointer(field_path, "inputFields", index),
+            )
+        if "transformationDescription" in field_mapping and not isinstance(
+            field_mapping["transformationDescription"], str
+        ):
+            raise _validation_error(
+                _pointer(field_path, "transformationDescription"),
+                "value must be a string",
+            )
+        if "transformationType" in field_mapping and not isinstance(
+            field_mapping["transformationType"], str
+        ):
+            raise _validation_error(
+                _pointer(field_path, "transformationType"),
+                "value must be a string",
+            )
+
+    if "dataset" in facet:
+        dataset_items = _require_list(facet["dataset"], path=_pointer(path, "dataset"))
+        for index, item in enumerate(dataset_items):
+            _validate_column_lineage_input_field(item, path=_pointer(path, "dataset", index))
+
+
 def _validate_dataset_facets(facets: object, *, path: str) -> None:
     mapping = _require_mapping(facets, path=path)
     for key, facet in mapping.items():
         facet_path = _pointer(path, key)
         facet_mapping = _require_mapping(facet, path=facet_path)
-        if key in SUPPORTED_DATASET_FACETS:
+        if key == "columnLineage":
+            _validate_column_lineage_facet(facet_mapping, path=facet_path)
+        elif key in SUPPORTED_DATASET_FACETS:
             _validate_supported_facet(key, facet_mapping, path=facet_path)
 
 
