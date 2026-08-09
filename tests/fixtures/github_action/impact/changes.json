@@ -1,0 +1,1 @@
+{"changes_schema": "governance-impact-changes", "changes_version": "1", "changed_nodes": [{"namespace": "analytics", "kind": "table", "logical_id": "orders", "parent": {"namespace": "analytics", "kind": "dataset", "logical_id": "public", "parent": {"namespace": "analytics", "kind": "data_source", "logical_id": "db", "parent": null}}}]}

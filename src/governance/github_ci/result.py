@@ -6,10 +6,21 @@ import json
 from pathlib import Path
 from typing import Any
 
+from governance.impact import (
+    IMPACT_DIAGNOSTIC_SCHEMA,
+    IMPACT_DIAGNOSTIC_VERSION,
+    load_impact_result,
+)
+from governance.impact import (
+    RESULT_VERSION as IMPACT_CONTRACT_RESULT_VERSION,
+)
 from governance.io.atomic import atomic_write_text
 
 RESULT_SCHEMA = "governance-action-result"
 RESULT_VERSION = "1"
+
+# Alias of the public impact contract version — not action-result RESULT_VERSION.
+IMPACT_RESULT_VERSION = IMPACT_CONTRACT_RESULT_VERSION
 
 CONFIG_DIAGNOSTIC_SCHEMA = "governance-config-diagnostics"
 POLICY_REPORT_SCHEMA = "governance-policy-report"
@@ -22,6 +33,7 @@ KNOWN_DIAGNOSTIC_SCHEMAS = frozenset(
         "governance-plan-diagnostics",
         "governance-operation-diagnostics",
         "governance-config-resolution-diagnostics",
+        IMPACT_DIAGNOSTIC_SCHEMA,
     }
 )
 
@@ -29,6 +41,7 @@ CONFIG_RESULT_NAME = "config-result.json"
 POLICY_RESULT_NAME = "policy-result.json"
 PLAN_RESULT_NAME = "plan-result.json"
 ACTION_RESULT_NAME = "action-result.json"
+IMPACT_RESULT_NAME = "impact-result.json"
 REPORT_NAME = "report.md"
 ANNOTATIONS_NAME = "annotations.txt"
 
@@ -295,4 +308,27 @@ def action_result_outputs(action_result: dict[str, Any]) -> dict[str, str]:
         "remote-only-count": str(plan["remote_only_count"]),
         "writes-performed": "0",
         "plan-path": "" if plan["plan_path"] is None else str(plan["plan_path"]),
+        "impact-status": "not_run",
+        "impact-result-path": "",
+        "impact-result-version": "",
     }
+
+
+def load_recognized_impact_result(path: Path) -> dict[str, Any]:
+    """Load impact-result via the authoritative impact contract validator."""
+    return load_impact_result(path)
+
+
+def parse_impact_stdout_diagnostic(raw: str) -> dict[str, Any]:
+    """Parse a known versioned diagnostic family from impact CLI stdout."""
+    payload = parse_json_object(raw)
+    schema = payload.get("diagnostic_schema")
+    if schema == IMPACT_DIAGNOSTIC_SCHEMA:
+        if payload.get("diagnostic_version") != IMPACT_DIAGNOSTIC_VERSION:
+            raise CliContractError("unexpected impact diagnostic_version")
+        return payload
+    if schema in KNOWN_DIAGNOSTIC_SCHEMAS:
+        if payload.get("diagnostic_version") != CONTRACT_VERSION_VALUE:
+            raise CliContractError("unexpected diagnostic_version")
+        return payload
+    raise CliContractError("unrecognized diagnostic_schema")
