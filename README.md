@@ -1,5 +1,7 @@
 # collibra-governance-automation
 
+[![CI](https://github.com/fgnfmackk/collibra-governance-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fgnfmackk/collibra-governance-automation/actions/workflows/ci.yml)
+
 Deterministic Governance-as-Code and governance change intelligence between metadata sources, open standards, policies, lineage, pull-request review, and governance platforms.
 
 Flow:
@@ -22,21 +24,21 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 
 | Area | Status |
 | --- | --- |
-| PostgreSQL technical metadata discovery | Real against local demo |
-| Vendor-neutral governance model | Real |
+| PostgreSQL technical metadata discovery | Implemented (local PostgreSQL demo) |
+| Vendor-neutral governance model | Implemented |
 | Governance graph + provenance foundation | Deterministic |
-| Deterministic inventory / snapshot artifacts | Real |
-| Governance-as-Code (`governance.yaml`, policies, saved plans) | Real (opt-in via `--config`) |
-| Open Data Contract Standard (ODCS) ingestion | Real |
-| dbt manifest metadata + dependency edges | Real |
-| OpenLineage events + dataset facets | Real |
-| Deterministic column-level lineage | Real |
+| Deterministic inventory / snapshot artifacts | Implemented |
+| Governance-as-Code (`governance.yaml`, policies, saved plans) | Implemented (opt-in via `--config`) |
+| Open Data Contract Standard (ODCS) ingestion | Implemented |
+| dbt manifest metadata + dependency edges | Implemented |
+| OpenLineage events + dataset facets | Implemented |
+| Deterministic column-level lineage | Implemented |
 | Downstream traversal / blast-radius analysis | Deterministic |
 | `governance impact` CLI + impact changes/result v1 artifacts | Contract-tested |
-| GitHub Action `operation: impact` + PR/step-summary reports | Real (read-only) |
-| Collibra mapping + mock adapter | Real, local/offline |
+| GitHub Action `operation: impact` + PR/step-summary reports | Implemented (read-only) |
+| Collibra mapping + mock adapter | Implemented (local/offline) |
 | Live Collibra Core REST API v2 adapter | Contract-tested |
-| Safe plan-driven reconciliation (dry-run by default) | Real |
+| Safe plan-driven reconciliation (dry-run by default) | Implemented |
 | Commercial Collibra tenant validation | Not claimed |
 
 Central safety: sync/apply default to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. Impact performs zero remote writes. No automatic deletes. No automatic remediation from impact.
