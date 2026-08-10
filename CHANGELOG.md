@@ -80,7 +80,7 @@
 - Sticky pull request comments are opt-in
 - This package remains a technical governance automation project, not a hosted governance platform
 
-## 1.0.0
+## 1.0.0 - 2026-08-07
 
 ### Added
 
