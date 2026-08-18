@@ -19,7 +19,12 @@ from governance.integrations.collibra.import_api import (
     compile_import_document,
     prove_import_create_identifiers_absent,
 )
-from governance.integrations.collibra.jobs import JobView, is_terminal_success
+from governance.integrations.collibra.jobs import (
+    JobView,
+    SubmissionState,
+    is_terminal_success,
+    observe_job,
+)
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import SyncPlan
 
@@ -49,7 +54,7 @@ class SyncLifecycleResult:
     synchronization_id: str
     batch_job_ids: tuple[str, ...]
     batch_jobs: tuple[JobView, ...]
-    finalization_submitted: bool
+    finalization_submission_state: SubmissionState
     finalization_job_id: str | None
     finalization_job: JobView | None
     success: bool
@@ -57,6 +62,10 @@ class SyncLifecycleResult:
     unchanged_count: int
     import_error_summary: dict[str, int] | None = None
     error: str | None = None
+
+    @property
+    def finalization_submitted(self) -> bool:
+        return self.finalization_submission_state == "submitted"
 
     @property
     def report(self) -> SyncExecutionReport:
@@ -139,26 +148,28 @@ def _batch_failure(
     document: ImportDocument,
     sync_id: str,
     unchanged_count: int,
-    batch_job_id: str,
-    batch_view: JobView,
+    batch_job_ids: tuple[str, ...],
+    batch_jobs: tuple[JobView, ...],
     adapter: Any,
+    batch_view: JobView,
+    error: str,
 ) -> SyncLifecycleResult:
-    outcome = batch_view.normalized_outcome or batch_view.normalized_state
+    failing_id = batch_view.job_id or (batch_job_ids[-1] if batch_job_ids else "")
     return SyncLifecycleResult(
         plan=plan,
         document=document,
         dry_run=False,
         synchronization_id=sync_id,
-        batch_job_ids=(batch_job_id,),
-        batch_jobs=(batch_view,),
-        finalization_submitted=False,
+        batch_job_ids=batch_job_ids,
+        batch_jobs=batch_jobs,
+        finalization_submission_state="not_attempted",
         finalization_job_id=None,
         finalization_job=None,
         success=False,
         applied_count=0,
         unchanged_count=unchanged_count,
-        import_error_summary=_best_effort_import_error_summary(adapter, batch_job_id),
-        error=f"sync batch job outcome={outcome}",
+        import_error_summary=_best_effort_import_error_summary(adapter, failing_id),
+        error=error,
     )
 
 
@@ -182,7 +193,7 @@ def execute_sync_v2(
             synchronization_id=sync_id,
             batch_job_ids=(),
             batch_jobs=(),
-            finalization_submitted=False,
+            finalization_submission_state="not_attempted",
             finalization_job_id=None,
             finalization_job=None,
             success=True,
@@ -197,7 +208,7 @@ def execute_sync_v2(
             synchronization_id=sync_id,
             batch_job_ids=(),
             batch_jobs=(),
-            finalization_submitted=False,
+            finalization_submission_state="not_attempted",
             finalization_job_id=None,
             finalization_job=None,
             success=True,
@@ -216,7 +227,7 @@ def execute_sync_v2(
             synchronization_id=sync_id,
             batch_job_ids=(),
             batch_jobs=(),
-            finalization_submitted=False,
+            finalization_submission_state="not_attempted",
             finalization_job_id=None,
             finalization_job=None,
             success=False,
@@ -236,7 +247,7 @@ def execute_sync_v2(
             synchronization_id=sync_id,
             batch_job_ids=(),
             batch_jobs=(),
-            finalization_submitted=False,
+            finalization_submission_state="not_attempted",
             finalization_job_id=None,
             finalization_job=None,
             success=False,
@@ -244,19 +255,56 @@ def execute_sync_v2(
             unchanged_count=unchanged_count,
             error="sync batch job outcome=uncertain",
         )
-    batch_view = poll_job(batch_job_id)
+    batch_view, observation_error = observe_job(poll_job, batch_job_id)
+    if observation_error is not None:
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(batch_job_id,),
+            batch_jobs=(),
+            finalization_submission_state="not_attempted",
+            finalization_job_id=None,
+            finalization_job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error=observation_error,
+        )
+    assert batch_view is not None
     if not is_terminal_success(batch_view):
+        outcome = batch_view.normalized_outcome or batch_view.normalized_state
         return _batch_failure(
             plan=plan,
             document=document,
             sync_id=sync_id,
             unchanged_count=unchanged_count,
-            batch_job_id=batch_job_id,
-            batch_view=batch_view,
+            batch_job_ids=(batch_job_id,),
+            batch_jobs=(batch_view,),
             adapter=adapter,
+            batch_view=batch_view,
+            error=f"sync batch job outcome={outcome}",
         )
 
-    finalize_submission = submit_finalize(sync_id, strategy=FINALIZATION_STRATEGY_IGNORE)
+    try:
+        finalize_submission = submit_finalize(sync_id, strategy=FINALIZATION_STRATEGY_IGNORE)
+    except CollibraAdapterError:
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(batch_job_id,),
+            batch_jobs=(batch_view,),
+            finalization_submission_state="unknown",
+            finalization_job_id=None,
+            finalization_job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error="sync finalization job outcome=uncertain",
+        )
     finalize_job_id = getattr(finalize_submission, "job_id", "") or ""
     if not finalize_job_id:
         return SyncLifecycleResult(
@@ -266,7 +314,7 @@ def execute_sync_v2(
             synchronization_id=sync_id,
             batch_job_ids=(batch_job_id,),
             batch_jobs=(batch_view,),
-            finalization_submitted=False,
+            finalization_submission_state="unknown",
             finalization_job_id=None,
             finalization_job=None,
             success=False,
@@ -274,7 +322,24 @@ def execute_sync_v2(
             unchanged_count=unchanged_count,
             error="sync finalization job outcome=uncertain",
         )
-    finalize_view = poll_job(finalize_job_id)
+    finalize_view, finalize_observation_error = observe_job(poll_job, finalize_job_id)
+    if finalize_observation_error is not None:
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(batch_job_id,),
+            batch_jobs=(batch_view,),
+            finalization_submission_state="submitted",
+            finalization_job_id=finalize_job_id,
+            finalization_job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error=finalize_observation_error,
+        )
+    assert finalize_view is not None
     if not is_terminal_success(finalize_view):
         outcome = finalize_view.normalized_outcome or finalize_view.normalized_state
         return SyncLifecycleResult(
@@ -284,7 +349,7 @@ def execute_sync_v2(
             synchronization_id=sync_id,
             batch_job_ids=(batch_job_id,),
             batch_jobs=(batch_view,),
-            finalization_submitted=True,
+            finalization_submission_state="submitted",
             finalization_job_id=finalize_job_id,
             finalization_job=finalize_view,
             success=False,
@@ -300,7 +365,7 @@ def execute_sync_v2(
         synchronization_id=sync_id,
         batch_job_ids=(batch_job_id,),
         batch_jobs=(batch_view,),
-        finalization_submitted=True,
+        finalization_submission_state="submitted",
         finalization_job_id=finalize_job_id,
         finalization_job=finalize_view,
         success=True,

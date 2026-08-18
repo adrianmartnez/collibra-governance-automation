@@ -6,7 +6,10 @@ from typing import Any
 
 from governance.identity.hashing import ContentIdentity
 from governance.integrations.collibra.import_api import ImportJobExecutionResult
-from governance.integrations.collibra.jobs import JobView
+from governance.integrations.collibra.jobs import (
+    JobView,
+    is_remote_terminal,
+)
 
 IMPORT_JOB_RESULT_SCHEMA = "governance-import-job-result"
 IMPORT_JOB_RESULT_VERSION = "1"
@@ -19,7 +22,7 @@ def _job_fields(job: JobView | None) -> dict[str, Any]:
             "job_result": None,
             "terminal": False,
         }
-    terminal = job.normalized_state != "non_terminal"
+    terminal = is_remote_terminal(job)
     return {
         "job_state": job.remote_state,
         "job_result": job.remote_result,
@@ -41,7 +44,7 @@ def build_import_job_result(
         "result_schema": IMPORT_JOB_RESULT_SCHEMA,
         "result_version": IMPORT_JOB_RESULT_VERSION,
         "stale": False,
-        "submitted": result.submitted,
+        "submission_state": result.submission_state,
         "success": result.success,
         **_job_fields(result.job),
     }
@@ -65,7 +68,7 @@ def build_import_job_sync_payload(
         "mode": mode,
         "result_schema": IMPORT_JOB_RESULT_SCHEMA,
         "result_version": IMPORT_JOB_RESULT_VERSION,
-        "submitted": result.submitted,
+        "submission_state": result.submission_state,
         "success": result.success,
         **_job_fields(result.job),
     }
@@ -79,11 +82,14 @@ def build_import_job_sync_payload(
 def format_import_job_result_human(payload: dict[str, Any]) -> str:
     job_id = payload.get("job_id")
     job_id_text = "null" if job_id is None else str(job_id)
+    submission_state = payload.get("submission_state")
+    if submission_state is None and "submitted" in payload:
+        submission_state = "submitted" if payload["submitted"] else "not_attempted"
     lines = [
         f"stale={str(payload.get('stale', False)).lower()}",
         f"execution_mode={payload['execution_mode']}",
         f"dry_run={str(payload['dry_run']).lower()}",
-        f"submitted={str(payload['submitted']).lower()}",
+        f"submission_state={submission_state}",
         f"job_id={job_id_text}",
         f"terminal={str(payload.get('terminal', False)).lower()}",
         f"success={str(payload['success']).lower()}",

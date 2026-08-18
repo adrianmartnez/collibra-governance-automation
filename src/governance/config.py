@@ -76,14 +76,14 @@ class Settings:
         object.__setattr__(self, "collibra_mode", mode)
         if self.collibra_timeout_seconds <= 0:
             raise ValueError("collibra_timeout_seconds must be positive")
-        if self.collibra_job_poll_interval_seconds <= 0:
-            raise ValueError("collibra_job_poll_interval_seconds must be positive")
-        if self.collibra_job_poll_timeout_seconds <= 0:
-            raise ValueError("collibra_job_poll_timeout_seconds must be positive")
-        if self.collibra_job_poll_timeout_seconds < self.collibra_job_poll_interval_seconds:
-            raise ValueError(
-                "collibra_job_poll_timeout_seconds must be >= collibra_job_poll_interval_seconds"
-            )
+        from governance.integrations.collibra.jobs import validate_job_polling_policy
+
+        interval, timeout = validate_job_polling_policy(
+            self.collibra_job_poll_interval_seconds,
+            self.collibra_job_poll_timeout_seconds,
+        )
+        object.__setattr__(self, "collibra_job_poll_interval_seconds", interval)
+        object.__setattr__(self, "collibra_job_poll_timeout_seconds", timeout)
         execution = self.collibra_execution_mode.strip().lower() or DEFAULT_COLLIBRA_EXECUTION_MODE
         if execution not in ALLOWED_COLLIBRA_EXECUTION_MODES:
             raise ValueError("collibra_execution_mode must be core_rest, import_v2, or sync_v2")

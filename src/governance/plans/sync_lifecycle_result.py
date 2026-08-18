@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from governance.identity.hashing import ContentIdentity
-from governance.integrations.collibra.jobs import JobView
+from governance.integrations.collibra.jobs import JobView, is_remote_terminal
 from governance.integrations.collibra.synchronization import SyncLifecycleResult
 
 SYNC_LIFECYCLE_RESULT_SCHEMA = "governance-sync-lifecycle-result"
@@ -21,6 +21,7 @@ def _serialize_job(job: JobView | None) -> dict[str, Any] | None:
         "job_result": job.remote_result,
         "normalized_outcome": job.normalized_outcome,
         "normalized_state": job.normalized_state,
+        "terminal": is_remote_terminal(job),
     }
 
 
@@ -35,7 +36,7 @@ def build_sync_lifecycle_result(
         "dry_run": result.dry_run,
         "execution_mode": "sync_v2",
         "finalization_job_id": result.finalization_job_id,
-        "finalization_submitted": result.finalization_submitted,
+        "finalization_submission_state": result.finalization_submission_state,
         "plan_content_identity": plan_content_identity.to_dict(),
         "result_schema": SYNC_LIFECYCLE_RESULT_SCHEMA,
         "result_version": SYNC_LIFECYCLE_RESULT_VERSION,
@@ -65,7 +66,7 @@ def build_sync_lifecycle_sync_payload(
         "dry_run": result.dry_run,
         "execution_mode": "sync_v2",
         "finalization_job_id": result.finalization_job_id,
-        "finalization_submitted": result.finalization_submitted,
+        "finalization_submission_state": result.finalization_submission_state,
         "mode": mode,
         "result_schema": SYNC_LIFECYCLE_RESULT_SCHEMA,
         "result_version": SYNC_LIFECYCLE_RESULT_VERSION,
@@ -90,7 +91,7 @@ def format_sync_lifecycle_result_human(payload: dict[str, Any]) -> str:
         f"dry_run={str(payload['dry_run']).lower()}",
         f"success={str(payload['success']).lower()}",
         f"synchronization_id={payload['synchronization_id']}",
-        f"finalization_submitted={str(payload['finalization_submitted']).lower()}",
+        f"finalization_submission_state={payload['finalization_submission_state']}",
         f"applied_count={payload['applied_count']}",
     ]
     finalize_id = payload.get("finalization_job_id")

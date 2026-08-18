@@ -243,10 +243,10 @@ def test_job_poll_settings_env_override() -> None:
 @pytest.mark.parametrize(
     ("interval", "timeout", "match"),
     [
-        (0.0, 300.0, "collibra_job_poll_interval_seconds"),
-        (-1.0, 300.0, "collibra_job_poll_interval_seconds"),
-        (1.0, 0.0, "collibra_job_poll_timeout_seconds"),
-        (5.0, 2.0, "collibra_job_poll_timeout_seconds must be >="),
+        (0.0, 300.0, "finite positive"),
+        (-1.0, 300.0, "finite positive"),
+        (1.0, 0.0, "finite positive"),
+        (5.0, 2.0, "timeout_seconds must be >="),
     ],
 )
 def test_rejects_invalid_job_poll_settings(interval: float, timeout: float, match: str) -> None:
@@ -262,3 +262,35 @@ def test_rejects_invalid_job_poll_settings(interval: float, timeout: float, matc
             collibra_job_poll_interval_seconds=interval,
             collibra_job_poll_timeout_seconds=timeout,
         )
+
+
+@pytest.mark.parametrize(
+    ("interval", "timeout"),
+    [
+        (float("nan"), 300.0),
+        (float("inf"), 300.0),
+        (1.0, float("nan")),
+        (1.0, float("inf")),
+        (float("-inf"), 300.0),
+    ],
+)
+def test_rejects_non_finite_job_poll_settings(interval: float, timeout: float) -> None:
+    with pytest.raises(ValueError, match="finite positive"):
+        Settings(
+            postgres_host="localhost",
+            postgres_port=5432,
+            postgres_db="db",
+            postgres_user="user",
+            postgres_password="pass",
+            postgres_source_name="source",
+            inventory_output_path="artifacts/out.json",
+            collibra_job_poll_interval_seconds=interval,
+            collibra_job_poll_timeout_seconds=timeout,
+        )
+
+
+def test_job_polling_policy_rejects_non_finite_at_library_level() -> None:
+    with pytest.raises(ValueError, match="finite positive"):
+        from governance.integrations.collibra.jobs import JobPollingPolicy
+
+        JobPollingPolicy(interval_seconds=float("nan"), timeout_seconds=10.0)

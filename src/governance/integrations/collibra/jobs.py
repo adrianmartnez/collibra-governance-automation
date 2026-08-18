@@ -6,16 +6,21 @@ success; terminal success requires state=COMPLETED and result=SUCCESS.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from governance.integrations.collibra.adapters import CollibraAdapterError
 
 JOB_PATH_PREFIX = "/rest/2.0/jobs"
 IMPORT_ERRORS_PATH_PREFIX = "/rest/2.0/import/results"
 
+SubmissionState = Literal["not_attempted", "submitted", "unknown"]
+JOB_OBSERVATION_FAILURE = "could not observe job outcome"
+
 REMOTE_STATES = frozenset({"WAITING", "RUNNING", "CANCELING", "COMPLETED", "CANCELED", "ERROR"})
+REMOTE_TERMINAL_STATES = frozenset({"COMPLETED", "CANCELED", "ERROR"})
 REMOTE_RESULTS = frozenset({"NOT_SET", "SUCCESS", "COMPLETED_WITH_ERROR", "FAILURE", "ABORTED"})
 NON_TERMINAL_STATES = frozenset({"WAITING", "RUNNING", "CANCELING"})
 
@@ -40,10 +45,36 @@ DEFAULT_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_POLL_TIMEOUT_SECONDS = 300.0
 
 
+def validate_finite_poll_seconds(value: float, field_name: str) -> float:
+    """Reject non-finite or non-positive poll timing values."""
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{field_name} must be a finite positive number")
+    return value
+
+
+def validate_job_polling_policy(
+    interval_seconds: float,
+    timeout_seconds: float,
+) -> tuple[float, float]:
+    interval = validate_finite_poll_seconds(interval_seconds, "interval_seconds")
+    timeout = validate_finite_poll_seconds(timeout_seconds, "timeout_seconds")
+    if timeout < interval:
+        raise ValueError("timeout_seconds must be >= interval_seconds")
+    return interval, timeout
+
+
 @dataclass(frozen=True, slots=True)
 class JobPollingPolicy:
     interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
     timeout_seconds: float = DEFAULT_POLL_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        interval, timeout = validate_job_polling_policy(
+            self.interval_seconds,
+            self.timeout_seconds,
+        )
+        object.__setattr__(self, "interval_seconds", interval)
+        object.__setattr__(self, "timeout_seconds", timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +101,27 @@ def is_terminal_success(view: JobView) -> bool:
         view.normalized_state == NORMALIZED_TERMINAL_SUCCESS
         and view.normalized_outcome == OUTCOME_SUCCESS
     )
+
+
+def is_remote_terminal(job: JobView | None) -> bool:
+    """True only when a known remote terminal state was observed (COMPLETED/CANCELED/ERROR)."""
+    if job is None:
+        return False
+    state = job.remote_state
+    if not isinstance(state, str) or not state:
+        return False
+    return state in REMOTE_TERMINAL_STATES
+
+
+def observe_job(
+    poll_job: Callable[[str], JobView],
+    job_id: str,
+) -> tuple[JobView | None, str | None]:
+    """Poll a job handle. Transport failures preserve the handle but not remote outcome."""
+    try:
+        return poll_job(job_id), None
+    except CollibraAdapterError:
+        return None, JOB_OBSERVATION_FAILURE
 
 
 def classify_job(payload: Any, *, job_id: str | None = None) -> JobView:
@@ -200,6 +252,10 @@ def poll_until_terminal(
 
     CANCELING remains non-terminal until the bound expires.
     """
+    interval_seconds, timeout_seconds = validate_job_polling_policy(
+        interval_seconds,
+        timeout_seconds,
+    )
     if not job_id.strip():
         return JobView(
             job_id=None,
@@ -227,12 +283,12 @@ def poll_until_terminal(
 def sanitize_import_error_summary(payload: Any) -> dict[str, int]:
     """Return a secret-safe import-error summary. Never includes row payloads."""
     if isinstance(payload, dict):
-        results = payload.get("results")
-        if isinstance(results, list):
-            return {"error_count": len(results)}
         total = payload.get("total")
         if isinstance(total, int) and total >= 0:
             return {"error_count": total}
+        results = payload.get("results")
+        if isinstance(results, list):
+            return {"error_count": len(results)}
     if isinstance(payload, list):
         return {"error_count": len(payload)}
     return {"error_count": 0}

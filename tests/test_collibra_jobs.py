@@ -27,8 +27,13 @@ from governance.integrations.collibra import (
 )
 from governance.integrations.collibra.import_api import IMPORT_MULTIPART_FIELDS
 from governance.integrations.collibra.jobs import (
+    JOB_OBSERVATION_FAILURE,
     classify_job,
+    is_remote_terminal,
     poll_until_terminal,
+    sanitize_import_error_summary,
+    timeout_view,
+    validate_finite_poll_seconds,
 )
 from governance.integrations.collibra.synchronization import (
     derive_synchronization_id,
@@ -357,6 +362,10 @@ def test_malformed_finalize_submission_is_uncertain_without_retry() -> None:
         synchronization_id=UUID_A,
     )
     assert result.success is False
+    assert result.finalization_submission_state == "unknown"
+    assert result.finalization_submitted is False
+    assert result.batch_job_ids == ("batch-1",)
+    assert result.finalization_job_id is None
     assert "uncertain" in (result.error or "")
     assert finalize_posts == 1
 
@@ -803,6 +812,7 @@ def test_sync_v2_finalize_failure_preserves_both_job_ids() -> None:
     assert result.success is False
     assert result.batch_job_ids == ("batch-1",)
     assert result.finalization_job_id == "fin-1"
+    assert result.finalization_submission_state == "submitted"
     assert result.finalization_submitted is True
 
 
@@ -900,3 +910,211 @@ def test_changing_poll_policy_does_not_change_target_context_identity() -> None:
         )
     )
     assert target_context_identity(base) == target_context_identity(slower)
+
+
+@pytest.mark.parametrize(
+    ("payload", "terminal"),
+    [
+        ({"state": "WAITING"}, False),
+        ({"state": "RUNNING"}, False),
+        ({"state": "CANCELING"}, False),
+        ({"state": "CANCELED"}, True),
+        ({"state": "ERROR"}, True),
+        ({"state": "COMPLETED", "result": "SUCCESS"}, True),
+        ({"state": "COMPLETED", "result": "FAILURE"}, True),
+        ({"state": "COMPLETED", "result": "NOT_SET"}, True),
+        ({"state": "NEW_STATE"}, False),
+        ("not-a-job", False),
+    ],
+)
+def test_is_remote_terminal_semantics(payload: object, terminal: bool) -> None:
+    view = classify_job(payload)
+    assert is_remote_terminal(view) is terminal
+
+
+def test_timeout_after_running_is_not_remote_terminal() -> None:
+    running = classify_job({"id": "j1", "state": "RUNNING"})
+    timed_out = timeout_view(running)
+    assert timed_out.normalized_state == "timeout"
+    assert is_remote_terminal(timed_out) is False
+
+
+def test_sanitize_import_error_summary_prefers_total_over_page() -> None:
+    summary = sanitize_import_error_summary(
+        {"total": 1500, "results": [{"row": index} for index in range(1000)]}
+    )
+    assert summary == {"error_count": 1500}
+
+
+def test_sanitize_import_error_summary_total_zero() -> None:
+    assert sanitize_import_error_summary({"total": 0, "results": [{"row": 1}]}) == {
+        "error_count": 0
+    }
+
+
+def test_sanitize_import_error_summary_falls_back_to_results_length() -> None:
+    assert sanitize_import_error_summary({"results": [{}, {}, {}]}) == {"error_count": 3}
+
+
+def test_sanitize_import_error_summary_never_includes_raw_payload() -> None:
+    summary = sanitize_import_error_summary(
+        {
+            "total": 1,
+            "results": [
+                {
+                    "errorMessage": "super-secret-value",
+                    "command": {"identifier": {"name": "orders"}},
+                }
+            ],
+        }
+    )
+    dumped = str(summary)
+    assert summary == {"error_count": 1}
+    assert "super-secret" not in dumped
+    assert "orders" not in dumped
+
+
+def test_import_poll_get_failure_preserves_job_id() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return _empty_assets_response()
+        if path.endswith("/import/json-job"):
+            return httpx.Response(200, json={"id": "job-123"})
+        if path.endswith("/jobs/job-123"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="import_v2",
+    )
+    assert result.success is False
+    assert result.job_id == "job-123"
+    assert result.submission_state == "submitted"
+    assert result.error == JOB_OBSERVATION_FAILURE
+    assert result.job is None
+    assert not any("/import/synchronize" in urlparse(str(item.url)).path for item in requests)
+
+
+def test_sync_batch_poll_get_failure_preserves_batch_id_no_finalize() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if path.endswith("/finalize/job"):
+            raise AssertionError("finalize must not run")
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.success is False
+    assert result.batch_job_ids == ("batch-1",)
+    assert result.finalization_submission_state == "not_attempted"
+    assert result.error == JOB_OBSERVATION_FAILURE
+    assert not any(item.url.path.endswith("/finalize/job") for item in requests)
+
+
+def test_sync_finalize_poll_get_failure_preserves_both_ids() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200, json={"id": "batch-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        if path.endswith("/finalize/job"):
+            return httpx.Response(200, json={"id": "fin-1"})
+        if path.endswith("/jobs/fin-1"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.success is False
+    assert result.batch_job_ids == ("batch-1",)
+    assert result.finalization_job_id == "fin-1"
+    assert result.finalization_submission_state == "submitted"
+    assert result.error == JOB_OBSERVATION_FAILURE
+
+
+def test_sync_finalize_write_timeout_preserves_batch_unknown_submission() -> None:
+    finalize_posts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal finalize_posts
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200, json={"id": "batch-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        if path.endswith("/finalize/job"):
+            finalize_posts += 1
+            raise httpx.WriteTimeout("write timeout")
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.success is False
+    assert result.batch_job_ids == ("batch-1",)
+    assert result.finalization_submission_state == "unknown"
+    assert result.finalization_job_id is None
+    assert finalize_posts == 1
+
+
+def test_poll_until_terminal_rejects_non_finite_policy() -> None:
+    clock = FakeClock()
+    with pytest.raises(ValueError, match="finite positive"):
+        poll_until_terminal(
+            lambda _job_id: {"id": "j1", "state": "COMPLETED", "result": "SUCCESS"},
+            "j1",
+            monotonic_clock=clock,
+            sleeper=clock.sleep,
+            interval_seconds=float("nan"),
+            timeout_seconds=5.0,
+        )
+
+
+def test_validate_finite_poll_seconds_accepts_valid_values() -> None:
+    assert validate_finite_poll_seconds(1.5, "interval_seconds") == 1.5

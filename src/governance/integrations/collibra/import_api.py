@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.collibra.adapters import CollibraAdapterError
-from governance.integrations.collibra.jobs import JobView
+from governance.integrations.collibra.jobs import JobView, SubmissionState, observe_job
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
     SyncAction,
@@ -111,7 +111,7 @@ class ImportJobExecutionResult:
     plan: SyncPlan
     document: ImportDocument
     dry_run: bool
-    submitted: bool
+    submission_state: SubmissionState
     job_id: str | None
     job: JobView | None
     success: bool
@@ -121,10 +121,14 @@ class ImportJobExecutionResult:
     error: str | None = None
 
     @property
+    def submitted(self) -> bool:
+        return self.submission_state == "submitted"
+
+    @property
     def terminal(self) -> bool:
-        if self.job is None:
-            return False
-        return getattr(self.job, "normalized_state", None) != "non_terminal"
+        from governance.integrations.collibra.jobs import is_remote_terminal
+
+        return is_remote_terminal(self.job)
 
 
 def compile_import_document(
@@ -511,7 +515,7 @@ def _execute_import_job_lifecycle(
             plan=plan,
             document=document,
             dry_run=False,
-            submitted=False,
+            submission_state="unknown",
             job_id=None,
             job=None,
             success=False,
@@ -525,7 +529,7 @@ def _execute_import_job_lifecycle(
             plan=plan,
             document=document,
             dry_run=False,
-            submitted=True,
+            submission_state="submitted",
             job_id=job_id,
             job=None,
             success=False,
@@ -533,7 +537,21 @@ def _execute_import_job_lifecycle(
             unchanged_count=unchanged_count,
             error="import_v2 requires job polling",
         )
-    view = poll_job(job_id)
+    view, observation_error = observe_job(poll_job, job_id)
+    if observation_error is not None:
+        return ImportJobExecutionResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            submission_state="submitted",
+            job_id=job_id,
+            job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error=observation_error,
+        )
+    assert view is not None
     from governance.integrations.collibra.jobs import is_terminal_success
 
     if is_terminal_success(view):
@@ -541,7 +559,7 @@ def _execute_import_job_lifecycle(
             plan=plan,
             document=document,
             dry_run=False,
-            submitted=True,
+            submission_state="submitted",
             job_id=job_id,
             job=view,
             success=True,
@@ -553,7 +571,7 @@ def _execute_import_job_lifecycle(
         plan=plan,
         document=document,
         dry_run=False,
-        submitted=True,
+        submission_state="submitted",
         job_id=job_id,
         job=view,
         success=False,
@@ -621,7 +639,7 @@ def execute_collibra_plan(
             plan=plan,
             document=document,
             dry_run=False,
-            submitted=False,
+            submission_state="not_attempted",
             job_id=None,
             job=None,
             success=True,
