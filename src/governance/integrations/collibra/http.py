@@ -103,6 +103,7 @@ class CollibraHttpExecutor:
         attempt = 0
         while True:
             attempt += 1
+            attempt_started = self._monotonic()
             try:
                 response = self._client.request(
                     method,
@@ -115,6 +116,7 @@ class CollibraHttpExecutor:
                     auth=auth,
                 )
             except (httpx.ConnectError, httpx.ConnectTimeout):
+                self._record_attempt(path=path, attempt=attempt, attempt_started=attempt_started)
                 if not self._should_retry(attempt=attempt, started=started):
                     raise self._transport_error(
                         op,
@@ -126,6 +128,7 @@ class CollibraHttpExecutor:
                 self._sleep(self._delay_for_backoff(attempt=attempt, started=started))
                 continue
             except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout):
+                self._record_attempt(path=path, attempt=attempt, attempt_started=attempt_started)
                 if is_write:
                     raise self._transport_error(
                         op,
@@ -145,6 +148,7 @@ class CollibraHttpExecutor:
                 self._sleep(self._delay_for_backoff(attempt=attempt, started=started))
                 continue
             except httpx.HTTPError:
+                self._record_attempt(path=path, attempt=attempt, attempt_started=attempt_started)
                 raise self._transport_error(
                     op,
                     path,
@@ -153,6 +157,12 @@ class CollibraHttpExecutor:
                     exhausted=False,
                 ) from None
 
+            self._record_attempt(
+                path=path,
+                attempt=attempt,
+                attempt_started=attempt_started,
+                status=response.status_code,
+            )
             if response.status_code == 429:
                 if not self._should_retry(attempt=attempt, started=started):
                     raise self._http_error(
@@ -211,6 +221,26 @@ class CollibraHttpExecutor:
             return False
         elapsed = self._monotonic() - started
         return elapsed < self._policy.max_elapsed_seconds
+
+    def _record_attempt(
+        self,
+        *,
+        path: str,
+        attempt: int,
+        attempt_started: float,
+        status: int | None = None,
+    ) -> None:
+        from governance.integrations.collibra.telemetry import emit
+
+        duration_ms = int(max(0.0, (self._monotonic() - attempt_started) * 1000))
+        emit(
+            operation="http_attempt",
+            endpoint_family=self._endpoint_family,
+            endpoint_path=path,
+            attempt=attempt,
+            status=status,
+            duration_ms=duration_ms,
+        )
 
     def _delay_for_backoff(self, *, attempt: int, started: float) -> float:
         delay = self._policy.backoff_seconds(attempt)

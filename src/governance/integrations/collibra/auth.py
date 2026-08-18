@@ -132,6 +132,8 @@ class _OAuthClientCredentialsProvider:
         if self._scope:
             data["scope"] = self._scope
         acquired_at = self._monotonic_clock()
+        from governance.integrations.collibra.telemetry import emit
+
         try:
             response = self._client.post(
                 self._token_url,
@@ -140,17 +142,41 @@ class _OAuthClientCredentialsProvider:
                 auth=auth,
             )
         except httpx.TimeoutException:
+            duration_ms = int(max(0.0, (self._monotonic_clock() - acquired_at) * 1000))
+            emit(
+                operation="oauth_token",
+                endpoint_family="oauth",
+                endpoint_path=_token_endpoint_label(self._kind),
+                duration_ms=duration_ms,
+                outcome="error",
+            )
             raise CollibraAuthError(
                 "oauth token request timed out",
                 operation="oauth_token",
                 endpoint_path=_token_endpoint_label(self._kind),
             ) from None
         except httpx.HTTPError:
+            duration_ms = int(max(0.0, (self._monotonic_clock() - acquired_at) * 1000))
+            emit(
+                operation="oauth_token",
+                endpoint_family="oauth",
+                endpoint_path=_token_endpoint_label(self._kind),
+                duration_ms=duration_ms,
+                outcome="error",
+            )
             raise CollibraAuthError(
                 "oauth token request failed",
                 operation="oauth_token",
                 endpoint_path=_token_endpoint_label(self._kind),
             ) from None
+        duration_ms = int(max(0.0, (self._monotonic_clock() - acquired_at) * 1000))
+        emit(
+            operation="oauth_token",
+            endpoint_family="oauth",
+            endpoint_path=_token_endpoint_label(self._kind),
+            status=response.status_code,
+            duration_ms=duration_ms,
+        )
         if response.status_code >= 400:
             raise CollibraAuthError(
                 "oauth token request failed",

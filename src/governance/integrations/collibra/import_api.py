@@ -550,7 +550,9 @@ def _execute_import_batches_lifecycle(
     *,
     unchanged_count: int,
 ) -> ImportJobExecutionResult:
+    from governance.integrations.collibra.batching import batch_document_counts
     from governance.integrations.collibra.jobs import is_terminal_success
+    from governance.integrations.collibra.telemetry import emit
 
     prove_import_create_identifiers_absent(adapter, plan)
     poll_job = getattr(adapter, "poll_job", None)
@@ -567,10 +569,21 @@ def _execute_import_batches_lifecycle(
 
     applied = 0
     records: list[BatchLifecycleRecord] = []
+    batch_count = len(batches)
     for batch_index, batch in enumerate(batches):
+        counts = batch_document_counts(batch)
         try:
             submission = adapter.submit_json_import(batch)
         except CollibraAdapterError:
+            emit(
+                operation="import_batch",
+                endpoint_family="import_v2",
+                batch_index=batch_index + 1,
+                batch_count=batch_count,
+                resource_count=counts.resource_count,
+                additional_characteristic_count=counts.additional_characteristic_count,
+                submission_state="unknown",
+            )
             records.append(
                 make_batch_lifecycle_record(
                     batch_index,
@@ -589,6 +602,15 @@ def _execute_import_batches_lifecycle(
             )
         job_id = getattr(submission, "job_id", "") or ""
         if not job_id:
+            emit(
+                operation="import_batch",
+                endpoint_family="import_v2",
+                batch_index=batch_index + 1,
+                batch_count=batch_count,
+                resource_count=counts.resource_count,
+                additional_characteristic_count=counts.additional_characteristic_count,
+                submission_state="unknown",
+            )
             records.append(
                 make_batch_lifecycle_record(
                     batch_index,
@@ -605,6 +627,16 @@ def _execute_import_batches_lifecycle(
                 unchanged_count=unchanged_count,
                 error=IMPORT_SUBMISSION_UNCERTAIN,
             )
+        emit(
+            operation="import_batch",
+            endpoint_family="import_v2",
+            batch_index=batch_index + 1,
+            batch_count=batch_count,
+            resource_count=counts.resource_count,
+            additional_characteristic_count=counts.additional_characteristic_count,
+            submission_state="submitted",
+            job_id=job_id,
+        )
         view, observation_error = observe_job(poll_job, job_id)
         if observation_error is not None:
             records.append(
@@ -700,6 +732,55 @@ def execute_collibra_plan(
     max_additional_characteristics: int | None = None,
 ) -> Any:
     """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
+    from governance.integrations.collibra.telemetry import execution_scope, finish_execution
+
+    mode = (execution_mode or "core_rest").strip().lower()
+    with execution_scope(execution_mode=mode):
+        try:
+            result = _execute_collibra_plan(
+                adapter,
+                plan,
+                mapping_config,
+                apply=apply,
+                execution_mode=mode,
+                synchronization_id=synchronization_id,
+                max_resources=max_resources,
+                max_additional_characteristics=max_additional_characteristics,
+            )
+        except Exception:
+            finish_execution(
+                outcome="error",
+                execution_mode=mode,
+            )
+            raise
+
+        finish_execution(
+            outcome="success" if result.success else "failure",
+            execution_mode=mode,
+            writes_performed=_known_writes_performed(result),
+        )
+        return result
+
+
+def _known_writes_performed(result: Any) -> int | None:
+    if getattr(result, "dry_run", False):
+        return 0
+    if getattr(result, "success", False):
+        return int(getattr(result, "applied_count", 0) or 0)
+    return None
+
+
+def _execute_collibra_plan(
+    adapter: Any,
+    plan: SyncPlan,
+    mapping_config: CollibraMappingConfig,
+    *,
+    apply: bool,
+    execution_mode: str,
+    synchronization_id: str | None = None,
+    max_resources: int | None = None,
+    max_additional_characteristics: int | None = None,
+) -> Any:
     from governance.integrations.collibra.batching import partition_document
     from governance.integrations.collibra.sync import execute_sync_plan
     from governance.integrations.collibra.synchronization import execute_sync_v2
