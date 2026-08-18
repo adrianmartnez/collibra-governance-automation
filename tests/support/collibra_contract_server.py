@@ -50,6 +50,7 @@ class CollibraContractServer:
         self.sanitized_requests: list[dict[str, Any]] = []
         self.finalize_posts = 0
         self.token_posts = 0
+        self.mutation_posts = 0
         self._asset_gets = 0
         self._job_polls: dict[str, int] = {}
         self._import_job_counter = 0
@@ -123,6 +124,10 @@ class CollibraContractServer:
             "content_type": content_type,
         }
         self.sanitized_requests.append(record)
+        if handler.command in {"POST", "PATCH", "PUT", "DELETE"} and not (
+            parsed.path.endswith("/oauth/v2/token") or parsed.path.endswith("/idp/token")
+        ):
+            self.mutation_posts += 1
         try:
             status, payload, extra_headers, record_updates = self._dispatch(
                 handler.command,
@@ -172,6 +177,13 @@ class CollibraContractServer:
             return self._token(method, path, body, headers)
         if method == "GET" and path.endswith("/application/info"):
             return 200, {"version": "contract-test"}, {}, {}
+        if method == "GET" and any(
+            part in path
+            for part in ("/domains/", "/assetTypes/", "/attributeTypes/", "/relationTypes/")
+        ):
+            if self.scenario == "missing_mapping":
+                return 404, {"error": "not-found"}, {}, {}
+            return 200, {"id": path.rsplit("/", 1)[-1]}, {}, {}
         if method == "GET" and path.endswith("/assets"):
             return self._assets(query)
         if method == "GET" and path.endswith("/attributes"):

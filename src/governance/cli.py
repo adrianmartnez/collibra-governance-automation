@@ -1,4 +1,4 @@
-"""Governance CLI: scan, export, diff, sync, check, plan, apply, and impact."""
+"""Governance CLI: scan, export, diff, sync, check, plan, apply, impact, and preflight."""
 
 from __future__ import annotations
 
@@ -77,10 +77,13 @@ from governance.integrations.collibra import (
     build_collibra_adapter,
     build_sync_plan,
     execute_collibra_plan,
+    format_preflight_human,
     load_mapping_config_file,
     map_to_desired_state,
     mapping_contains_example_placeholders,
     mock_mapping_config,
+    preflight_exit_code,
+    run_preflight,
 )
 from governance.integrations.dbt import DbtError, load_dbt_graph
 from governance.integrations.odcs import OdcsError, load_odcs_graph
@@ -224,6 +227,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_apply(args)
     if command == "impact":
         return _cmd_impact(args)
+    if command == "preflight":
+        return _cmd_preflight(args)
 
     canonical: CanonicalConfig | None = None
     config_path = getattr(args, "config", None)
@@ -530,6 +535,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Named profile overlay; valid only with --config.",
     )
     _add_format(impact)
+
+    preflight = subparsers.add_parser(
+        "preflight",
+        help=(
+            "Read-only Collibra tenant compatibility checks. "
+            "Zero remote mutations. HTTP non-loopback is rejected before credentials."
+        ),
+    )
+    preflight.add_argument(
+        "--config",
+        metavar="PATH",
+        required=True,
+        help="Path to governance.yaml.",
+    )
+    preflight.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay (overrides GOVERNANCE_PROFILE).",
+    )
+    _add_format(preflight)
     return parser
 
 
@@ -1009,6 +1034,37 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(format_apply_result_human(payload))
     return 0 if result.success else 1
+
+
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    loaded = _load_canonical_and_settings(
+        config_path=args.config,
+        profile=getattr(args, "profile", None),
+        fmt=fmt,
+    )
+    if isinstance(loaded, int):
+        return loaded
+    canonical, settings = loaded
+
+    if not canonical.targets:
+        return _emit_operational_message(_SAFE_TARGET_REQUIRED, fmt)
+
+    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    if isinstance(mode, int):
+        return mode
+
+    try:
+        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+    except CliOperationalError as exc:
+        return _emit_operational_message(str(exc), fmt)
+
+    report = run_preflight(settings, mapping_config)
+    if fmt == "json":
+        _print_json(report.to_dict())
+    else:
+        sys.stdout.write(format_preflight_human(report))
+    return preflight_exit_code(report)
 
 
 def _cmd_impact(args: argparse.Namespace) -> int:

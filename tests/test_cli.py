@@ -247,6 +247,7 @@ def test_help_and_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert "diff" in help_out
     assert "sync" in help_out
     assert "config" in help_out
+    assert "preflight" in help_out
 
     assert main(["--version"]) == 0
     version_out = capsys.readouterr().out.strip()
