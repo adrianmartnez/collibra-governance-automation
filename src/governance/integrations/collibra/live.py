@@ -37,6 +37,10 @@ from governance.integrations.collibra.auth import (
     StaticBearerProvider,
 )
 from governance.integrations.collibra.endpoint import normalize_base_url
+from governance.integrations.collibra.http import (
+    MAX_PAGINATION_PAGES,
+    CollibraHttpExecutor,
+)
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
     CollibraAssetSpec,
@@ -74,6 +78,8 @@ class LiveCollibraAdapter:
         transport: httpx.BaseTransport | None = None,
         page_size: int = DEFAULT_PAGE_SIZE,
         monotonic_clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
         self._config = mapping_config
         self._base_url = normalize_base_url(base_url)
@@ -108,6 +114,12 @@ class LiveCollibraAdapter:
             verify=True,
             transport=transport,
         )
+        self._http = CollibraHttpExecutor(
+            self._client,
+            monotonic_clock=monotonic_clock,
+            wall_clock=wall_clock,
+            sleeper=sleeper,
+        )
 
     @classmethod
     def from_settings(
@@ -117,6 +129,9 @@ class LiveCollibraAdapter:
         *,
         transport: httpx.BaseTransport | None = None,
         monotonic_clock: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], None] | None = None,
+        page_size: int = DEFAULT_PAGE_SIZE,
     ) -> LiveCollibraAdapter:
         return cls(
             mapping_config=mapping_config,
@@ -131,7 +146,10 @@ class LiveCollibraAdapter:
             oauth_scope=settings.collibra_oauth_scope or None,
             oauth_client_auth=settings.collibra_oauth_client_auth or None,
             transport=transport,
+            page_size=page_size,
             monotonic_clock=monotonic_clock,
+            wall_clock=wall_clock,
+            sleeper=sleeper,
         )
 
     @property
@@ -342,21 +360,15 @@ class LiveCollibraAdapter:
             auth = httpx.BasicAuth(self._username or "", self._password or "")
         retried_oauth = False
         while True:
-            try:
-                response = self._client.request(
-                    method,
-                    path,
-                    params=params,
-                    json=json,
-                    auth=auth,
-                    headers=self._request_auth_headers(),
-                )
-            except httpx.HTTPError:
-                raise CollibraAdapterError(
-                    "HTTP transport error",
-                    operation=method.lower(),
-                    endpoint_path=path,
-                ) from None
+            response = self._http.request(
+                method,
+                path,
+                params=params,
+                json=json,
+                auth=auth,
+                headers=self._request_auth_headers(),
+                operation=method.lower(),
+            )
             if (
                 response.status_code == 401
                 and self._auth_mode == "oauth"
@@ -389,7 +401,16 @@ class LiveCollibraAdapter:
     def _paginate(self, path: str, params: QueryParams) -> list[dict[str, Any]]:
         offset = 0
         collected: list[dict[str, Any]] = []
+        pages = 0
         while True:
+            pages += 1
+            if pages > MAX_PAGINATION_PAGES:
+                raise CollibraAdapterError(
+                    "pagination exceeded hard page bound",
+                    operation="get",
+                    endpoint_path=path,
+                    endpoint_family="core_rest",
+                )
             page_params = _with_pagination(params, offset=offset, limit=self._page_size)
             payload = self._request("GET", path, params=page_params)
             results = payload.get("results")
