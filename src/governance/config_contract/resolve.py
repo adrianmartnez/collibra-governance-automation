@@ -69,6 +69,11 @@ def resolve_settings(
     collibra_username = base.collibra_username
     collibra_password = base.collibra_password
     collibra_bearer_token = base.collibra_bearer_token
+    collibra_client_id = base.collibra_client_id
+    collibra_client_secret = base.collibra_client_secret
+    collibra_token_url = base.collibra_token_url
+    collibra_oauth_scope = base.collibra_oauth_scope
+    collibra_oauth_client_auth = base.collibra_oauth_client_auth
     collibra_timeout_seconds = base.collibra_timeout_seconds
 
     if canonical.targets:
@@ -79,6 +84,11 @@ def resolve_settings(
         collibra_username = resolved["username"]
         collibra_password = resolved["password"]
         collibra_bearer_token = resolved["bearer_token"]
+        collibra_client_id = resolved["client_id"]
+        collibra_client_secret = resolved["client_secret"]
+        collibra_token_url = resolved["token_url"]
+        collibra_oauth_scope = resolved["oauth_scope"]
+        collibra_oauth_client_auth = resolved["oauth_client_auth"]
         collibra_timeout_seconds = resolved["timeout_seconds"]
 
     inventory_path = str(Path(canonical.config_root) / canonical.artifacts.inventory_path)
@@ -98,6 +108,11 @@ def resolve_settings(
             collibra_username=collibra_username,
             collibra_password=collibra_password,
             collibra_bearer_token=collibra_bearer_token,
+            collibra_client_id=collibra_client_id,
+            collibra_client_secret=collibra_client_secret,
+            collibra_token_url=collibra_token_url,
+            collibra_oauth_scope=collibra_oauth_scope,
+            collibra_oauth_client_auth=collibra_oauth_client_auth,
             collibra_timeout_seconds=collibra_timeout_seconds,
         )
     except ValueError as exc:
@@ -142,15 +157,34 @@ def validate_collibra_runtime(
     username = (settings.collibra_username or "").strip()
     password = (settings.collibra_password or "").strip()
     bearer = (settings.collibra_bearer_token or "").strip()
+    client_id = (settings.collibra_client_id or "").strip()
+    client_secret = (settings.collibra_client_secret or "").strip()
+    token_url = (settings.collibra_token_url or "").strip()
+    oauth_scope = (settings.collibra_oauth_scope or "").strip()
+    oauth_client_auth = (settings.collibra_oauth_client_auth or "").strip()
     has_basic_partial = bool(username) or bool(password)
     has_basic = bool(username) and bool(password)
     has_bearer = bool(bearer)
+    has_oauth_partial = bool(client_id) or bool(client_secret)
+    has_oauth = bool(client_id) and bool(client_secret)
 
-    if has_basic_partial and has_bearer:
+    if sum([has_basic_partial, has_bearer, has_oauth_partial]) > 1:
         raise ConfigResolutionError(
-            "live mode accepts exactly one auth method: basic or bearer",
+            "live mode accepts exactly one auth method: basic, bearer, or oauth",
             path=_target_auth_path(canonical, "bearer_token_env")
+            or _target_auth_path(canonical, "client_id_env")
             or _target_auth_path(canonical, "username_env"),
+            code=CODE_RUNTIME_INVALID,
+        )
+    if has_oauth_partial and not has_oauth:
+        path = (
+            _target_auth_path(canonical, "client_secret_env")
+            if client_id and not client_secret
+            else _target_auth_path(canonical, "client_id_env")
+        )
+        raise ConfigResolutionError(
+            "live mode oauth requires both client_id and client_secret",
+            path=path,
             code=CODE_RUNTIME_INVALID,
         )
     if has_basic_partial and not has_basic:
@@ -164,12 +198,22 @@ def validate_collibra_runtime(
             path=path,
             code=CODE_RUNTIME_INVALID,
         )
+    if has_oauth:
+        _validate_oauth_runtime(
+            canonical,
+            token_url=token_url,
+            oauth_scope=oauth_scope,
+            oauth_client_auth=oauth_client_auth,
+            base_url=settings.collibra_base_url,
+        )
+        return
     if has_basic or has_bearer:
         return
     raise ConfigResolutionError(
-        "live mode requires exactly one auth method: basic or bearer",
+        "live mode requires exactly one auth method: basic, bearer, or oauth",
         path=_target_auth_path(canonical, "username_env")
         or _target_auth_path(canonical, "bearer_token_env")
+        or _target_auth_path(canonical, "client_id_env")
         or "/targets/0/config/auth",
         code=CODE_RUNTIME_INVALID,
     )
@@ -283,6 +327,11 @@ def _resolve_collibra(
     username = base.collibra_username
     password = base.collibra_password
     bearer = base.collibra_bearer_token
+    client_id = base.collibra_client_id
+    client_secret = base.collibra_client_secret
+    token_url = base.collibra_token_url
+    oauth_scope = base.collibra_oauth_scope
+    oauth_client_auth = base.collibra_oauth_client_auth
     timeout = base.collibra_timeout_seconds
     if auth is not None:
         if auth.base_url_env is not None:
@@ -293,6 +342,16 @@ def _resolve_collibra(
             password = env.get(auth.password_env, "")
         if auth.bearer_token_env is not None:
             bearer = env.get(auth.bearer_token_env, "")
+        if auth.client_id_env is not None:
+            client_id = env.get(auth.client_id_env, "")
+        if auth.client_secret_env is not None:
+            client_secret = env.get(auth.client_secret_env, "")
+        if auth.token_url_env is not None:
+            token_url = env.get(auth.token_url_env, "")
+        if auth.scope_env is not None:
+            oauth_scope = env.get(auth.scope_env, "")
+        if auth.oauth_client_auth_env is not None:
+            oauth_client_auth = env.get(auth.oauth_client_auth_env, "")
         if auth.timeout_seconds_env is not None:
             raw = env.get(auth.timeout_seconds_env)
             if raw is not None and raw.strip():
@@ -313,8 +372,94 @@ def _resolve_collibra(
         "username": username,
         "password": password,
         "bearer_token": bearer,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "token_url": token_url,
+        "oauth_scope": oauth_scope,
+        "oauth_client_auth": oauth_client_auth,
         "timeout_seconds": timeout,
     }
+
+
+def _validate_oauth_runtime(
+    canonical: CanonicalConfig | None,
+    *,
+    token_url: str,
+    oauth_scope: str,
+    oauth_client_auth: str,
+    base_url: str,
+) -> None:
+    from governance.integrations.collibra.auth import parse_oauth_client_auth
+    from governance.integrations.collibra.endpoint import (
+        classify_transport,
+        normalize_base_url,
+        normalize_token_url,
+    )
+
+    auth = None
+    if canonical is not None and canonical.targets:
+        auth = canonical.targets[0].config.auth
+    native_idp_fields_declared = bool(
+        auth is not None
+        and (auth.token_url_env or auth.scope_env or auth.oauth_client_auth_env)
+        and not token_url
+    )
+    if not token_url:
+        if oauth_scope or oauth_client_auth or native_idp_fields_declared:
+            raise ConfigResolutionError(
+                "native oauth rejects token_url, scope, and oauth_client_auth",
+                path=_target_auth_path(canonical, "token_url_env")
+                or _target_auth_path(canonical, "scope_env")
+                or _target_auth_path(canonical, "oauth_client_auth_env"),
+                code=CODE_RUNTIME_INVALID,
+            )
+        try:
+            classified = classify_transport(normalize_base_url(base_url))
+        except ValueError:
+            raise ConfigResolutionError(
+                "oauth token endpoint is invalid",
+                path=_target_auth_path(canonical, "base_url_env"),
+                code=CODE_RUNTIME_INVALID,
+            ) from None
+        if classified == "remote_http":
+            raise ConfigResolutionError(
+                "oauth token endpoint must use HTTPS or HTTP loopback",
+                path=_target_auth_path(canonical, "base_url_env"),
+                code=CODE_RUNTIME_INVALID,
+            )
+        return
+
+    try:
+        normalized_token_url = normalize_token_url(token_url)
+        classified = classify_transport(normalized_token_url)
+        if oauth_client_auth:
+            parse_oauth_client_auth(oauth_client_auth)
+    except ValueError as exc:
+        message = str(exc)
+        if "embed" in message.lower():
+            stable = "oauth token_url must not embed credentials"
+        elif "query string" in message.lower():
+            stable = "oauth token_url must not include a query string"
+        elif "https or http loopback" in message.lower():
+            stable = "oauth token endpoint must use HTTPS or HTTP loopback"
+        elif "oauth_client_auth" in message.lower():
+            stable = "oauth_client_auth must be client_secret_post or client_secret_basic"
+        else:
+            stable = "oauth token endpoint is invalid"
+        lowered = message.lower()
+        if "client_id" in lowered or "client_secret" in lowered or token_url.lower() in lowered:
+            stable = "oauth token_url must not embed credentials"
+        raise ConfigResolutionError(
+            stable,
+            path=_target_auth_path(canonical, "token_url_env"),
+            code=CODE_RUNTIME_INVALID,
+        ) from None
+    if classified == "remote_http":
+        raise ConfigResolutionError(
+            "oauth token endpoint must use HTTPS or HTTP loopback",
+            path=_target_auth_path(canonical, "token_url_env"),
+            code=CODE_RUNTIME_INVALID,
+        )
 
 
 def _env_or_default(
@@ -359,7 +504,14 @@ def _safe_load_settings_message(exc: BaseException) -> str:
         return "postgres port must be a positive integer"
     if not text:
         return "resolved runtime settings are invalid"
-    for marker in ("password", "bearer", "authorization", "token="):
+    for marker in (
+        "password",
+        "bearer",
+        "authorization",
+        "token=",
+        "client_secret",
+        "access_token",
+    ):
         if marker in lowered:
             return "resolved runtime settings are invalid"
     return text

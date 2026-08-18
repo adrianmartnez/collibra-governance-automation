@@ -1,10 +1,14 @@
 """Live Collibra Core REST API v2 adapter boundary.
 
-Authentication modes:
+Authentication modes (exactly one):
 - Basic username/password
 - Bearer token (caller-supplied; may originate from JWT/OAuth elsewhere)
+- OAuth 2.0 client credentials (native Collibra token endpoint or external IdP)
 
-This module does not implement OAuth token acquisition, refresh, or caching.
+OAuth token acquisition, TTL-relative reuse, and a single 401 reacquisition live
+in ``auth``. This module attaches Authorization per request and does not bake
+auth headers onto the shared HTTP client.
+
 It is contract-tested with mocked HTTP and is not validated against a commercial
 tenant in this repository.
 
@@ -20,12 +24,18 @@ Find contracts (Core REST API v2 OpenAPI):
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
 import httpx
 
-from governance.integrations.collibra.adapters import CollibraAdapterError
+from governance.integrations.collibra.adapters import CollibraAdapterError, CollibraAuthError
+from governance.integrations.collibra.auth import (
+    CollibraNativeOAuthProvider,
+    CollibraTokenProvider,
+    ExternalIdpOAuthProvider,
+    StaticBearerProvider,
+)
 from governance.integrations.collibra.endpoint import normalize_base_url
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
@@ -56,8 +66,14 @@ class LiveCollibraAdapter:
         username: str | None = None,
         password: str | None = None,
         bearer_token: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        token_url: str | None = None,
+        oauth_scope: str | None = None,
+        oauth_client_auth: str | None = None,
         transport: httpx.BaseTransport | None = None,
         page_size: int = DEFAULT_PAGE_SIZE,
+        monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         self._config = mapping_config
         self._base_url = normalize_base_url(base_url)
@@ -66,13 +82,31 @@ class LiveCollibraAdapter:
         self._username = username
         self._password = password
         self._bearer_token = bearer_token
-        self._auth_mode = _resolve_auth_mode(username, password, bearer_token)
+        self._auth_mode = _resolve_auth_mode(
+            username,
+            password,
+            bearer_token,
+            client_id,
+            client_secret,
+        )
+        self._token_provider: CollibraTokenProvider | None = _build_token_provider(
+            auth_mode=self._auth_mode,
+            base_url=self._base_url,
+            timeout_seconds=timeout_seconds,
+            bearer_token=bearer_token,
+            client_id=client_id,
+            client_secret=client_secret,
+            token_url=token_url,
+            oauth_scope=oauth_scope,
+            oauth_client_auth=oauth_client_auth,
+            transport=transport,
+            monotonic_clock=monotonic_clock,
+        )
         self._client = httpx.Client(
             base_url=self._base_url,
             timeout=timeout_seconds,
             verify=True,
             transport=transport,
-            headers=self._auth_headers(),
         )
 
     @classmethod
@@ -82,6 +116,7 @@ class LiveCollibraAdapter:
         mapping_config: CollibraMappingConfig,
         *,
         transport: httpx.BaseTransport | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
     ) -> LiveCollibraAdapter:
         return cls(
             mapping_config=mapping_config,
@@ -90,7 +125,13 @@ class LiveCollibraAdapter:
             username=settings.collibra_username or None,
             password=settings.collibra_password or None,
             bearer_token=settings.collibra_bearer_token or None,
+            client_id=settings.collibra_client_id or None,
+            client_secret=settings.collibra_client_secret or None,
+            token_url=settings.collibra_token_url or None,
+            oauth_scope=settings.collibra_oauth_scope or None,
+            oauth_client_auth=settings.collibra_oauth_client_auth or None,
             transport=transport,
+            monotonic_clock=monotonic_clock,
         )
 
     @property
@@ -98,6 +139,10 @@ class LiveCollibraAdapter:
         return "live"
 
     def close(self) -> None:
+        provider = self._token_provider
+        close = getattr(provider, "close", None)
+        if callable(close):
+            close()
         self._client.close()
 
     def __enter__(self) -> LiveCollibraAdapter:
@@ -279,11 +324,10 @@ class LiveCollibraAdapter:
             )
         return remote_id
 
-    def _auth_headers(self) -> dict[str, str]:
-        if self._auth_mode == "bearer":
-            assert self._bearer_token is not None
-            return {"Authorization": f"Bearer {self._bearer_token}"}
-        return {}
+    def _request_auth_headers(self) -> dict[str, str]:
+        if self._token_provider is None:
+            return {}
+        return {"Authorization": f"Bearer {self._token_provider.get_access_token()}"}
 
     def _request(
         self,
@@ -296,20 +340,33 @@ class LiveCollibraAdapter:
         auth = None
         if self._auth_mode == "basic":
             auth = httpx.BasicAuth(self._username or "", self._password or "")
-        try:
-            response = self._client.request(
-                method,
-                path,
-                params=params,
-                json=json,
-                auth=auth,
-            )
-        except httpx.HTTPError:
-            raise CollibraAdapterError(
-                "HTTP transport error",
-                operation=method.lower(),
-                endpoint_path=path,
-            ) from None
+        retried_oauth = False
+        while True:
+            try:
+                response = self._client.request(
+                    method,
+                    path,
+                    params=params,
+                    json=json,
+                    auth=auth,
+                    headers=self._request_auth_headers(),
+                )
+            except httpx.HTTPError:
+                raise CollibraAdapterError(
+                    "HTTP transport error",
+                    operation=method.lower(),
+                    endpoint_path=path,
+                ) from None
+            if (
+                response.status_code == 401
+                and self._auth_mode == "oauth"
+                and self._token_provider is not None
+                and not retried_oauth
+            ):
+                self._token_provider.invalidate()
+                retried_oauth = True
+                continue
+            break
         if response.status_code >= 400:
             raise CollibraAdapterError(
                 "Collibra API request failed",
@@ -453,20 +510,81 @@ def _resolve_auth_mode(
     username: str | None,
     password: str | None,
     bearer_token: str | None,
-) -> Literal["basic", "bearer"]:
-    has_basic = bool(username) or bool(password)
+    client_id: str | None = None,
+    client_secret: str | None = None,
+) -> Literal["basic", "bearer", "oauth"]:
+    has_basic_partial = bool(username) or bool(password)
+    has_basic = bool(username) and bool(password)
     has_bearer = bool(bearer_token)
-    if has_basic and has_bearer:
-        raise ValueError("live mode accepts exactly one auth method: basic or bearer")
+    has_oauth_partial = bool(client_id) or bool(client_secret)
+    has_oauth = bool(client_id) and bool(client_secret)
+    selected = sum([has_basic_partial, has_bearer, has_oauth_partial])
+    if selected > 1:
+        raise ValueError("live mode accepts exactly one auth method: basic, bearer, or oauth")
+    if has_oauth_partial and not has_oauth:
+        raise ValueError("live mode oauth requires both client_id and client_secret")
+    if has_basic_partial and not has_basic:
+        raise ValueError("live mode basic auth requires both username and password")
+    if has_oauth:
+        return "oauth"
     if has_bearer:
         if not bearer_token or not bearer_token.strip():
             raise ValueError("collibra_bearer_token is required for bearer auth")
         return "bearer"
-    if username and password:
+    if has_basic:
         return "basic"
     raise ValueError(
-        "live mode requires exactly one auth method: "
-        "COLLIBRA_USERNAME/COLLIBRA_PASSWORD or COLLIBRA_BEARER_TOKEN"
+        "live mode requires exactly one auth method: basic, bearer, or oauth client credentials"
+    )
+
+
+def _build_token_provider(
+    *,
+    auth_mode: Literal["basic", "bearer", "oauth"],
+    base_url: str,
+    timeout_seconds: float,
+    bearer_token: str | None,
+    client_id: str | None,
+    client_secret: str | None,
+    token_url: str | None,
+    oauth_scope: str | None,
+    oauth_client_auth: str | None,
+    transport: httpx.BaseTransport | None,
+    monotonic_clock: Callable[[], float] | None,
+) -> CollibraTokenProvider | None:
+    if auth_mode == "basic":
+        return None
+    if auth_mode == "bearer":
+        assert bearer_token is not None
+        return StaticBearerProvider(bearer_token)
+    assert client_id is not None and client_secret is not None
+    cleaned_token_url = (token_url or "").strip()
+    cleaned_scope = (oauth_scope or "").strip()
+    cleaned_client_auth = (oauth_client_auth or "").strip()
+    if not cleaned_token_url:
+        if cleaned_scope or cleaned_client_auth:
+            raise CollibraAuthError(
+                "native oauth rejects token_url, scope, and oauth_client_auth",
+                operation="oauth_token",
+                endpoint_path="/rest/oauth/v2/token",
+            )
+        return CollibraNativeOAuthProvider(
+            base_url=base_url,
+            client_id=client_id,
+            client_secret=client_secret,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
+            monotonic_clock=monotonic_clock,
+        )
+    return ExternalIdpOAuthProvider(
+        token_url=cleaned_token_url,
+        client_id=client_id,
+        client_secret=client_secret,
+        timeout_seconds=timeout_seconds,
+        client_auth=cleaned_client_auth or None,
+        scope=cleaned_scope or None,
+        transport=transport,
+        monotonic_clock=monotonic_clock,
     )
 
 

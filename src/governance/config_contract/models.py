@@ -67,6 +67,11 @@ class CollibraAuthRefs:
     username_env: str | None = None
     password_env: str | None = None
     bearer_token_env: str | None = None
+    client_id_env: str | None = None
+    client_secret_env: str | None = None
+    token_url_env: str | None = None
+    scope_env: str | None = None
+    oauth_client_auth_env: str | None = None
     timeout_seconds_env: str | None = None
 
     def to_dict(self) -> dict[str, str]:
@@ -76,6 +81,11 @@ class CollibraAuthRefs:
             "username_env",
             "password_env",
             "bearer_token_env",
+            "client_id_env",
+            "client_secret_env",
+            "token_url_env",
+            "scope_env",
+            "oauth_client_auth_env",
             "timeout_seconds_env",
         ):
             value = getattr(self, key)

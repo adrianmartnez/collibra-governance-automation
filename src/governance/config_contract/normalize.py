@@ -103,6 +103,11 @@ def _normalize_collibra_config(config: dict[str, Any]) -> CollibraTargetConfig:
             username_env=auth_raw.get("username_env"),
             password_env=auth_raw.get("password_env"),
             bearer_token_env=auth_raw.get("bearer_token_env"),
+            client_id_env=auth_raw.get("client_id_env"),
+            client_secret_env=auth_raw.get("client_secret_env"),
+            token_url_env=auth_raw.get("token_url_env"),
+            scope_env=auth_raw.get("scope_env"),
+            oauth_client_auth_env=auth_raw.get("oauth_client_auth_env"),
             timeout_seconds_env=auth_raw.get("timeout_seconds_env"),
         )
     return CollibraTargetConfig(

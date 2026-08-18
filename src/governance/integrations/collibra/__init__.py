@@ -3,6 +3,7 @@
 from governance.integrations.collibra.adapters import (
     CollibraAdapter,
     CollibraAdapterError,
+    CollibraAuthError,
     build_collibra_adapter,
 )
 from governance.integrations.collibra.endpoint import normalize_base_url
@@ -40,6 +41,7 @@ from governance.integrations.collibra.sync import (
 __all__ = [
     "CollibraAdapter",
     "CollibraAdapterError",
+    "CollibraAuthError",
     "CollibraAssetSpec",
     "CollibraAttributeSpec",
     "CollibraDesiredState",

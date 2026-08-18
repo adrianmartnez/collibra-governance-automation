@@ -1631,7 +1631,14 @@ def _safe_error_message(exc: BaseException) -> str:
     if not text:
         return _SAFE_UNEXPECTED
     lowered = text.lower()
-    for secret_marker in ("password", "bearer", "authorization", "token="):
+    for secret_marker in (
+        "password",
+        "bearer",
+        "authorization",
+        "token=",
+        "client_secret",
+        "access_token",
+    ):
         if secret_marker in lowered:
             return _SAFE_UNEXPECTED
     return text
