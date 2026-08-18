@@ -7,14 +7,14 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
-from tests.test_collibra_import_cli import (
+
+from governance.cli import main
+from governance.integrations.collibra.jobs import JOB_OBSERVATION_FAILURE
+from test_collibra_import_cli import (
     _patch_scanner,
     _post_paths,
     _write_workspace,
 )
-
-from governance.cli import main
-from governance.integrations.collibra.jobs import JOB_OBSERVATION_FAILURE
 
 UUID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
