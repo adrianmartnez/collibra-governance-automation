@@ -66,6 +66,7 @@ from governance.integrations.collibra import (
     CollibraAdapterError,
     CollibraMappingConfig,
     CollibraMappingError,
+    ImportExecutionResult,
     SyncAction,
     SyncActionType,
     SyncObjectKind,
@@ -73,7 +74,7 @@ from governance.integrations.collibra import (
     SyncResult,
     build_collibra_adapter,
     build_sync_plan,
-    execute_sync_plan,
+    execute_collibra_plan,
     load_mapping_config_file,
     map_to_desired_state,
     mapping_contains_example_placeholders,
@@ -87,10 +88,14 @@ from governance.plans import (
     PlanError,
     SavedGovernancePlan,
     build_apply_result,
+    build_import_submission_result,
+    build_import_sync_payload,
     build_saved_plan,
     build_stale_result,
     compute_remote_state_identity_value,
     format_apply_result_human,
+    format_import_submission_human,
+    format_import_sync_human,
     format_stale_human,
     identity_mismatch,
     load_saved_plan,
@@ -943,7 +948,26 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 return _emit_operational(exc, fmt)
             raise
 
-    result = execute_sync_plan(adapter, saved.sync_plan, apply=apply)
+    try:
+        result = execute_collibra_plan(
+            adapter,
+            saved.sync_plan,
+            mapping_config,
+            apply=apply,
+            execution_mode=settings.collibra_execution_mode,
+        )
+    except CollibraAdapterError as exc:
+        return _emit_operational(exc, fmt)
+    if isinstance(result, ImportExecutionResult):
+        payload = build_import_submission_result(
+            result=result,
+            plan_content_identity=saved.content_identity(),
+        )
+        if fmt == "json":
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_import_submission_human(payload))
+        return 0 if result.error is None else 1
     payload = build_apply_result(
         sync_plan=saved.sync_plan,
         result=result,
@@ -1388,7 +1412,25 @@ def _cmd_sync(
     adapter = build_collibra_adapter(effective, mapping_config)
     remote = adapter.read_remote_state(desired)
     plan = build_sync_plan(desired, remote)
-    result = execute_sync_plan(adapter, plan, apply=apply)
+    try:
+        result = execute_collibra_plan(
+            adapter,
+            plan,
+            mapping_config,
+            apply=apply,
+            execution_mode=settings.collibra_execution_mode,
+        )
+    except CollibraAdapterError as exc:
+        return _emit_operational(exc, "json" if json_output else "human")
+    if isinstance(result, ImportExecutionResult):
+        if result.error is not None:
+            raise CliOperationalError(result.error)
+        payload = build_import_sync_payload(mode=mode, result=result)
+        if json_output:
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_import_sync_human(payload))
+        return 0
     if not result.success:
         message = result.error or _SAFE_SYNC_FAILED
         raise CliOperationalError(message)

@@ -91,6 +91,8 @@ class CollibraHttpExecutor:
         *,
         params: QueryParams | None = None,
         json: dict[str, Any] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Any | None = None,
         headers: Mapping[str, str] | None = None,
         auth: httpx.Auth | None = None,
         operation: str | None = None,
@@ -107,6 +109,8 @@ class CollibraHttpExecutor:
                     path,
                     params=params,
                     json=json,
+                    data=data,
+                    files=files,
                     headers=headers,
                     auth=auth,
                 )

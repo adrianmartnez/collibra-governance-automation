@@ -246,6 +246,13 @@ def _validate_target(target: Any, pointer: str) -> list[DiagnosticError]:
 
     if config.get("mode_env") is not None:
         errors.extend(_validate_env_name(config["mode_env"], f"{pointer}/config/mode_env"))
+    if config.get("execution_mode_env") is not None:
+        errors.extend(
+            _validate_env_name(
+                config["execution_mode_env"],
+                f"{pointer}/config/execution_mode_env",
+            )
+        )
 
     mapping = config.get("mapping")
     if not isinstance(mapping, dict) or "path" not in mapping:

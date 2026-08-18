@@ -14,6 +14,12 @@ from governance.plans.errors import (
     UnsupportedPlanVersionError,
     plan_diagnostics_failure,
 )
+from governance.plans.import_submission_result import (
+    build_import_submission_result,
+    build_import_sync_payload,
+    format_import_submission_human,
+    format_import_sync_human,
+)
 from governance.plans.load import load_saved_plan
 from governance.plans.models import PLAN_SCHEMA, PLAN_VERSION, SavedGovernancePlan
 from governance.plans.stale import (
@@ -33,10 +39,14 @@ __all__ = [
     "SavedGovernancePlan",
     "UnsupportedPlanVersionError",
     "build_apply_result",
+    "build_import_submission_result",
+    "build_import_sync_payload",
     "build_saved_plan",
     "build_stale_result",
     "compute_remote_state_identity_value",
     "format_apply_result_human",
+    "format_import_submission_human",
+    "format_import_sync_human",
     "format_stale_human",
     "identity_mismatch",
     "load_saved_plan",

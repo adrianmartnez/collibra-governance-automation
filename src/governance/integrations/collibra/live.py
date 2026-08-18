@@ -263,6 +263,35 @@ class LiveCollibraAdapter:
             unmanaged_relationships_ignored=unmanaged_relationships,
         )
 
+    def lookup_assets_by_natural_identifier(
+        self,
+        *,
+        name: str,
+        domain_ref: str,
+    ) -> list[dict[str, Any]]:
+        """Read-only occupancy of an Import CREATE name+domain identifier.
+
+        Unscoped by asset type: any occupant is a MERGE collision. Managed
+        identity remains ``local_id``; this lookup does not become a second
+        identity authority.
+        """
+        if not name.strip() or not domain_ref.strip():
+            raise CollibraAdapterError(
+                "import_v2 CREATE collision check is ambiguous",
+                operation="import_collision_check",
+                endpoint_path=f"{API_PREFIX}/assets",
+                endpoint_family="core_rest",
+            )
+        return self._paginate(
+            f"{API_PREFIX}/assets",
+            {
+                "name": name,
+                "nameMatchMode": "EXACT",
+                "domainId": domain_ref,
+                "excludeMeta": "false",
+            },
+        )
+
     def create_asset(self, asset: CollibraAssetSpec) -> str:
         payload: dict[str, Any] = {
             "name": asset.name,
@@ -342,6 +371,42 @@ class LiveCollibraAdapter:
             )
         return remote_id
 
+    def submit_json_import(self, document: Any) -> Any:
+        from governance.integrations.collibra.import_api import (
+            FORBIDDEN_SYNC_PATH_FRAGMENT,
+            IMPORT_JSON_JOB_PATH,
+            IMPORT_MULTIPART_FIELDS,
+            ImportDocument,
+            ImportSubmission,
+        )
+
+        if not isinstance(document, ImportDocument):
+            raise CollibraAdapterError(
+                "import document is invalid",
+                operation="submit_json_import",
+                endpoint_path=IMPORT_JSON_JOB_PATH,
+            )
+        if FORBIDDEN_SYNC_PATH_FRAGMENT in IMPORT_JSON_JOB_PATH:
+            raise CollibraAdapterError(
+                "combined synchronization import endpoint is forbidden",
+                operation="submit_json_import",
+                endpoint_path=IMPORT_JSON_JOB_PATH,
+            )
+        payload = self._request(
+            "POST",
+            IMPORT_JSON_JOB_PATH,
+            data=dict(IMPORT_MULTIPART_FIELDS),
+            files={"file": ("import.json", document.canonical_json(), "application/json")},
+        )
+        job_id = str(payload.get("id") or "")
+        if not job_id:
+            raise CollibraAdapterError(
+                "import job response missing id",
+                operation="submit_json_import",
+                endpoint_path=IMPORT_JSON_JOB_PATH,
+            )
+        return ImportSubmission(job_id=job_id)
+
     def _request_auth_headers(self) -> dict[str, str]:
         if self._token_provider is None:
             return {}
@@ -354,6 +419,8 @@ class LiveCollibraAdapter:
         *,
         params: QueryParams | None = None,
         json: dict[str, Any] | None = None,
+        data: Mapping[str, str] | None = None,
+        files: Any | None = None,
     ) -> Any:
         auth = None
         if self._auth_mode == "basic":
@@ -365,6 +432,8 @@ class LiveCollibraAdapter:
                 path,
                 params=params,
                 json=json,
+                data=data,
+                files=files,
                 auth=auth,
                 headers=self._request_auth_headers(),
                 operation=method.lower(),
