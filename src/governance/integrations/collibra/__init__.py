@@ -10,6 +10,8 @@ from governance.integrations.collibra.endpoint import normalize_base_url
 from governance.integrations.collibra.import_api import (
     ImportCompileError,
     ImportDocument,
+    ImportExecutionResult,
+    ImportSubmission,
     compile_import_document,
     execute_collibra_plan,
 )
@@ -62,6 +64,8 @@ __all__ = [
     "MockCollibraAdapter",
     "ImportCompileError",
     "ImportDocument",
+    "ImportExecutionResult",
+    "ImportSubmission",
     "PLANNER_CONTRACT_VERSION",
     "SyncAction",
     "SyncActionType",

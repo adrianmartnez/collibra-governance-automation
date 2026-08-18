@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.collibra.adapters import CollibraAdapterError
@@ -60,6 +60,38 @@ class ImportSubmission:
     job_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ImportExecutionResult:
+    """Compile + optional json-job submit. Not terminal Import job completion.
+
+    ``submitted`` means POST /import/json-job accepted a job id. ``applied_count``
+    stays 0 until a later lifecycle PR can observe job SUCCESS.
+    """
+
+    plan: SyncPlan
+    document: ImportDocument
+    dry_run: bool
+    submitted: bool
+    submission: ImportSubmission | None = None
+    unchanged_count: int = 0
+    error: str | None = None
+    failed_action: SyncAction | None = None
+
+    @property
+    def job_id(self) -> str | None:
+        if self.submission is None:
+            return None
+        return self.submission.job_id
+
+    @property
+    def applied_count(self) -> int:
+        return 0
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+
 def compile_import_document(
     plan: SyncPlan,
     mapping_config: CollibraMappingConfig,
@@ -67,7 +99,8 @@ def compile_import_document(
     """Translate a reviewed SyncPlan into Import v2 commands.
 
     Emits only mapping-managed attribute types. Unmanaged types are rejected
-    before any HTTP. Relations are attached to the source asset command.
+    before any HTTP. Relationship CREATE is attached to the later endpoint
+    command so Import never depends on a forward identifier.
     """
     allowed_attr_types = set(mapping_config.attribute_type_refs.values())
     mutating = [
@@ -102,22 +135,14 @@ def compile_import_document(
             relationship = action.desired_relationship
             if relationship is None:
                 raise ImportCompileError("relationship action missing spec")
-            source_command = commands.get(relationship.source_local_id)
-            if source_command is None:
-                source_command = _relation_only_command(
-                    plan,
-                    source_local_id=relationship.source_local_id,
-                )
-                commands[relationship.source_local_id] = source_command
-                order.append(relationship.source_local_id)
-            _add_relation(
-                source_command,
+            _attach_relationship(
+                commands,
+                order,
+                plan,
+                assets_by_local,
+                source_local_id=relationship.source_local_id,
+                target_local_id=relationship.target_local_id,
                 relation_type_ref=relationship.relation_type_ref,
-                target=_relation_target_identifier(
-                    plan,
-                    assets_by_local,
-                    target_local_id=relationship.target_local_id,
-                ),
             )
 
     return ImportDocument(
@@ -189,6 +214,112 @@ def _managed_attributes(
     return payload
 
 
+def _is_create_asset(action: SyncAction | None) -> bool:
+    return (
+        action is not None
+        and action.object_kind is SyncObjectKind.ASSET
+        and action.action_type is SyncActionType.CREATE
+    )
+
+
+def _asset_identifier(action: SyncAction) -> dict[str, Any]:
+    if action.action_type is SyncActionType.CREATE:
+        asset = action.desired_asset
+        if asset is None:
+            raise ImportCompileError("asset action missing desired spec")
+        return {
+            "name": asset.name,
+            "domain": {"id": asset.domain_ref},
+        }
+    if action.remote_id:
+        return {"id": action.remote_id}
+    raise ImportCompileError("relationship endpoint cannot be identified")
+
+
+def _ensure_relation_command(
+    commands: dict[str, dict[str, Any]],
+    order: list[str],
+    plan: SyncPlan,
+    *,
+    local_id: str,
+) -> dict[str, Any]:
+    existing = commands.get(local_id)
+    if existing is not None:
+        return existing
+    command = _relation_only_command(plan, source_local_id=local_id)
+    commands[local_id] = command
+    order.append(local_id)
+    return command
+
+
+def _attach_relationship(
+    commands: dict[str, dict[str, Any]],
+    order: list[str],
+    plan: SyncPlan,
+    assets_by_local: dict[str, SyncAction],
+    *,
+    source_local_id: str,
+    target_local_id: str,
+    relation_type_ref: str,
+) -> None:
+    source_action = assets_by_local.get(source_local_id)
+    target_action = assets_by_local.get(target_local_id)
+    if source_action is None or target_action is None:
+        raise ImportCompileError("relationship endpoint cannot be identified")
+    source_create = _is_create_asset(source_action)
+    target_create = _is_create_asset(target_action)
+    if source_create and target_create:
+        try:
+            source_idx = order.index(source_local_id)
+            target_idx = order.index(target_local_id)
+        except ValueError as exc:
+            raise ImportCompileError("relationship CREATE missing asset command") from exc
+        if target_idx > source_idx:
+            _add_relation(
+                commands[target_local_id],
+                relation_type_ref=relation_type_ref,
+                direction="SOURCE",
+                related=_asset_identifier(source_action),
+            )
+        else:
+            _add_relation(
+                commands[source_local_id],
+                relation_type_ref=relation_type_ref,
+                direction="TARGET",
+                related=_asset_identifier(target_action),
+            )
+        return
+    if source_create:
+        source_command = commands.get(source_local_id)
+        if source_command is None:
+            raise ImportCompileError("relationship CREATE missing asset command")
+        _add_relation(
+            source_command,
+            relation_type_ref=relation_type_ref,
+            direction="TARGET",
+            related=_asset_identifier(target_action),
+        )
+        return
+    if target_create:
+        target_command = commands.get(target_local_id)
+        if target_command is None:
+            raise ImportCompileError("relationship CREATE missing asset command")
+        _add_relation(
+            target_command,
+            relation_type_ref=relation_type_ref,
+            direction="SOURCE",
+            related=_asset_identifier(source_action),
+        )
+        return
+    host = _ensure_relation_command(commands, order, plan, local_id=source_local_id)
+    _add_relation(
+        host,
+        relation_type_ref=relation_type_ref,
+        direction="TARGET",
+        related=_asset_identifier(target_action),
+    )
+
+
 def _relation_only_command(plan: SyncPlan, *, source_local_id: str) -> dict[str, Any]:
     remote_id = None
     for action in plan.actions:
@@ -207,33 +338,17 @@ def _relation_only_command(plan: SyncPlan, *, source_local_id: str) -> dict[str,
     }
 
 
-def _relation_target_identifier(
-    plan: SyncPlan,
-    assets_by_local: dict[str, SyncAction],
-    *,
-    target_local_id: str,
-) -> dict[str, Any]:
-    action = assets_by_local.get(target_local_id)
-    if action is not None and action.remote_id:
-        return {"id": action.remote_id}
-    if action is not None and action.desired_asset is not None:
-        return {
-            "name": action.desired_asset.name,
-            "domain": {"id": action.desired_asset.domain_ref},
-        }
-    raise ImportCompileError("relationship target cannot be identified")
-
-
 def _add_relation(
     command: dict[str, Any],
     *,
     relation_type_ref: str,
-    target: dict[str, Any],
+    direction: Literal["SOURCE", "TARGET"],
+    related: dict[str, Any],
 ) -> None:
     relations = command.setdefault("relations", {})
-    key = f"{relation_type_ref}:TARGET"
+    key = f"{relation_type_ref}:{direction}"
     bucket = relations.setdefault(key, [])
-    bucket.append(target)
+    bucket.append(related)
 
 
 def execute_collibra_plan(
@@ -245,7 +360,6 @@ def execute_collibra_plan(
     execution_mode: str,
 ) -> Any:
     """Run Core REST or Import v2 for a reviewed plan. Mock always uses Core REST."""
-    from governance.integrations.collibra.models import SyncResult
     from governance.integrations.collibra.sync import execute_sync_plan
 
     mode = (execution_mode or "core_rest").strip().lower()
@@ -256,26 +370,31 @@ def execute_collibra_plan(
     document = compile_import_document(plan, mapping_config)
     unchanged_count = len(plan.unchanged)
     if not apply:
-        return SyncResult(
-            success=True,
-            dry_run=True,
-            applied_count=0,
-            unchanged_count=unchanged_count,
+        return ImportExecutionResult(
             plan=plan,
+            document=document,
+            dry_run=True,
+            submitted=False,
+            submission=None,
+            unchanged_count=unchanged_count,
         )
     if not document.commands:
-        return SyncResult(
-            success=True,
-            dry_run=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
+        return ImportExecutionResult(
             plan=plan,
+            document=document,
+            dry_run=False,
+            submitted=False,
+            submission=None,
+            unchanged_count=unchanged_count,
         )
-    adapter.submit_json_import(document)
-    return SyncResult(
-        success=True,
-        dry_run=False,
-        applied_count=len(document.commands),
-        unchanged_count=unchanged_count,
+    submission = adapter.submit_json_import(document)
+    if not isinstance(submission, ImportSubmission) or not submission.job_id:
+        raise ImportCompileError("import job response missing id")
+    return ImportExecutionResult(
         plan=plan,
+        document=document,
+        dry_run=False,
+        submitted=True,
+        submission=submission,
+        unchanged_count=unchanged_count,
     )

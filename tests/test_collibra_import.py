@@ -13,6 +13,7 @@ from governance.integrations.collibra import (
     CollibraAttributeSpec,
     CollibraRelationshipSpec,
     ImportCompileError,
+    ImportExecutionResult,
     LiveCollibraAdapter,
     MockCollibraAdapter,
     SyncAction,
@@ -44,7 +45,13 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**base)
 
 
-def _asset(*, local_id: str = "tbl:demo", name: str = "demo", attrs: tuple[str, str] | None = None):
+def _asset(
+    *,
+    local_id: str = "tbl:demo",
+    name: str = "demo",
+    kind: str = "table",
+    attrs: tuple[str, str] | None = None,
+):
     config = mock_mapping_config()
     attributes = ()
     if attrs is not None:
@@ -53,9 +60,39 @@ def _asset(*, local_id: str = "tbl:demo", name: str = "demo", attrs: tuple[str, 
         local_id=local_id,
         name=name,
         display_name=name,
-        asset_type_ref=config.asset_type_refs["table"],
+        asset_type_ref=config.asset_type_refs[kind],
         domain_ref=config.domain_ref,
         attributes=attributes,
+    )
+
+
+def _create_asset_action(
+    *,
+    local_id: str,
+    name: str,
+    kind: str,
+) -> SyncAction:
+    return SyncAction(
+        action_type=SyncActionType.CREATE,
+        object_kind=SyncObjectKind.ASSET,
+        local_id=local_id,
+        reason="create",
+        desired_asset=_asset(local_id=local_id, name=name, kind=kind),
+    )
+
+
+def _schema_table_rel(rel_type: str) -> SyncAction:
+    return SyncAction(
+        action_type=SyncActionType.CREATE,
+        object_kind=SyncObjectKind.RELATIONSHIP,
+        local_id="rel:1",
+        reason="rel",
+        desired_relationship=CollibraRelationshipSpec(
+            local_key="rel:1",
+            source_local_id="sch:demo",
+            target_local_id="tbl:demo",
+            relation_type_ref=rel_type,
+        ),
     )
 
 
@@ -189,7 +226,153 @@ def test_reordered_input_compiles_equivalently() -> None:
     assert left == right
 
 
-def test_import_submit_multipart_and_dry_run_zero_posts() -> None:
+def test_both_create_relation_attaches_to_later_command() -> None:
+    config = mock_mapping_config()
+    rel_type = config.relation_type_refs["schema_table"]
+    schema = _create_asset_action(local_id="sch:demo", name="sch", kind="schema")
+    table = _create_asset_action(local_id="tbl:demo", name="tbl", kind="table")
+    rel = _schema_table_rel(rel_type)
+    document = compile_import_document(SyncPlan(actions=(schema, table, rel)), config)
+    commands = document.to_list()
+    assert len(commands) == 2
+    assert commands[0]["identifier"]["name"] == "sch"
+    assert "relations" not in commands[0]
+    assert commands[1]["identifier"]["name"] == "tbl"
+    assert commands[1]["relations"][f"{rel_type}:SOURCE"] == [
+        {"name": "sch", "domain": {"id": config.domain_ref}}
+    ]
+    assert f"{rel_type}:TARGET" not in commands[0].get("relations", {})
+    reordered = compile_import_document(SyncPlan(actions=(table, rel, schema)), config)
+    assert reordered.canonical_json() == document.canonical_json()
+
+
+def test_source_create_target_existing_relation_on_source() -> None:
+    config = mock_mapping_config()
+    rel_type = config.relation_type_refs["schema_table"]
+    plan = SyncPlan(
+        actions=(
+            _create_asset_action(local_id="sch:demo", name="sch", kind="schema"),
+            SyncAction(
+                action_type=SyncActionType.UNCHANGED,
+                object_kind=SyncObjectKind.ASSET,
+                local_id="tbl:demo",
+                remote_id="table-1",
+                reason="exists",
+            ),
+            _schema_table_rel(rel_type),
+        )
+    )
+    command = compile_import_document(plan, config).to_list()[0]
+    assert command["identifier"]["name"] == "sch"
+    assert command["relations"][f"{rel_type}:TARGET"] == [{"id": "table-1"}]
+
+
+def test_source_existing_target_create_relation_on_target() -> None:
+    config = mock_mapping_config()
+    rel_type = config.relation_type_refs["schema_table"]
+    plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.UNCHANGED,
+                object_kind=SyncObjectKind.ASSET,
+                local_id="sch:demo",
+                remote_id="schema-1",
+                reason="exists",
+            ),
+            _create_asset_action(local_id="tbl:demo", name="tbl", kind="table"),
+            _schema_table_rel(rel_type),
+        )
+    )
+    command = compile_import_document(plan, config).to_list()[0]
+    assert command["identifier"]["name"] == "tbl"
+    assert command["relations"][f"{rel_type}:SOURCE"] == [{"id": "schema-1"}]
+
+
+def test_import_submit_preserves_job_id_without_claiming_completion() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.UPDATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id="tbl:demo",
+                remote_id="asset-1",
+                reason="attr",
+                desired_asset=_asset(attrs=("description", "new-description")),
+                changed_fields=("managed_attributes",),
+            ),
+        )
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "POST" and path.endswith("/import/json-job"):
+            return httpx.Response(200, json={"id": "job-123"})
+        return httpx.Response(500, json={"error": "unexpected"})
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert isinstance(result, ImportExecutionResult)
+    assert len(requests) == 1
+    assert urlparse(str(requests[0].url)).path == "/rest/2.0/import/json-job"
+    assert result.job_id == "job-123"
+    assert result.submission is not None
+    assert result.submission.job_id == "job-123"
+    assert result.submitted is True
+    assert result.dry_run is False
+    assert result.applied_count == 0
+    assert getattr(result, "completed", None) is not True
+    assert requests[0].method == "POST"
+
+
+def test_import_dry_run_returns_inspectable_document() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.UPDATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id="tbl:demo",
+                remote_id="asset-1",
+                reason="attr",
+                desired_asset=_asset(attrs=("description", "new-description")),
+                changed_fields=("managed_attributes",),
+            ),
+        )
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500)
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    preview = execute_collibra_plan(adapter, plan, config, apply=False, execution_mode="import_v2")
+    compiled = compile_import_document(plan, config)
+    assert isinstance(preview, ImportExecutionResult)
+    assert preview.document is not None
+    assert preview.document.canonical_json() == compiled.canonical_json()
+    assert preview.document.to_list() == compiled.to_list()
+    assert requests == []
+    assert preview.submitted is False
+    assert preview.submission is None
+    assert preview.job_id is None
+    assert preview.applied_count == 0
+
+
+def test_import_preview_matches_submitted_multipart_bytes() -> None:
     config = mock_mapping_config()
     desc = config.attribute_type_refs["description"]
     plan = SyncPlan(
@@ -230,16 +413,15 @@ def test_import_submit_multipart_and_dry_run_zero_posts() -> None:
         transport=httpx.MockTransport(handler),
         sleeper=lambda _s: None,
     )
-    dry = execute_collibra_plan(adapter, plan, config, apply=False, execution_mode="import_v2")
-    assert dry.dry_run is True
-    assert dry.applied_count == 0
+    preview = execute_collibra_plan(adapter, plan, config, apply=False, execution_mode="import_v2")
+    assert preview.submitted is False
     assert requests == []
-
     applied = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert applied.success is True
-    assert applied.applied_count == 1
+    assert applied.submitted is True
+    assert applied.applied_count == 0
     assert len(requests) == 1
-    assert urlparse(str(requests[0].url)).path == "/rest/2.0/import/json-job"
+    assert preview.document.canonical_json() in requests[0].content
+    assert "secret-token-value-xyz" not in requests[0].content.decode("utf-8", errors="replace")
 
 
 def test_unchanged_managed_attributes_are_idempotent() -> None:
