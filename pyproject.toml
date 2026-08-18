@@ -50,6 +50,7 @@ markers = [
     "integration: requires the local PostgreSQL demo service",
     "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",
     "cli_integration: end-to-end CLI smoke against local PostgreSQL demo",
+    "collibra_contract: localhost Collibra contract HTTP server (no commercial tenant)",
 ]
 
 [tool.ruff]
