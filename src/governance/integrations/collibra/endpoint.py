@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 TransportClass = Literal["https", "loopback_http", "remote_http"]
 
@@ -21,13 +21,16 @@ def normalize_base_url(base_url: str) -> str:
 
 
 def normalize_token_url(token_url: str) -> str:
-    """Return a canonical absolute token URL without fragment or embedded secrets."""
+    """Return a canonical absolute token URL without query, fragment, or secrets.
+
+    v1.3 does not accept unrestricted query strings. Any query is rejected rather
+    than filtered by parameter name.
+    """
     parsed = _parse_absolute_http_url(token_url, field="oauth token_url")
-    if _query_contains_embedded_credentials(parsed.query):
-        raise ValueError("oauth token_url must not embed credentials")
-    query = f"?{parsed.query}" if parsed.query else ""
+    if parsed.query:
+        raise ValueError("oauth token_url must not include a query string")
     path = parsed.path or ""
-    return f"{parsed.scheme}://{parsed.netloc}{path}{query}"
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
 
 
 def classify_transport(url: str) -> TransportClass:
@@ -60,10 +63,3 @@ def _parse_absolute_http_url(url: str, *, field: str):
     if parsed.username or parsed.password:
         raise ValueError(f"{field} must not embed credentials")
     return parsed
-
-
-def _query_contains_embedded_credentials(query: str) -> bool:
-    if not query:
-        return False
-    keys = {key.lower() for key in parse_qs(query, keep_blank_values=True)}
-    return "client_id" in keys or "client_secret" in keys

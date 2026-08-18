@@ -24,7 +24,7 @@ from governance.integrations.collibra.auth import (
     ExternalIdpOAuthProvider,
     effective_skew_seconds,
 )
-from governance.integrations.collibra.endpoint import classify_transport
+from governance.integrations.collibra.endpoint import classify_transport, normalize_token_url
 
 CLIENT_ID = "oauth-client-id-value"
 CLIENT_SECRET = "oauth-client-secret-do-not-leak"
@@ -425,36 +425,72 @@ def test_external_http_remote_rejected_before_token_post() -> None:
 
 
 def test_embedded_credentials_on_token_url_rejected() -> None:
-    fake = _OAuthCollibra()
-    with pytest.raises(CollibraAuthError, match="embed credentials") as exc_info:
-        _adapter(
-            fake,
-            _settings(
-                collibra_token_url=(
-                    f"https://{CLIENT_ID}:{CLIENT_SECRET}@idp.example.invalid/oauth/token"
-                )
-            ),
-        )
-    assert fake.requests == []
-    text = str(exc_info.value)
-    assert CLIENT_ID not in text
-    assert CLIENT_SECRET not in text
+    userinfo_url = (
+        "https://USERINFO_USER_CANARY:USERINFO_PASSWORD_CANARY@idp.example.invalid/oauth/token"
+    )
+    settings = _settings(collibra_token_url=userinfo_url)
+    assert "USERINFO_USER_CANARY" not in repr(settings)
+    assert "USERINFO_PASSWORD_CANARY" not in repr(settings)
+    assert "USERINFO_PASSWORD_CANARY" not in str(settings.redacted())
+    assert settings.redacted()["collibra_token_url"] == ("https://idp.example.invalid/oauth/token")
 
     fake = _OAuthCollibra()
     with pytest.raises(CollibraAuthError, match="embed credentials") as exc_info:
+        _adapter(fake, settings)
+    assert fake.requests == []
+    text = str(exc_info.value)
+    assert "USERINFO_USER_CANARY" not in text
+    assert "USERINFO_PASSWORD_CANARY" not in text
+    assert CLIENT_ID not in text
+    assert CLIENT_SECRET not in text
+
+    with pytest.raises(ConfigResolutionError, match="embed credentials") as exc_info:
+        validate_collibra_runtime(settings)
+    assert "USERINFO_PASSWORD_CANARY" not in str(exc_info.value)
+
+
+def test_token_url_query_rejected_and_not_leaked() -> None:
+    query_canary = "QUERY_SECRET_CANARY"
+    token_url = f"https://idp.example.invalid/oauth/token?api_key={query_canary}"
+    settings = _settings(collibra_token_url=token_url)
+    assert query_canary not in repr(settings)
+    assert query_canary not in str(settings.redacted())
+    assert settings.redacted()["collibra_token_url"] == ("https://idp.example.invalid/oauth/token")
+
+    fake = _OAuthCollibra()
+    with pytest.raises(CollibraAuthError, match="query string") as exc_info:
+        _adapter(fake, settings)
+    assert fake.requests == []
+    assert query_canary not in str(exc_info.value)
+    assert query_canary not in repr(exc_info.value)
+
+    with pytest.raises(ConfigResolutionError, match="query string") as exc_info:
+        validate_collibra_runtime(settings)
+    assert query_canary not in str(exc_info.value)
+    assert query_canary not in repr(exc_info.value)
+
+    fake = _OAuthCollibra()
+    with pytest.raises(CollibraAuthError, match="query string") as exc_info:
         _adapter(
             fake,
             _settings(
                 collibra_token_url=(
-                    "https://idp.example.invalid/oauth/token"
-                    f"?client_id={CLIENT_ID}&client_secret={CLIENT_SECRET}"
+                    f"https://idp.example.invalid/oauth/token?client_secret={CLIENT_SECRET}"
                 )
             ),
         )
     assert fake.requests == []
-    text = str(exc_info.value)
-    assert CLIENT_ID not in text
-    assert CLIENT_SECRET not in text
+    assert CLIENT_SECRET not in str(exc_info.value)
+
+
+def test_normalize_token_url_accepts_https_without_query() -> None:
+    assert (
+        normalize_token_url("https://idp.example.invalid/oauth/token")
+        == "https://idp.example.invalid/oauth/token"
+    )
+    with pytest.raises(ValueError, match="query string") as exc_info:
+        normalize_token_url("https://idp.example.invalid/oauth/token?api_key=QUERY_SECRET_CANARY")
+    assert "QUERY_SECRET_CANARY" not in str(exc_info.value)
 
 
 def test_provider_repr_hides_secrets() -> None:

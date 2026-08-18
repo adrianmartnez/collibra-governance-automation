@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -28,17 +28,17 @@ class Settings:
     postgres_port: int
     postgres_db: str
     postgres_user: str
-    postgres_password: str
+    postgres_password: str = field(repr=False)
     postgres_source_name: str
     inventory_output_path: str
     log_level: str = DEFAULT_LOG_LEVEL
     collibra_mode: str = DEFAULT_COLLIBRA_MODE
     collibra_base_url: str = ""
     collibra_username: str = ""
-    collibra_password: str = ""
-    collibra_bearer_token: str = ""
+    collibra_password: str = field(default="", repr=False)
+    collibra_bearer_token: str = field(default="", repr=False)
     collibra_client_id: str = ""
-    collibra_client_secret: str = ""
+    collibra_client_secret: str = field(default="", repr=False)
     collibra_token_url: str = ""
     collibra_oauth_scope: str = ""
     collibra_oauth_client_auth: str = ""
@@ -68,6 +68,10 @@ class Settings:
         if self.collibra_timeout_seconds <= 0:
             raise ValueError("collibra_timeout_seconds must be positive")
 
+    def __repr__(self) -> str:
+        body = ", ".join(f"{key}={value!r}" for key, value in self.redacted().items())
+        return f"{type(self).__name__}({body})"
+
     @property
     def database_url(self) -> str:
         return (
@@ -87,17 +91,33 @@ class Settings:
             "inventory_output_path": self.inventory_output_path,
             "log_level": self.log_level,
             "collibra_mode": self.collibra_mode,
-            "collibra_base_url": self.collibra_base_url,
+            "collibra_base_url": _diagnostic_http_url(self.collibra_base_url),
             "collibra_username": self.collibra_username,
             "collibra_password": "***" if self.collibra_password else "",
             "collibra_bearer_token": "***" if self.collibra_bearer_token else "",
             "collibra_client_id": self.collibra_client_id,
             "collibra_client_secret": "***" if self.collibra_client_secret else "",
-            "collibra_token_url": self.collibra_token_url,
+            "collibra_token_url": _diagnostic_http_url(self.collibra_token_url),
             "collibra_oauth_scope": self.collibra_oauth_scope,
             "collibra_oauth_client_auth": self.collibra_oauth_client_auth,
             "collibra_timeout_seconds": self.collibra_timeout_seconds,
         }
+
+
+def _diagnostic_http_url(url: str) -> str:
+    """Return scheme/host/path only. Never emit userinfo, query, or fragment."""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"}:
+        return "<redacted-url>"
+    hostname = parsed.hostname
+    if not hostname:
+        return "<redacted-url>"
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+    return f"{parsed.scheme}://{netloc}{parsed.path or ''}"
 
 
 def _parse_database_url(url: str) -> dict[str, str | int]:

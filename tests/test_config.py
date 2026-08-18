@@ -130,6 +130,59 @@ def test_redacted_masks_oauth_client_secret() -> None:
     assert "oauth-client-secret" not in str(redacted)
 
 
+def test_repr_hides_collibra_secret_canaries() -> None:
+    settings = Settings(
+        postgres_host="localhost",
+        postgres_port=5432,
+        postgres_db="governance_demo",
+        postgres_user="postgres",
+        postgres_password="postgres",
+        postgres_source_name="governance-demo",
+        inventory_output_path="artifacts/metadata-inventory.json",
+        collibra_mode="live",
+        collibra_base_url="https://collibra.example.invalid",
+        collibra_username="governance-bot",
+        collibra_password="BASIC_PASSWORD_CANARY",
+        collibra_bearer_token="BEARER_CANARY",
+        collibra_client_id="visible-client-id",
+        collibra_client_secret="OAUTH_SECRET_CANARY",
+        collibra_token_url="https://idp.example.invalid/oauth/token",
+    )
+    text = repr(settings)
+    assert "BASIC_PASSWORD_CANARY" not in text
+    assert "BEARER_CANARY" not in text
+    assert "OAUTH_SECRET_CANARY" not in text
+    assert "visible-client-id" in text
+    assert "https://collibra.example.invalid" in text
+    assert "https://idp.example.invalid/oauth/token" in text
+    assert "live" in text
+
+
+def test_repr_and_redacted_omit_token_url_query() -> None:
+    canary = "QUERY_SECRET_CANARY"
+    settings = Settings(
+        postgres_host="localhost",
+        postgres_port=5432,
+        postgres_db="governance_demo",
+        postgres_user="postgres",
+        postgres_password="postgres",
+        postgres_source_name="governance-demo",
+        inventory_output_path="artifacts/metadata-inventory.json",
+        collibra_mode="live",
+        collibra_base_url="https://collibra.example.invalid",
+        collibra_client_id="visible-client-id",
+        collibra_client_secret="OAUTH_SECRET_CANARY",
+        collibra_token_url=f"https://idp.example.invalid/oauth/token?api_key={canary}",
+    )
+    text = repr(settings)
+    redacted = settings.redacted()
+    assert canary not in text
+    assert canary not in str(redacted)
+    assert redacted["collibra_token_url"] == "https://idp.example.invalid/oauth/token"
+    assert "https://idp.example.invalid/oauth/token" in text
+    assert "?" not in str(redacted["collibra_token_url"])
+
+
 def test_rejects_blank_host() -> None:
     with pytest.raises(ValueError, match="postgres_host"):
         Settings(

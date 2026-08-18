@@ -297,6 +297,8 @@ def _safe_oauth_transport_message(exc: BaseException) -> str:
     text = str(exc).lower()
     if "embed" in text:
         return "oauth token_url must not embed credentials"
+    if "query string" in text:
+        return "oauth token_url must not include a query string"
     if "https or http loopback" in text:
         return "oauth token endpoint must use HTTPS or HTTP loopback"
     if "client_secret_post" in text or "oauth_client_auth" in text:

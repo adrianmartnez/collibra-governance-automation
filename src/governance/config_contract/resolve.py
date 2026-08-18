@@ -438,6 +438,8 @@ def _validate_oauth_runtime(
         message = str(exc)
         if "embed" in message.lower():
             stable = "oauth token_url must not embed credentials"
+        elif "query string" in message.lower():
+            stable = "oauth token_url must not include a query string"
         elif "https or http loopback" in message.lower():
             stable = "oauth token endpoint must use HTTPS or HTTP loopback"
         elif "oauth_client_auth" in message.lower():
