@@ -73,7 +73,7 @@ from governance.integrations.collibra import (
     SyncResult,
     build_collibra_adapter,
     build_sync_plan,
-    execute_sync_plan,
+    execute_collibra_plan,
     load_mapping_config_file,
     map_to_desired_state,
     mapping_contains_example_placeholders,
@@ -943,7 +943,13 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 return _emit_operational(exc, fmt)
             raise
 
-    result = execute_sync_plan(adapter, saved.sync_plan, apply=apply)
+    result = execute_collibra_plan(
+        adapter,
+        saved.sync_plan,
+        mapping_config,
+        apply=apply,
+        execution_mode=settings.collibra_execution_mode,
+    )
     payload = build_apply_result(
         sync_plan=saved.sync_plan,
         result=result,
@@ -1388,7 +1394,13 @@ def _cmd_sync(
     adapter = build_collibra_adapter(effective, mapping_config)
     remote = adapter.read_remote_state(desired)
     plan = build_sync_plan(desired, remote)
-    result = execute_sync_plan(adapter, plan, apply=apply)
+    result = execute_collibra_plan(
+        adapter,
+        plan,
+        mapping_config,
+        apply=apply,
+        execution_mode=settings.collibra_execution_mode,
+    )
     if not result.success:
         message = result.error or _SAFE_SYNC_FAILED
         raise CliOperationalError(message)

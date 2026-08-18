@@ -176,7 +176,8 @@
             }
           }
         },
-        "auth": { "$ref": "#/$defs/collibraAuth" }
+        "auth": { "$ref": "#/$defs/collibraAuth" },
+        "execution_mode_env": { "$ref": "#/$defs/envName" }
       }
     },
     "collibraAuth": {

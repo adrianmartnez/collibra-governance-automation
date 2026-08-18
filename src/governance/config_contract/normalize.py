@@ -114,4 +114,5 @@ def _normalize_collibra_config(config: dict[str, Any]) -> CollibraTargetConfig:
         mapping_path=mapping_path,
         mode_env=config.get("mode_env"),
         auth=auth,
+        execution_mode_env=config.get("execution_mode_env"),
     )

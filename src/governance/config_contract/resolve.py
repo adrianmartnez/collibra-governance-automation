@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from governance.config import (
+    DEFAULT_COLLIBRA_EXECUTION_MODE,
     DEFAULT_COLLIBRA_MODE,
     DEFAULT_COLLIBRA_TIMEOUT_SECONDS,
     DEFAULT_POSTGRES_DB,
@@ -75,6 +76,7 @@ def resolve_settings(
     collibra_oauth_scope = base.collibra_oauth_scope
     collibra_oauth_client_auth = base.collibra_oauth_client_auth
     collibra_timeout_seconds = base.collibra_timeout_seconds
+    collibra_execution_mode = base.collibra_execution_mode
 
     if canonical.targets:
         target = canonical.targets[0]
@@ -90,6 +92,7 @@ def resolve_settings(
         collibra_oauth_scope = resolved["oauth_scope"]
         collibra_oauth_client_auth = resolved["oauth_client_auth"]
         collibra_timeout_seconds = resolved["timeout_seconds"]
+        collibra_execution_mode = resolved["execution_mode"]
 
     inventory_path = str(Path(canonical.config_root) / canonical.artifacts.inventory_path)
 
@@ -114,6 +117,7 @@ def resolve_settings(
             collibra_oauth_scope=collibra_oauth_scope,
             collibra_oauth_client_auth=collibra_oauth_client_auth,
             collibra_timeout_seconds=collibra_timeout_seconds,
+            collibra_execution_mode=collibra_execution_mode,
         )
     except ValueError as exc:
         raise ConfigResolutionError(
@@ -333,6 +337,9 @@ def _resolve_collibra(
     oauth_scope = base.collibra_oauth_scope
     oauth_client_auth = base.collibra_oauth_client_auth
     timeout = base.collibra_timeout_seconds
+    execution_mode = base.collibra_execution_mode
+    if config.execution_mode_env is not None:
+        execution_mode = env.get(config.execution_mode_env, DEFAULT_COLLIBRA_EXECUTION_MODE)
     if auth is not None:
         if auth.base_url_env is not None:
             base_url = env.get(auth.base_url_env, "")
@@ -378,6 +385,7 @@ def _resolve_collibra(
         "oauth_scope": oauth_scope,
         "oauth_client_auth": oauth_client_auth,
         "timeout_seconds": timeout,
+        "execution_mode": execution_mode,
     }
 
 
@@ -538,6 +546,10 @@ def _settings_validation_path(canonical: CanonicalConfig, exc: BaseException) ->
     text = str(exc).lower()
     if "collibra_mode" in text:
         return _target_mode_path(canonical)
+    if "collibra_execution_mode" in text:
+        if canonical.targets and canonical.targets[0].config.execution_mode_env is not None:
+            return "/targets/0/config/execution_mode_env"
+        return "/targets/0/config"
     if "collibra_timeout" in text:
         return _target_auth_path(canonical, "timeout_seconds_env")
     if "postgres_port" in text:

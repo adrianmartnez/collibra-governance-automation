@@ -7,6 +7,12 @@ from governance.integrations.collibra.adapters import (
     build_collibra_adapter,
 )
 from governance.integrations.collibra.endpoint import normalize_base_url
+from governance.integrations.collibra.import_api import (
+    ImportCompileError,
+    ImportDocument,
+    compile_import_document,
+    execute_collibra_plan,
+)
 from governance.integrations.collibra.live import LiveCollibraAdapter
 from governance.integrations.collibra.mapping import (
     CollibraMappingConfig,
@@ -54,6 +60,8 @@ __all__ = [
     "CollibraRemoteState",
     "LiveCollibraAdapter",
     "MockCollibraAdapter",
+    "ImportCompileError",
+    "ImportDocument",
     "PLANNER_CONTRACT_VERSION",
     "SyncAction",
     "SyncActionType",
@@ -62,6 +70,8 @@ __all__ = [
     "SyncResult",
     "build_collibra_adapter",
     "build_sync_plan",
+    "compile_import_document",
+    "execute_collibra_plan",
     "execute_sync_plan",
     "load_mapping_config_file",
     "map_to_desired_state",

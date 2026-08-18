@@ -18,6 +18,8 @@ DEFAULT_POSTGRES_SOURCE_NAME = "governance-demo"
 DEFAULT_INVENTORY_OUTPUT_PATH = "artifacts/metadata-inventory.json"
 DEFAULT_COLLIBRA_MODE = "mock"
 DEFAULT_COLLIBRA_TIMEOUT_SECONDS = 10.0
+DEFAULT_COLLIBRA_EXECUTION_MODE = "core_rest"
+ALLOWED_COLLIBRA_EXECUTION_MODES = frozenset({"core_rest", "import_v2"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +45,7 @@ class Settings:
     collibra_oauth_scope: str = ""
     collibra_oauth_client_auth: str = ""
     collibra_timeout_seconds: float = DEFAULT_COLLIBRA_TIMEOUT_SECONDS
+    collibra_execution_mode: str = DEFAULT_COLLIBRA_EXECUTION_MODE
 
     def __post_init__(self) -> None:
         if not self.postgres_host.strip():
@@ -67,6 +70,10 @@ class Settings:
         object.__setattr__(self, "collibra_mode", mode)
         if self.collibra_timeout_seconds <= 0:
             raise ValueError("collibra_timeout_seconds must be positive")
+        execution = self.collibra_execution_mode.strip().lower() or DEFAULT_COLLIBRA_EXECUTION_MODE
+        if execution not in ALLOWED_COLLIBRA_EXECUTION_MODES:
+            raise ValueError("collibra_execution_mode must be core_rest or import_v2")
+        object.__setattr__(self, "collibra_execution_mode", execution)
 
     def __repr__(self) -> str:
         body = ", ".join(f"{key}={value!r}" for key, value in self.redacted().items())
@@ -101,6 +108,7 @@ class Settings:
             "collibra_oauth_scope": self.collibra_oauth_scope,
             "collibra_oauth_client_auth": self.collibra_oauth_client_auth,
             "collibra_timeout_seconds": self.collibra_timeout_seconds,
+            "collibra_execution_mode": self.collibra_execution_mode,
         }
 
 
@@ -166,6 +174,9 @@ def load_settings(
         "collibra_timeout_seconds": float(
             env.get("COLLIBRA_TIMEOUT_SECONDS", str(DEFAULT_COLLIBRA_TIMEOUT_SECONDS))
         ),
+        "collibra_execution_mode": env.get(
+            "COLLIBRA_EXECUTION_MODE", DEFAULT_COLLIBRA_EXECUTION_MODE
+        ),
     }
 
     database_url = env.get("DATABASE_URL")
@@ -192,4 +203,5 @@ def load_settings(
         collibra_oauth_scope=str(values["collibra_oauth_scope"]),
         collibra_oauth_client_auth=str(values["collibra_oauth_client_auth"]),
         collibra_timeout_seconds=float(values["collibra_timeout_seconds"]),
+        collibra_execution_mode=str(values["collibra_execution_mode"]),
     )

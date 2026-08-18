@@ -99,6 +99,7 @@ class CollibraTargetConfig:
     mapping_path: str
     mode_env: str | None = None
     auth: CollibraAuthRefs | None = None
+    execution_mode_env: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"mapping": {"path": self.mapping_path}}
@@ -106,6 +107,8 @@ class CollibraTargetConfig:
             payload["mode_env"] = self.mode_env
         if self.auth is not None and self.auth.to_dict():
             payload["auth"] = self.auth.to_dict()
+        if self.execution_mode_env is not None:
+            payload["execution_mode_env"] = self.execution_mode_env
         return payload
 
 
