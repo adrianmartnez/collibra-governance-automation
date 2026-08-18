@@ -16,7 +16,7 @@ import httpx
 
 from governance.config import Settings
 from governance.integrations.collibra.adapters import CollibraAdapterError, CollibraAuthError
-from governance.integrations.collibra.endpoint import classify_transport
+from governance.integrations.collibra.endpoint import classify_transport, normalize_token_url
 from governance.integrations.collibra.live import API_PREFIX, LiveCollibraAdapter
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 
@@ -42,6 +42,10 @@ CODE_HTTPS = "https_transport"
 CODE_MOCK_MODE = "mock_mode_not_verified"
 CODE_APPLICATION_INFO = "application_info"
 CODE_AUTH_FAILURE = "authentication_failed"
+CODE_AUTH_CONFIG = "authentication_configuration_invalid"
+CODE_READ_PERMISSION = "read_permission_denied"
+CODE_REMOTE_PREREQUISITE = "remote_prerequisite_failed"
+CODE_TOKEN_URL_INVALID = "oauth_token_url_invalid"
 CODE_MAPPING_REF = "mapping_ref"
 CODE_MAPPING_MISSING = "mapping_ref_missing"
 CODE_WRITES_NOT_PROBED = "write_capability_not_probed"
@@ -144,50 +148,45 @@ def run_preflight(
     if token_gate is not None:
         return token_gate
 
-    adapter = LiveCollibraAdapter.from_settings(
-        settings,
-        mapping_config,
-        transport=transport,
-    )
+    adapter: LiveCollibraAdapter | None = None
     try:
-        auth_check = _probe_application_info(adapter)
-        checks.append(auth_check)
-        if auth_check.status != STATUS_VERIFIED:
-            return _report(
-                overall=_rollup(checks),
-                mode="live",
-                transport=transport_class,
-                checks=(*checks, _writes_check()),
-            )
-        checks.extend(_probe_mapping_refs(adapter, mapping_config))
-    except CollibraAuthError:
+        adapter = LiveCollibraAdapter.from_settings(
+            settings,
+            mapping_config,
+            transport=transport,
+        )
+    except (ValueError, CollibraAuthError):
         checks.append(
             PreflightCheck(
                 id="auth",
                 status=STATUS_INCOMPATIBLE,
-                code=CODE_AUTH_FAILURE,
-                message="authentication failed on a read-only request",
+                code=CODE_AUTH_CONFIG,
+                message="authentication configuration is invalid",
             )
         )
+        checks.append(_writes_check())
+        return _report(
+            overall=STATUS_INCOMPATIBLE,
+            mode="live",
+            transport=transport_class,
+            checks=tuple(checks),
+        )
+
+    assert adapter is not None
+    try:
+        auth_check = _probe_application_info(adapter)
+        checks.append(auth_check)
+        if auth_check.status != STATUS_VERIFIED:
+            checks.append(_writes_check())
+            return _report(
+                overall=_rollup(checks),
+                mode="live",
+                transport=transport_class,
+                checks=tuple(checks),
+            )
+        checks.extend(_probe_mapping_refs(adapter, mapping_config))
     except CollibraAdapterError as exc:
-        if exc.status_code == 401:
-            checks.append(
-                PreflightCheck(
-                    id="auth",
-                    status=STATUS_INCOMPATIBLE,
-                    code=CODE_AUTH_FAILURE,
-                    message="authentication failed on a read-only request",
-                )
-            )
-        else:
-            checks.append(
-                PreflightCheck(
-                    id="operational",
-                    status=STATUS_OPERATIONAL_FAILURE,
-                    code=CODE_OPERATIONAL,
-                    message=_safe_operational_message(exc),
-                )
-            )
+        checks.append(_classify_remote_error(exc))
     except httpx.HTTPError:
         checks.append(
             PreflightCheck(
@@ -276,19 +275,13 @@ def _classify_optional_token_url(token_url: str) -> PreflightReport | None:
             code=CODE_EMBEDDED_CREDENTIALS,
             message="oauth token_url must not embed credentials",
         )
-    if "client_id=" in parsed.query.lower() or "client_secret=" in parsed.query.lower():
-        return _incompatible(
-            id="token_url",
-            code=CODE_EMBEDDED_CREDENTIALS,
-            message="oauth token_url must not embed credentials",
-        )
     try:
         transport_class = classify_transport(raw)
     except ValueError:
         return _incompatible(
             id="token_url",
-            code=CODE_MALFORMED_URL,
-            message="oauth token_url must be an absolute http(s) URL",
+            code=CODE_TOKEN_URL_INVALID,
+            message="oauth token_url is invalid",
         )
     if transport_class == "remote_http":
         return _incompatible(
@@ -296,6 +289,14 @@ def _classify_optional_token_url(token_url: str) -> PreflightReport | None:
             code=CODE_REMOTE_HTTP,
             message="HTTP non-loopback token_url is incompatible; credentials were not sent",
             transport="remote_http",
+        )
+    try:
+        normalize_token_url(raw)
+    except ValueError:
+        return _incompatible(
+            id="token_url",
+            code=CODE_TOKEN_URL_INVALID,
+            message="oauth token_url is invalid",
         )
     return None
 
@@ -362,6 +363,44 @@ def _probe_mapping_refs(
     return checks
 
 
+def _classify_remote_error(exc: CollibraAdapterError) -> PreflightCheck:
+    status_code = exc.status_code
+    if status_code == 401:
+        return PreflightCheck(
+            id="auth",
+            status=STATUS_INCOMPATIBLE,
+            code=CODE_AUTH_FAILURE,
+            message="authentication failed on a read-only request",
+        )
+    if status_code == 403:
+        return PreflightCheck(
+            id="read",
+            status=STATUS_INCOMPATIBLE,
+            code=CODE_READ_PERMISSION,
+            message="read permission or OAuth scope is insufficient",
+        )
+    if status_code == 429:
+        return PreflightCheck(
+            id="operational",
+            status=STATUS_OPERATIONAL_FAILURE,
+            code=CODE_OPERATIONAL,
+            message="Collibra read failed",
+        )
+    if status_code is not None and 400 <= status_code < 500:
+        return PreflightCheck(
+            id="prerequisite",
+            status=STATUS_INCOMPATIBLE,
+            code=CODE_REMOTE_PREREQUISITE,
+            message="remote prerequisite failed on a read-only request",
+        )
+    return PreflightCheck(
+        id="operational",
+        status=STATUS_OPERATIONAL_FAILURE,
+        code=CODE_OPERATIONAL,
+        message="Collibra read failed",
+    )
+
+
 def _writes_check() -> PreflightCheck:
     return PreflightCheck(
         id="writes",
@@ -412,8 +451,3 @@ def _incompatible(
             _writes_check(),
         ),
     )
-
-
-def _safe_operational_message(exc: CollibraAdapterError) -> str:
-    del exc
-    return "Collibra read failed"
