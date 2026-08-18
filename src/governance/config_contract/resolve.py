@@ -82,6 +82,10 @@ def resolve_settings(
     collibra_job_poll_timeout_seconds = base.collibra_job_poll_timeout_seconds
     collibra_execution_mode = base.collibra_execution_mode
     collibra_synchronization_id = base.collibra_synchronization_id
+    collibra_batch_max_resources = base.collibra_batch_max_resources
+    collibra_batch_max_additional_characteristics = (
+        base.collibra_batch_max_additional_characteristics
+    )
 
     if canonical.targets:
         target = canonical.targets[0]
@@ -101,6 +105,10 @@ def resolve_settings(
         collibra_job_poll_timeout_seconds = resolved["job_poll_timeout_seconds"]
         collibra_execution_mode = resolved["execution_mode"]
         collibra_synchronization_id = resolved["synchronization_id"]
+        collibra_batch_max_resources = resolved["batch_max_resources"]
+        collibra_batch_max_additional_characteristics = resolved[
+            "batch_max_additional_characteristics"
+        ]
 
     inventory_path = str(Path(canonical.config_root) / canonical.artifacts.inventory_path)
 
@@ -129,6 +137,10 @@ def resolve_settings(
             collibra_job_poll_timeout_seconds=collibra_job_poll_timeout_seconds,
             collibra_execution_mode=collibra_execution_mode,
             collibra_synchronization_id=collibra_synchronization_id,
+            collibra_batch_max_resources=collibra_batch_max_resources,
+            collibra_batch_max_additional_characteristics=(
+                collibra_batch_max_additional_characteristics
+            ),
         )
     except ValueError as exc:
         raise ConfigResolutionError(
@@ -358,6 +370,30 @@ def _resolve_collibra(
         synchronization_id = config.synchronization_id
     elif config.synchronization_id_env is not None:
         synchronization_id = env.get(config.synchronization_id_env, "")
+    batch_max_resources = base.collibra_batch_max_resources
+    batch_max_additional = base.collibra_batch_max_additional_characteristics
+    if config.batch_max_resources_env is not None:
+        raw_resources = env.get(config.batch_max_resources_env)
+        if raw_resources is not None and raw_resources.strip():
+            try:
+                batch_max_resources = int(raw_resources)
+            except ValueError as exc:
+                raise ConfigResolutionError(
+                    "collibra batch_max_resources must be a positive integer",
+                    path="/targets/0/config/batch_max_resources_env",
+                    code=CODE_RUNTIME_INVALID,
+                ) from exc
+    if config.batch_max_additional_characteristics_env is not None:
+        raw_additional = env.get(config.batch_max_additional_characteristics_env)
+        if raw_additional is not None and raw_additional.strip():
+            try:
+                batch_max_additional = int(raw_additional)
+            except ValueError as exc:
+                raise ConfigResolutionError(
+                    "collibra batch_max_additional_characteristics must be a positive integer",
+                    path="/targets/0/config/batch_max_additional_characteristics_env",
+                    code=CODE_RUNTIME_INVALID,
+                ) from exc
     if auth is not None:
         if auth.base_url_env is not None:
             base_url = env.get(auth.base_url_env, "")
@@ -433,6 +469,8 @@ def _resolve_collibra(
         "job_poll_timeout_seconds": job_poll_timeout,
         "execution_mode": execution_mode,
         "synchronization_id": synchronization_id,
+        "batch_max_resources": batch_max_resources,
+        "batch_max_additional_characteristics": batch_max_additional,
     }
 
 
@@ -602,6 +640,15 @@ def _settings_validation_path(canonical: CanonicalConfig, exc: BaseException) ->
             return "/targets/0/config/synchronization_id_env"
         if canonical.targets and canonical.targets[0].config.synchronization_id is not None:
             return "/targets/0/config/synchronization_id"
+        return "/targets/0/config"
+    if "batch ceilings" in text or "batch_max" in text:
+        if canonical.targets and canonical.targets[0].config.batch_max_resources_env is not None:
+            return "/targets/0/config/batch_max_resources_env"
+        if (
+            canonical.targets
+            and canonical.targets[0].config.batch_max_additional_characteristics_env is not None
+        ):
+            return "/targets/0/config/batch_max_additional_characteristics_env"
         return "/targets/0/config"
     if "collibra_timeout" in text:
         return _target_auth_path(canonical, "timeout_seconds_env")

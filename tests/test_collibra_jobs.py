@@ -25,6 +25,7 @@ from governance.integrations.collibra import (
     mock_mapping_config,
     prove_import_create_identifiers_absent,
 )
+from governance.integrations.collibra.batching import partition_document
 from governance.integrations.collibra.import_api import (
     IMPORT_MULTIPART_FIELDS,
     compile_import_document,
@@ -1232,14 +1233,24 @@ def test_sync_batch_missing_id_unknown_no_finalize() -> None:
 
 
 def test_sync_lifecycle_payload_preserves_batch_id_without_job_view() -> None:
+    from governance.integrations.collibra.jobs import make_batch_lifecycle_record
+
+    plan = _create_plan()
+    document = compile_import_document(plan, mock_mapping_config())
+    batch = partition_document(document, max_resources=50_000)[0]
+    record = make_batch_lifecycle_record(
+        0,
+        batch,
+        submission_state="submitted",
+        job_id="batch-1",
+        observation_error=JOB_OBSERVATION_FAILURE,
+    )
     result = SyncLifecycleResult(
-        plan=_create_plan(),
-        document=compile_import_document(_create_plan(), mock_mapping_config()),
+        plan=plan,
+        document=document,
         dry_run=False,
         synchronization_id=UUID_A,
-        batch_submission_state="submitted",
-        batch_job_ids=("batch-1",),
-        batch_jobs=(),
+        batch_lifecycle=(record,),
         finalization_submission_state="not_attempted",
         finalization_job_id=None,
         finalization_job=None,

@@ -281,6 +281,20 @@ def _validate_target(target: Any, pointer: str) -> list[DiagnosticError]:
                 f"{pointer}/config/synchronization_id_env",
             )
         )
+    if config.get("batch_max_resources_env") is not None:
+        errors.extend(
+            _validate_env_name(
+                config["batch_max_resources_env"],
+                f"{pointer}/config/batch_max_resources_env",
+            )
+        )
+    if config.get("batch_max_additional_characteristics_env") is not None:
+        errors.extend(
+            _validate_env_name(
+                config["batch_max_additional_characteristics_env"],
+                f"{pointer}/config/batch_max_additional_characteristics_env",
+            )
+        )
 
     mapping = config.get("mapping")
     if not isinstance(mapping, dict) or "path" not in mapping:

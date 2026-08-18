@@ -964,6 +964,8 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             apply=apply,
             execution_mode=settings.collibra_execution_mode,
             synchronization_id=_synchronization_id_for_mode(settings),
+            max_resources=settings.collibra_batch_max_resources,
+            max_additional_characteristics=settings.collibra_batch_max_additional_characteristics,
         )
     except CollibraAdapterError as exc:
         return _emit_operational(exc, fmt)
@@ -1449,6 +1451,8 @@ def _cmd_sync(
             apply=apply,
             execution_mode=settings.collibra_execution_mode,
             synchronization_id=_synchronization_id_for_mode(settings),
+            max_resources=settings.collibra_batch_max_resources,
+            max_additional_characteristics=settings.collibra_batch_max_additional_characteristics,
         )
     except CollibraAdapterError as exc:
         return _emit_operational(exc, "json" if json_output else "human")
