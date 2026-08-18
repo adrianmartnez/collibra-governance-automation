@@ -22,6 +22,8 @@ DEFAULT_COLLIBRA_TIMEOUT_SECONDS = 10.0
 DEFAULT_COLLIBRA_JOB_POLL_INTERVAL_SECONDS = 1.0
 DEFAULT_COLLIBRA_JOB_POLL_TIMEOUT_SECONDS = 300.0
 DEFAULT_COLLIBRA_EXECUTION_MODE = "core_rest"
+DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES = 50_000
+DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS = 500_000
 ALLOWED_COLLIBRA_EXECUTION_MODES = frozenset({"core_rest", "import_v2", "sync_v2"})
 
 
@@ -52,6 +54,10 @@ class Settings:
     collibra_job_poll_timeout_seconds: float = DEFAULT_COLLIBRA_JOB_POLL_TIMEOUT_SECONDS
     collibra_execution_mode: str = DEFAULT_COLLIBRA_EXECUTION_MODE
     collibra_synchronization_id: str = ""
+    collibra_batch_max_resources: int = DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES
+    collibra_batch_max_additional_characteristics: int = (
+        DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS
+    )
 
     def __post_init__(self) -> None:
         if not self.postgres_host.strip():
@@ -95,6 +101,17 @@ class Settings:
             except ValueError as exc:
                 raise ValueError("collibra_synchronization_id must be a UUID") from exc
         object.__setattr__(self, "collibra_synchronization_id", sync_id)
+        resources = int(self.collibra_batch_max_resources)
+        additional = int(self.collibra_batch_max_additional_characteristics)
+        if (
+            resources <= 0
+            or additional <= 0
+            or resources > DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES
+            or additional > DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS
+        ):
+            raise ValueError("collibra batch ceilings must be within the hard maxima")
+        object.__setattr__(self, "collibra_batch_max_resources", resources)
+        object.__setattr__(self, "collibra_batch_max_additional_characteristics", additional)
 
     def __repr__(self) -> str:
         body = ", ".join(f"{key}={value!r}" for key, value in self.redacted().items())
@@ -133,6 +150,10 @@ class Settings:
             "collibra_job_poll_timeout_seconds": self.collibra_job_poll_timeout_seconds,
             "collibra_execution_mode": self.collibra_execution_mode,
             "collibra_synchronization_id": self.collibra_synchronization_id,
+            "collibra_batch_max_resources": self.collibra_batch_max_resources,
+            "collibra_batch_max_additional_characteristics": (
+                self.collibra_batch_max_additional_characteristics
+            ),
         }
 
 
@@ -214,6 +235,17 @@ def load_settings(
             "COLLIBRA_EXECUTION_MODE", DEFAULT_COLLIBRA_EXECUTION_MODE
         ),
         "collibra_synchronization_id": env.get("COLLIBRA_SYNCHRONIZATION_ID", ""),
+        "collibra_batch_max_resources": int(
+            env.get("COLLIBRA_BATCH_MAX_RESOURCES", str(DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES))
+            or str(DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES)
+        ),
+        "collibra_batch_max_additional_characteristics": int(
+            env.get(
+                "COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS",
+                str(DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS),
+            )
+            or str(DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS)
+        ),
     }
 
     database_url = env.get("DATABASE_URL")
@@ -244,4 +276,8 @@ def load_settings(
         collibra_job_poll_timeout_seconds=float(values["collibra_job_poll_timeout_seconds"]),
         collibra_execution_mode=str(values["collibra_execution_mode"]),
         collibra_synchronization_id=str(values["collibra_synchronization_id"]),
+        collibra_batch_max_resources=int(values["collibra_batch_max_resources"]),
+        collibra_batch_max_additional_characteristics=int(
+            values["collibra_batch_max_additional_characteristics"]
+        ),
     )

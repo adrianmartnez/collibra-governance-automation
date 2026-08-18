@@ -106,6 +106,8 @@ class CollibraTargetConfig:
     execution_mode_env: str | None = None
     synchronization_id: str | None = None
     synchronization_id_env: str | None = None
+    batch_max_resources_env: str | None = None
+    batch_max_additional_characteristics_env: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"mapping": {"path": self.mapping_path}}
@@ -119,6 +121,12 @@ class CollibraTargetConfig:
             payload["synchronization_id"] = self.synchronization_id
         if self.synchronization_id_env is not None:
             payload["synchronization_id_env"] = self.synchronization_id_env
+        if self.batch_max_resources_env is not None:
+            payload["batch_max_resources_env"] = self.batch_max_resources_env
+        if self.batch_max_additional_characteristics_env is not None:
+            payload["batch_max_additional_characteristics_env"] = (
+                self.batch_max_additional_characteristics_env
+            )
         return payload
 
 

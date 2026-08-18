@@ -119,4 +119,8 @@ def _normalize_collibra_config(config: dict[str, Any]) -> CollibraTargetConfig:
         execution_mode_env=config.get("execution_mode_env"),
         synchronization_id=config.get("synchronization_id"),
         synchronization_id_env=config.get("synchronization_id_env"),
+        batch_max_resources_env=config.get("batch_max_resources_env"),
+        batch_max_additional_characteristics_env=config.get(
+            "batch_max_additional_characteristics_env"
+        ),
     )

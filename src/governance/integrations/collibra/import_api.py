@@ -507,6 +507,112 @@ def _best_effort_import_error_summary(adapter: Any, job_id: str) -> dict[str, in
     return None
 
 
+def _execute_import_batches_lifecycle(
+    adapter: Any,
+    plan: SyncPlan,
+    document: ImportDocument,
+    batches: tuple[ImportDocument, ...],
+    *,
+    unchanged_count: int,
+) -> ImportJobExecutionResult:
+    from governance.integrations.collibra.jobs import is_terminal_success
+
+    prove_import_create_identifiers_absent(adapter, plan)
+    poll_job = getattr(adapter, "poll_job", None)
+    if poll_job is None:
+        return ImportJobExecutionResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            submission_state="not_attempted",
+            job_id=None,
+            job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error="import_v2 requires job polling",
+        )
+
+    applied = 0
+    last_job_id: str | None = None
+    last_view: JobView | None = None
+    for batch in batches:
+        try:
+            submission = adapter.submit_json_import(batch)
+        except CollibraAdapterError:
+            return ImportJobExecutionResult(
+                plan=plan,
+                document=document,
+                dry_run=False,
+                submission_state="unknown",
+                job_id=last_job_id,
+                job=last_view,
+                success=False,
+                applied_count=applied,
+                unchanged_count=unchanged_count,
+                error=IMPORT_SUBMISSION_UNCERTAIN,
+            )
+        job_id = getattr(submission, "job_id", "") or ""
+        if not job_id:
+            return ImportJobExecutionResult(
+                plan=plan,
+                document=document,
+                dry_run=False,
+                submission_state="unknown",
+                job_id=last_job_id,
+                job=last_view,
+                success=False,
+                applied_count=applied,
+                unchanged_count=unchanged_count,
+                error=IMPORT_SUBMISSION_UNCERTAIN,
+            )
+        view, observation_error = observe_job(poll_job, job_id)
+        if observation_error is not None:
+            return ImportJobExecutionResult(
+                plan=plan,
+                document=document,
+                dry_run=False,
+                submission_state="submitted",
+                job_id=job_id,
+                job=None,
+                success=False,
+                applied_count=applied,
+                unchanged_count=unchanged_count,
+                error=observation_error,
+            )
+        assert view is not None
+        last_job_id = job_id
+        last_view = view
+        if not is_terminal_success(view):
+            outcome = view.normalized_outcome or view.normalized_state
+            return ImportJobExecutionResult(
+                plan=plan,
+                document=document,
+                dry_run=False,
+                submission_state="submitted",
+                job_id=job_id,
+                job=view,
+                success=False,
+                applied_count=applied,
+                unchanged_count=unchanged_count,
+                import_error_summary=_best_effort_import_error_summary(adapter, job_id),
+                error=f"import job outcome={outcome}",
+            )
+        applied += len(batch.commands)
+
+    return ImportJobExecutionResult(
+        plan=plan,
+        document=document,
+        dry_run=False,
+        submission_state="submitted",
+        job_id=last_job_id,
+        job=last_view,
+        success=True,
+        applied_count=applied,
+        unchanged_count=unchanged_count,
+    )
+
+
 def _execute_import_job_lifecycle(
     adapter: Any,
     plan: SyncPlan,
@@ -514,92 +620,12 @@ def _execute_import_job_lifecycle(
     *,
     unchanged_count: int,
 ) -> ImportJobExecutionResult:
-    prove_import_create_identifiers_absent(adapter, plan)
-    try:
-        submission = adapter.submit_json_import(document)
-    except CollibraAdapterError:
-        return ImportJobExecutionResult(
-            plan=plan,
-            document=document,
-            dry_run=False,
-            submission_state="unknown",
-            job_id=None,
-            job=None,
-            success=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error=IMPORT_SUBMISSION_UNCERTAIN,
-        )
-    job_id = getattr(submission, "job_id", "") or ""
-    if not job_id:
-        return ImportJobExecutionResult(
-            plan=plan,
-            document=document,
-            dry_run=False,
-            submission_state="unknown",
-            job_id=None,
-            job=None,
-            success=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error=IMPORT_SUBMISSION_UNCERTAIN,
-        )
-    poll_job = getattr(adapter, "poll_job", None)
-    if poll_job is None:
-        return ImportJobExecutionResult(
-            plan=plan,
-            document=document,
-            dry_run=False,
-            submission_state="submitted",
-            job_id=job_id,
-            job=None,
-            success=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error="import_v2 requires job polling",
-        )
-    view, observation_error = observe_job(poll_job, job_id)
-    if observation_error is not None:
-        return ImportJobExecutionResult(
-            plan=plan,
-            document=document,
-            dry_run=False,
-            submission_state="submitted",
-            job_id=job_id,
-            job=None,
-            success=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error=observation_error,
-        )
-    assert view is not None
-    from governance.integrations.collibra.jobs import is_terminal_success
-
-    if is_terminal_success(view):
-        return ImportJobExecutionResult(
-            plan=plan,
-            document=document,
-            dry_run=False,
-            submission_state="submitted",
-            job_id=job_id,
-            job=view,
-            success=True,
-            applied_count=len(document.commands),
-            unchanged_count=unchanged_count,
-        )
-    outcome = view.normalized_outcome or view.normalized_state
-    return ImportJobExecutionResult(
-        plan=plan,
-        document=document,
-        dry_run=False,
-        submission_state="submitted",
-        job_id=job_id,
-        job=view,
-        success=False,
-        applied_count=0,
+    return _execute_import_batches_lifecycle(
+        adapter,
+        plan,
+        document,
+        (document,),
         unchanged_count=unchanged_count,
-        import_error_summary=_best_effort_import_error_summary(adapter, job_id),
-        error=f"import job outcome={outcome}",
     )
 
 
@@ -624,8 +650,11 @@ def execute_collibra_plan(
     apply: bool,
     execution_mode: str,
     synchronization_id: str | None = None,
+    max_resources: int | None = None,
+    max_additional_characteristics: int | None = None,
 ) -> Any:
     """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
+    from governance.integrations.collibra.batching import partition_document
     from governance.integrations.collibra.sync import execute_sync_plan
     from governance.integrations.collibra.synchronization import execute_sync_v2
 
@@ -641,11 +670,18 @@ def execute_collibra_plan(
             mapping_config,
             apply=apply,
             synchronization_id=synchronization_id,
+            max_resources=max_resources,
+            max_additional_characteristics=max_additional_characteristics,
         )
     if mode != "import_v2":
         raise ImportCompileError("collibra_execution_mode must be core_rest, import_v2, or sync_v2")
     document = compile_import_document(plan, mapping_config)
     unchanged_count = len(plan.unchanged)
+    batches = partition_document(
+        document,
+        max_resources=max_resources,
+        max_additional_characteristics=max_additional_characteristics,
+    )
     if not apply:
         return ImportExecutionResult(
             plan=plan,
@@ -655,7 +691,7 @@ def execute_collibra_plan(
             submission=None,
             unchanged_count=unchanged_count,
         )
-    if not document.commands:
+    if not batches:
         return ImportJobExecutionResult(
             plan=plan,
             document=document,
@@ -667,9 +703,10 @@ def execute_collibra_plan(
             applied_count=0,
             unchanged_count=unchanged_count,
         )
-    return _execute_import_job_lifecycle(
+    return _execute_import_batches_lifecycle(
         adapter,
         plan,
         document,
+        batches,
         unchanged_count=unchanged_count,
     )

@@ -183,7 +183,9 @@
           "minLength": 1,
           "description": "Optional UUID override for Collibra synchronization identity."
         },
-        "synchronization_id_env": { "$ref": "#/$defs/envName" }
+        "synchronization_id_env": { "$ref": "#/$defs/envName" },
+        "batch_max_resources_env": { "$ref": "#/$defs/envName" },
+        "batch_max_additional_characteristics_env": { "$ref": "#/$defs/envName" }
       }
     },
     "collibraAuth": {
