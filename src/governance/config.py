@@ -27,6 +27,32 @@ DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS = 500_000
 ALLOWED_COLLIBRA_EXECUTION_MODES = frozenset({"core_rest", "import_v2", "sync_v2"})
 
 
+def require_strict_positive_int(value: object, field_name: str) -> int:
+    """Reject bool, float, and other non-int coercion for batch ceilings."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be positive")
+    return value
+
+
+def parse_batch_ceiling_text(raw: str, field_name: str) -> int:
+    """Parse env/config batch ceiling text without silent truncation."""
+    text = raw.strip()
+    if not text:
+        raise ValueError(f"{field_name} must be a positive integer")
+    lowered = text.lower()
+    if lowered in {"true", "false", "nan", "inf", "-inf", "+inf"}:
+        raise ValueError(f"{field_name} must be a positive integer")
+    if "." in text or "e" in lowered:
+        raise ValueError(f"{field_name} must be a positive integer")
+    if text.startswith(("+", "-")) and not text[1:].isdigit():
+        raise ValueError(f"{field_name} must be a positive integer")
+    if not text.isdigit():
+        raise ValueError(f"{field_name} must be a positive integer")
+    return require_strict_positive_int(int(text), field_name)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Runtime settings for local development and demos."""
@@ -101,8 +127,14 @@ class Settings:
             except ValueError as exc:
                 raise ValueError("collibra_synchronization_id must be a UUID") from exc
         object.__setattr__(self, "collibra_synchronization_id", sync_id)
-        resources = int(self.collibra_batch_max_resources)
-        additional = int(self.collibra_batch_max_additional_characteristics)
+        resources = require_strict_positive_int(
+            self.collibra_batch_max_resources,
+            "collibra_batch_max_resources",
+        )
+        additional = require_strict_positive_int(
+            self.collibra_batch_max_additional_characteristics,
+            "collibra_batch_max_additional_characteristics",
+        )
         if (
             resources <= 0
             or additional <= 0
@@ -235,16 +267,18 @@ def load_settings(
             "COLLIBRA_EXECUTION_MODE", DEFAULT_COLLIBRA_EXECUTION_MODE
         ),
         "collibra_synchronization_id": env.get("COLLIBRA_SYNCHRONIZATION_ID", ""),
-        "collibra_batch_max_resources": int(
+        "collibra_batch_max_resources": parse_batch_ceiling_text(
             env.get("COLLIBRA_BATCH_MAX_RESOURCES", str(DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES))
-            or str(DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES)
+            or str(DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES),
+            "COLLIBRA_BATCH_MAX_RESOURCES",
         ),
-        "collibra_batch_max_additional_characteristics": int(
+        "collibra_batch_max_additional_characteristics": parse_batch_ceiling_text(
             env.get(
                 "COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS",
                 str(DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS),
             )
-            or str(DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS)
+            or str(DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS),
+            "COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS",
         ),
     }
 

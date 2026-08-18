@@ -6,9 +6,9 @@ from typing import Any
 
 from governance.identity.hashing import ContentIdentity
 from governance.integrations.collibra.jobs import (
-    JOB_OBSERVATION_FAILURE,
     JobView,
     is_remote_terminal,
+    serialize_batch_lifecycle_record,
     submission_state_as_bool,
 )
 from governance.integrations.collibra.synchronization import SyncLifecycleResult
@@ -31,35 +31,7 @@ def _serialize_job(job: JobView | None) -> dict[str, Any] | None:
 
 
 def _batch_lifecycle_records(result: SyncLifecycleResult) -> list[dict[str, Any]]:
-    observation_error = (
-        result.error if result.error == JOB_OBSERVATION_FAILURE and not result.batch_jobs else None
-    )
-    if not result.batch_job_ids:
-        if result.batch_submission_state == "unknown":
-            return [
-                {
-                    "submission_state": "unknown",
-                    "job_id": None,
-                    "job_state": None,
-                    "job_result": None,
-                    "terminal": False,
-                }
-            ]
-        return []
-    records: list[dict[str, Any]] = []
-    for index, job_id in enumerate(result.batch_job_ids):
-        job = result.batch_jobs[index] if index < len(result.batch_jobs) else None
-        record: dict[str, Any] = {
-            "submission_state": result.batch_submission_state,
-            "job_id": job_id,
-            "job_state": job.remote_state if job is not None else None,
-            "job_result": job.remote_result if job is not None else None,
-            "terminal": is_remote_terminal(job),
-        }
-        if job is None and observation_error is not None:
-            record["observation_error"] = observation_error
-        records.append(record)
-    return records
+    return [serialize_batch_lifecycle_record(record) for record in result.batch_lifecycle]
 
 
 def _lifecycle_payload_fields(result: SyncLifecycleResult) -> dict[str, Any]:

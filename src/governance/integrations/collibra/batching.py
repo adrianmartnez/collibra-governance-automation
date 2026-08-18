@@ -6,17 +6,21 @@ resource accounting. Configured limits may only lower the hard maxima.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from governance.config import (
     DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS,
     DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES,
+    require_strict_positive_int,
 )
+from governance.identity.hashing import ALGORITHM, HASHING_CONTRACT_VERSION, ContentIdentity
 from governance.integrations.collibra.adapters import CollibraAdapterError
 
 HARD_MAX_RESOURCES = DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES
 HARD_MAX_ADDITIONAL_CHARACTERISTICS = DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS
+_IMPORT_BATCH_IDENTITY_PREFIX = b"gov-import-batch-v1\n"
 
 if TYPE_CHECKING:
     from governance.integrations.collibra.import_api import ImportDocument
@@ -60,15 +64,39 @@ class CommandCounts:
 ZERO_COUNTS = CommandCounts(0, 0, 0, 0)
 
 
+def import_batch_content_identity(document: ImportDocument) -> ContentIdentity:
+    """Deterministic SHA-256 identity for one partitioned Import batch."""
+    digest = hashlib.sha256(_IMPORT_BATCH_IDENTITY_PREFIX + document.canonical_json()).hexdigest()
+    return ContentIdentity(
+        algorithm=ALGORITHM,
+        hashing_contract_version=HASHING_CONTRACT_VERSION,
+        digest=digest,
+    )
+
+
+def batch_document_counts(document: ImportDocument) -> CommandCounts:
+    total = ZERO_COUNTS
+    for command in document.commands:
+        total = total.plus(count_command_payload(command.to_dict()))
+    return total
+
+
 def resolve_batch_limits(
     max_resources: int | None = None,
     max_additional_characteristics: int | None = None,
 ) -> tuple[int, int]:
-    resources = HARD_MAX_RESOURCES if max_resources is None else int(max_resources)
+    resources = (
+        HARD_MAX_RESOURCES
+        if max_resources is None
+        else require_strict_positive_int(max_resources, "max_resources")
+    )
     additional = (
         HARD_MAX_ADDITIONAL_CHARACTERISTICS
         if max_additional_characteristics is None
-        else int(max_additional_characteristics)
+        else require_strict_positive_int(
+            max_additional_characteristics,
+            "max_additional_characteristics",
+        )
     )
     if resources <= 0 or additional <= 0:
         raise BatchingError("batch ceilings must be positive")

@@ -9,8 +9,10 @@ from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.collibra.adapters import CollibraAdapterError
 from governance.integrations.collibra.jobs import (
     IMPORT_SUBMISSION_UNCERTAIN,
+    BatchLifecycleRecord,
     JobView,
     SubmissionState,
+    make_batch_lifecycle_record,
     observe_job,
 )
 from governance.integrations.collibra.mapping import CollibraMappingConfig
@@ -122,8 +124,13 @@ class ImportJobExecutionResult:
     success: bool
     applied_count: int
     unchanged_count: int
+    batch_lifecycle: tuple[BatchLifecycleRecord, ...] = ()
     import_error_summary: dict[str, int] | None = None
     error: str | None = None
+
+    @property
+    def batch_job_ids(self) -> tuple[str, ...]:
+        return tuple(record.job_id for record in self.batch_lifecycle if record.job_id)
 
     @property
     def submitted(self) -> bool | None:
@@ -507,6 +514,34 @@ def _best_effort_import_error_summary(adapter: Any, job_id: str) -> dict[str, in
     return None
 
 
+def _import_job_execution_result(
+    *,
+    plan: SyncPlan,
+    document: ImportDocument,
+    batch_lifecycle: tuple[BatchLifecycleRecord, ...],
+    applied_count: int,
+    success: bool,
+    unchanged_count: int,
+    import_error_summary: dict[str, int] | None = None,
+    error: str | None = None,
+) -> ImportJobExecutionResult:
+    last = batch_lifecycle[-1] if batch_lifecycle else None
+    return ImportJobExecutionResult(
+        plan=plan,
+        document=document,
+        dry_run=False,
+        submission_state=last.submission_state if last is not None else "not_attempted",
+        job_id=last.job_id if last is not None else None,
+        job=last.job if last is not None else None,
+        success=success,
+        applied_count=applied_count,
+        unchanged_count=unchanged_count,
+        batch_lifecycle=batch_lifecycle,
+        import_error_summary=import_error_summary,
+        error=error,
+    )
+
+
 def _execute_import_batches_lifecycle(
     adapter: Any,
     plan: SyncPlan,
@@ -520,95 +555,106 @@ def _execute_import_batches_lifecycle(
     prove_import_create_identifiers_absent(adapter, plan)
     poll_job = getattr(adapter, "poll_job", None)
     if poll_job is None:
-        return ImportJobExecutionResult(
+        return _import_job_execution_result(
             plan=plan,
             document=document,
-            dry_run=False,
-            submission_state="not_attempted",
-            job_id=None,
-            job=None,
-            success=False,
+            batch_lifecycle=(),
             applied_count=0,
+            success=False,
             unchanged_count=unchanged_count,
             error="import_v2 requires job polling",
         )
 
     applied = 0
-    last_job_id: str | None = None
-    last_view: JobView | None = None
-    for batch in batches:
+    records: list[BatchLifecycleRecord] = []
+    for batch_index, batch in enumerate(batches):
         try:
             submission = adapter.submit_json_import(batch)
         except CollibraAdapterError:
-            return ImportJobExecutionResult(
+            records.append(
+                make_batch_lifecycle_record(
+                    batch_index,
+                    batch,
+                    submission_state="unknown",
+                )
+            )
+            return _import_job_execution_result(
                 plan=plan,
                 document=document,
-                dry_run=False,
-                submission_state="unknown",
-                job_id=last_job_id,
-                job=last_view,
-                success=False,
+                batch_lifecycle=tuple(records),
                 applied_count=applied,
+                success=False,
                 unchanged_count=unchanged_count,
                 error=IMPORT_SUBMISSION_UNCERTAIN,
             )
         job_id = getattr(submission, "job_id", "") or ""
         if not job_id:
-            return ImportJobExecutionResult(
+            records.append(
+                make_batch_lifecycle_record(
+                    batch_index,
+                    batch,
+                    submission_state="unknown",
+                )
+            )
+            return _import_job_execution_result(
                 plan=plan,
                 document=document,
-                dry_run=False,
-                submission_state="unknown",
-                job_id=last_job_id,
-                job=last_view,
-                success=False,
+                batch_lifecycle=tuple(records),
                 applied_count=applied,
+                success=False,
                 unchanged_count=unchanged_count,
                 error=IMPORT_SUBMISSION_UNCERTAIN,
             )
         view, observation_error = observe_job(poll_job, job_id)
         if observation_error is not None:
-            return ImportJobExecutionResult(
+            records.append(
+                make_batch_lifecycle_record(
+                    batch_index,
+                    batch,
+                    submission_state="submitted",
+                    job_id=job_id,
+                    observation_error=observation_error,
+                )
+            )
+            return _import_job_execution_result(
                 plan=plan,
                 document=document,
-                dry_run=False,
-                submission_state="submitted",
-                job_id=job_id,
-                job=None,
-                success=False,
+                batch_lifecycle=tuple(records),
                 applied_count=applied,
+                success=False,
                 unchanged_count=unchanged_count,
                 error=observation_error,
             )
         assert view is not None
-        last_job_id = job_id
-        last_view = view
-        if not is_terminal_success(view):
-            outcome = view.normalized_outcome or view.normalized_state
-            return ImportJobExecutionResult(
-                plan=plan,
-                document=document,
-                dry_run=False,
+        records.append(
+            make_batch_lifecycle_record(
+                batch_index,
+                batch,
                 submission_state="submitted",
                 job_id=job_id,
                 job=view,
-                success=False,
+            )
+        )
+        if not is_terminal_success(view):
+            outcome = view.normalized_outcome or view.normalized_state
+            return _import_job_execution_result(
+                plan=plan,
+                document=document,
+                batch_lifecycle=tuple(records),
                 applied_count=applied,
+                success=False,
                 unchanged_count=unchanged_count,
                 import_error_summary=_best_effort_import_error_summary(adapter, job_id),
                 error=f"import job outcome={outcome}",
             )
         applied += len(batch.commands)
 
-    return ImportJobExecutionResult(
+    return _import_job_execution_result(
         plan=plan,
         document=document,
-        dry_run=False,
-        submission_state="submitted",
-        job_id=last_job_id,
-        job=last_view,
-        success=True,
+        batch_lifecycle=tuple(records),
         applied_count=applied,
+        success=True,
         unchanged_count=unchanged_count,
     )
 

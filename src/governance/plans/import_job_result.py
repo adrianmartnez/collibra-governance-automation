@@ -9,6 +9,7 @@ from governance.integrations.collibra.import_api import ImportJobExecutionResult
 from governance.integrations.collibra.jobs import (
     JobView,
     is_remote_terminal,
+    serialize_batch_lifecycle_record,
     submission_state_as_bool,
 )
 
@@ -31,20 +32,18 @@ def _job_fields(job: JobView | None) -> dict[str, Any]:
     }
 
 
-def build_import_job_result(
-    *,
-    result: ImportJobExecutionResult,
-    plan_content_identity: ContentIdentity,
-) -> dict[str, Any]:
+def _import_job_payload_fields(result: ImportJobExecutionResult) -> dict[str, Any]:
+    batch_lifecycle = [
+        serialize_batch_lifecycle_record(record) for record in result.batch_lifecycle
+    ]
+    batch_job_ids = list(result.batch_job_ids)
     payload: dict[str, Any] = {
         "applied_count": result.applied_count,
+        "batch_job_ids": batch_job_ids,
+        "batch_lifecycle": batch_lifecycle,
         "dry_run": result.dry_run,
         "execution_mode": "import_v2",
         "job_id": result.job_id,
-        "plan_content_identity": plan_content_identity.to_dict(),
-        "result_schema": IMPORT_JOB_RESULT_SCHEMA,
-        "result_version": IMPORT_JOB_RESULT_VERSION,
-        "stale": False,
         "submission_state": result.submission_state,
         "submitted": submission_state_as_bool(result.submission_state),
         "success": result.success,
@@ -57,28 +56,36 @@ def build_import_job_result(
     return payload
 
 
+def build_import_job_result(
+    *,
+    result: ImportJobExecutionResult,
+    plan_content_identity: ContentIdentity,
+) -> dict[str, Any]:
+    payload = _import_job_payload_fields(result)
+    payload.update(
+        {
+            "plan_content_identity": plan_content_identity.to_dict(),
+            "result_schema": IMPORT_JOB_RESULT_SCHEMA,
+            "result_version": IMPORT_JOB_RESULT_VERSION,
+            "stale": False,
+        }
+    )
+    return payload
+
+
 def build_import_job_sync_payload(
     *,
     mode: str,
     result: ImportJobExecutionResult,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "applied_count": result.applied_count,
-        "dry_run": result.dry_run,
-        "execution_mode": "import_v2",
-        "job_id": result.job_id,
-        "mode": mode,
-        "result_schema": IMPORT_JOB_RESULT_SCHEMA,
-        "result_version": IMPORT_JOB_RESULT_VERSION,
-        "submission_state": result.submission_state,
-        "submitted": submission_state_as_bool(result.submission_state),
-        "success": result.success,
-        **_job_fields(result.job),
-    }
-    if result.import_error_summary is not None:
-        payload["import_error_summary"] = dict(result.import_error_summary)
-    if result.error:
-        payload["error"] = result.error
+    payload = _import_job_payload_fields(result)
+    payload.update(
+        {
+            "mode": mode,
+            "result_schema": IMPORT_JOB_RESULT_SCHEMA,
+            "result_version": IMPORT_JOB_RESULT_VERSION,
+        }
+    )
     return payload
 
 
@@ -98,6 +105,10 @@ def format_import_job_result_human(payload: dict[str, Any]) -> str:
         f"success={str(payload['success']).lower()}",
         f"applied_count={payload['applied_count']}",
     ]
+    batch_job_ids = payload.get("batch_job_ids") or []
+    for index, batch_job_id in enumerate(batch_job_ids):
+        if batch_job_id:
+            lines.append(f"batch_job_id_{index}={batch_job_id}")
     if payload.get("job_state") is not None:
         lines.append(f"job_state={payload['job_state']}")
     if payload.get("job_result") is not None:

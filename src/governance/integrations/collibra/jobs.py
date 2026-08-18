@@ -11,6 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from governance.identity.hashing import ContentIdentity
 from governance.integrations.collibra.adapters import CollibraAdapterError
 
 JOB_PATH_PREFIX = "/rest/2.0/jobs"
@@ -88,6 +89,91 @@ class JobView:
     remote_result: str | None
     normalized_state: str
     normalized_outcome: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class BatchLifecycleRecord:
+    """Per-batch import/sync lifecycle audit record."""
+
+    batch_index: int
+    content_identity: ContentIdentity
+    resource_count: int
+    additional_characteristic_count: int
+    submission_state: SubmissionState
+    job_id: str | None
+    job: JobView | None
+    observation_error: str | None = None
+
+    @property
+    def terminal(self) -> bool:
+        return is_remote_terminal(self.job)
+
+    @property
+    def success(self) -> bool:
+        return is_terminal_success(self.job) if self.job is not None else False
+
+    @property
+    def normalized_outcome(self) -> str | None:
+        if self.job is None:
+            return None
+        return self.job.normalized_outcome or self.job.normalized_state
+
+
+def make_batch_lifecycle_record(
+    batch_index: int,
+    batch: Any,
+    *,
+    submission_state: SubmissionState,
+    job_id: str | None = None,
+    job: JobView | None = None,
+    observation_error: str | None = None,
+) -> BatchLifecycleRecord:
+    from governance.integrations.collibra.batching import (
+        batch_document_counts,
+        import_batch_content_identity,
+    )
+
+    counts = batch_document_counts(batch)
+    return BatchLifecycleRecord(
+        batch_index=batch_index,
+        content_identity=import_batch_content_identity(batch),
+        resource_count=counts.resource_count,
+        additional_characteristic_count=counts.additional_characteristic_count,
+        submission_state=submission_state,
+        job_id=job_id,
+        job=job,
+        observation_error=observation_error,
+    )
+
+
+def batch_lifecycle_projections(
+    batch_lifecycle: tuple[BatchLifecycleRecord, ...],
+) -> tuple[tuple[str, ...], tuple[JobView, ...], SubmissionState]:
+    job_ids = tuple(record.job_id for record in batch_lifecycle if record.job_id)
+    jobs = tuple(record.job for record in batch_lifecycle if record.job is not None)
+    if not batch_lifecycle:
+        return (), (), "not_attempted"
+    return job_ids, jobs, batch_lifecycle[-1].submission_state
+
+
+def serialize_batch_lifecycle_record(record: BatchLifecycleRecord) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "additional_characteristic_count": record.additional_characteristic_count,
+        "batch_index": record.batch_index,
+        "content_identity": record.content_identity.to_dict(),
+        "job_id": record.job_id,
+        "job_result": record.job.remote_result if record.job is not None else None,
+        "job_state": record.job.remote_state if record.job is not None else None,
+        "normalized_outcome": record.normalized_outcome,
+        "resource_count": record.resource_count,
+        "submission_state": record.submission_state,
+        "submitted": submission_state_as_bool(record.submission_state),
+        "success": record.success,
+        "terminal": record.terminal,
+    }
+    if record.observation_error is not None:
+        payload["observation_error"] = record.observation_error
+    return payload
 
 
 def job_path(job_id: str) -> str:
