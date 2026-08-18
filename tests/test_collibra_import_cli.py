@@ -158,14 +158,36 @@ def _patch_live_import_http(
     requests: list[httpx.Request],
     *,
     job_id: str = "job-123",
+    post_status: int = 200,
+    post_body: dict[str, object] | None = None,
+    collide_named_assets: bool = False,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = urlparse(str(request.url)).path
-        if request.method == "GET" and path.endswith(("/assets", "/attributes", "/relations")):
+        if request.method == "GET" and path.endswith("/assets"):
+            if collide_named_assets and request.url.params.get("name"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "id": "unmanaged-1",
+                                "name": request.url.params.get("name"),
+                                "domain": {"id": "mock-domain"},
+                            }
+                        ],
+                        "total": 1,
+                    },
+                )
+            return httpx.Response(200, json=_empty_page())
+        if request.method == "GET" and path.endswith(("/attributes", "/relations")):
             return httpx.Response(200, json=_empty_page())
         if request.method == "POST" and path.endswith("/import/json-job"):
-            return httpx.Response(200, json={"id": job_id})
+            if post_status != 200:
+                return httpx.Response(post_status, json={"error": "import failed"})
+            body = {"id": job_id} if post_body is None else post_body
+            return httpx.Response(200, json=body)
         return httpx.Response(500, json={"error": "unexpected"})
 
     def factory(settings, mapping_config, *, transport=None):
@@ -368,3 +390,164 @@ def test_import_apply_human_does_not_claim_job_success(
     assert "applied_count=0" in out
     assert "success=true" not in out
     assert "success=false" not in out
+
+
+def _assert_structured_import_failure(payload: object, captured: str) -> None:
+    assert isinstance(payload, dict)
+    assert payload["diagnostic_schema"] == "governance-operation-diagnostics"
+    assert payload["ok"] is False
+    assert payload.get("success") is not True
+    assert payload.get("completed") is not True
+    assert payload.get("applied_count", 0) == 0
+    assert "job_terminal_status" not in payload or payload["job_terminal_status"] == "not_observed"
+    lowered = captured.lower()
+    assert "collibra-secret-password" not in lowered
+    assert "super-secret-password" not in lowered
+    assert "authorization" not in lowered
+    assert "bearer " not in lowered
+
+
+def test_apply_import_v2_post_500_is_structured_json_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests: list[httpx.Request] = []
+    config, plan_path = _generate_plan(monkeypatch, tmp_path, requests, capsys)
+    _patch_live_import_http(monkeypatch, requests, post_status=500)
+    code = main(
+        [
+            "apply",
+            str(plan_path),
+            "--config",
+            str(config),
+            "--apply",
+            "--confirm-live",
+            "--format",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    payload = json.loads(captured.out)
+    _assert_structured_import_failure(payload, captured.out + captured.err)
+    assert any(
+        request.method == "POST" and urlparse(str(request.url)).path.endswith("/import/json-job")
+        for request in requests
+    )
+
+
+def test_sync_import_v2_post_500_is_structured_json_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests: list[httpx.Request] = []
+    _patch_env(monkeypatch)
+    _patch_scanner(monkeypatch)
+    _patch_live_import_http(monkeypatch, requests, post_status=500)
+    config = _write_workspace(tmp_path)
+    mapping = tmp_path / "mapping.json"
+    code = main(
+        [
+            "sync",
+            "--config",
+            str(config),
+            "--mode",
+            "live",
+            "--mapping-config",
+            str(mapping),
+            "--apply",
+            "--confirm-live",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    payload = json.loads(captured.out)
+    _assert_structured_import_failure(payload, captured.out + captured.err)
+
+
+def test_apply_import_v2_collision_is_structured_json_zero_post(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests: list[httpx.Request] = []
+    config, plan_path = _generate_plan(monkeypatch, tmp_path, requests, capsys)
+    _patch_live_import_http(monkeypatch, requests, collide_named_assets=True)
+    code = main(
+        [
+            "apply",
+            str(plan_path),
+            "--config",
+            str(config),
+            "--apply",
+            "--confirm-live",
+            "--format",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    payload = json.loads(captured.out)
+    _assert_structured_import_failure(payload, captured.out + captured.err)
+    assert _post_paths(requests) == []
+    assert "collides" in json.dumps(payload).lower()
+
+
+def test_apply_import_v2_missing_job_id_is_structured_json_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests: list[httpx.Request] = []
+    config, plan_path = _generate_plan(monkeypatch, tmp_path, requests, capsys)
+    _patch_live_import_http(monkeypatch, requests, post_body={})
+    code = main(
+        [
+            "apply",
+            str(plan_path),
+            "--config",
+            str(config),
+            "--apply",
+            "--confirm-live",
+            "--format",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    payload = json.loads(captured.out)
+    _assert_structured_import_failure(payload, captured.out + captured.err)
+    dumped = json.dumps(payload).lower()
+    assert "completed" not in dumped or payload.get("completed") is not True
+    assert "success" not in payload
+    assert "missing id" in dumped
+
+
+def test_apply_import_v2_post_500_human_is_safe_exit_1(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests: list[httpx.Request] = []
+    config, plan_path = _generate_plan(monkeypatch, tmp_path, requests, capsys)
+    _patch_live_import_http(monkeypatch, requests, post_status=500)
+    code = main(
+        [
+            "apply",
+            str(plan_path),
+            "--config",
+            str(config),
+            "--apply",
+            "--confirm-live",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.err.startswith("error: ")
+    combined = (captured.out + captured.err).lower()
+    assert "collibra-secret-password" not in combined
+    assert "success=true" not in combined
+    assert "completed=true" not in combined

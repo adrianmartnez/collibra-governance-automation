@@ -991,3 +991,152 @@ def test_mapper_same_name_distinct_local_ids_rejected_by_import() -> None:
     plan = build_sync_plan(desired, CollibraRemoteState())
     with pytest.raises(ImportCompileError, match="same name and domain"):
         compile_import_document(plan, config)
+
+
+def _mismatched_create(
+    *,
+    action_local_id: str | None,
+    desired_local_id: str,
+    name: str = "orders",
+) -> SyncAction:
+    return SyncAction(
+        action_type=SyncActionType.CREATE,
+        object_kind=SyncObjectKind.ASSET,
+        local_id=action_local_id,
+        reason="create",
+        desired_asset=_asset(local_id=desired_local_id, name=name, kind="table"),
+    )
+
+
+def _recording_live_adapter(config: object, requests: list[httpx.Request]) -> LiveCollibraAdapter:
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500)
+
+    return LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+
+
+def test_create_action_desired_local_id_mismatch_is_compile_error() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(actions=(_mismatched_create(action_local_id="A", desired_local_id="B"),))
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        compile_import_document(plan, config)
+
+
+def test_create_action_desired_local_id_mismatch_is_zero_network() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(actions=(_mismatched_create(action_local_id="A", desired_local_id="B"),))
+    requests: list[httpx.Request] = []
+    adapter = _recording_live_adapter(config, requests)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert requests == []
+
+
+def test_create_missing_action_local_id_is_compile_error_zero_network() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(actions=(_mismatched_create(action_local_id=None, desired_local_id="A"),))
+    requests: list[httpx.Request] = []
+    adapter = _recording_live_adapter(config, requests)
+    with pytest.raises(ImportCompileError, match="missing local identity"):
+        compile_import_document(plan, config)
+    with pytest.raises(ImportCompileError, match="missing local identity"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert requests == []
+
+
+def test_duplicate_guard_cannot_be_bypassed_by_divergent_desired_local_ids() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(
+        actions=(
+            _mismatched_create(action_local_id="same", desired_local_id="A"),
+            _mismatched_create(action_local_id="same", desired_local_id="B"),
+        )
+    )
+    requests: list[httpx.Request] = []
+    adapter = _recording_live_adapter(config, requests)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        compile_import_document(plan, config)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert requests == []
+
+
+def test_update_action_desired_local_id_mismatch_is_compile_error_zero_network() -> None:
+    config = mock_mapping_config()
+    plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.UPDATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id="A",
+                remote_id="asset-1",
+                reason="attr",
+                desired_asset=_asset(local_id="B", name="orders", kind="table"),
+                changed_fields=("name",),
+            ),
+        )
+    )
+    requests: list[httpx.Request] = []
+    adapter = _recording_live_adapter(config, requests)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        compile_import_document(plan, config)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert requests == []
+
+
+def test_build_sync_plan_create_still_compiles() -> None:
+    config = mock_mapping_config()
+    model = GovernanceModel(
+        data_sources=(
+            DataSource(
+                id=make_datasource_id("src"),
+                name="src",
+                system_type="postgresql",
+                databases=(
+                    Database(
+                        id=make_database_id("src", "demo"),
+                        name="demo",
+                        datasource_id=make_datasource_id("src"),
+                    ),
+                ),
+            ),
+        )
+    )
+    desired = map_to_desired_state(model, config)
+    plan = build_sync_plan(desired, CollibraRemoteState())
+    for action in plan.actions:
+        if action.object_kind is SyncObjectKind.ASSET and action.action_type in {
+            SyncActionType.CREATE,
+            SyncActionType.UPDATE,
+        }:
+            assert action.desired_asset is not None
+            assert action.local_id == action.desired_asset.local_id
+    first = compile_import_document(plan, config)
+    restored = SyncPlan.from_dict(plan.to_dict())
+    second = compile_import_document(restored, config)
+    assert first.canonical_json() == second.canonical_json()
+    assert first.to_list()
+
+
+def test_saved_plan_from_dict_mismatch_rejected_before_network() -> None:
+    config = mock_mapping_config()
+    mismatched = _mismatched_create(action_local_id="A", desired_local_id="B")
+    restored = SyncAction.from_dict(mismatched.to_dict())
+    assert restored.local_id == "A"
+    assert restored.desired_asset is not None
+    assert restored.desired_asset.local_id == "B"
+    plan = SyncPlan.from_dict(SyncPlan(actions=(restored,)).to_dict())
+    requests: list[httpx.Request] = []
+    adapter = _recording_live_adapter(config, requests)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        compile_import_document(plan, config)
+    with pytest.raises(ImportCompileError, match="local_id must equal"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert requests == []

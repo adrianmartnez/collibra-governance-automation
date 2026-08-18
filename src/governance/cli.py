@@ -948,13 +948,16 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 return _emit_operational(exc, fmt)
             raise
 
-    result = execute_collibra_plan(
-        adapter,
-        saved.sync_plan,
-        mapping_config,
-        apply=apply,
-        execution_mode=settings.collibra_execution_mode,
-    )
+    try:
+        result = execute_collibra_plan(
+            adapter,
+            saved.sync_plan,
+            mapping_config,
+            apply=apply,
+            execution_mode=settings.collibra_execution_mode,
+        )
+    except CollibraAdapterError as exc:
+        return _emit_operational(exc, fmt)
     if isinstance(result, ImportExecutionResult):
         payload = build_import_submission_result(
             result=result,
@@ -1409,13 +1412,16 @@ def _cmd_sync(
     adapter = build_collibra_adapter(effective, mapping_config)
     remote = adapter.read_remote_state(desired)
     plan = build_sync_plan(desired, remote)
-    result = execute_collibra_plan(
-        adapter,
-        plan,
-        mapping_config,
-        apply=apply,
-        execution_mode=settings.collibra_execution_mode,
-    )
+    try:
+        result = execute_collibra_plan(
+            adapter,
+            plan,
+            mapping_config,
+            apply=apply,
+            execution_mode=settings.collibra_execution_mode,
+        )
+    except CollibraAdapterError as exc:
+        return _emit_operational(exc, "json" if json_output else "human")
     if isinstance(result, ImportExecutionResult):
         if result.error is not None:
             raise CliOperationalError(result.error)

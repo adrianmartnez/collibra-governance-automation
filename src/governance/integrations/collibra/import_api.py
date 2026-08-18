@@ -127,6 +127,7 @@ def compile_import_document(
     ):
         raise ImportCompileError("import_v2 cannot represent relationship UPDATE/DELETE")
 
+    _reject_inconsistent_asset_local_identities(plan)
     _reject_duplicate_create_natural_identifiers(plan)
     assets_by_local = _asset_lookup(plan)
     commands: dict[str, dict[str, Any]] = {}
@@ -135,9 +136,7 @@ def compile_import_document(
     for action in _ordered_mutating_actions(mutating):
         if action.object_kind is SyncObjectKind.ASSET:
             command = _asset_command(action, allowed_attr_types=allowed_attr_types)
-            local_id = action.desired_asset.local_id if action.desired_asset else action.local_id
-            if not local_id:
-                raise ImportCompileError("asset command missing local identity")
+            local_id = _require_asset_local_identity(action)
             if local_id in commands:
                 raise ImportCompileError("duplicate import identifier")
             commands[local_id] = command
@@ -166,8 +165,15 @@ def compile_import_document(
 def _asset_lookup(plan: SyncPlan) -> dict[str, SyncAction]:
     found: dict[str, SyncAction] = {}
     for action in plan.actions:
-        if action.object_kind is SyncObjectKind.ASSET and action.local_id:
-            found[action.local_id] = action
+        if action.object_kind is not SyncObjectKind.ASSET:
+            continue
+        if action.action_type in {SyncActionType.CREATE, SyncActionType.UPDATE}:
+            local_id = _require_asset_local_identity(action)
+        elif action.local_id:
+            local_id = action.local_id
+        else:
+            continue
+        found[local_id] = action
     return found
 
 
@@ -253,6 +259,35 @@ def _exact_import_identifier_key(asset: Any) -> tuple[str, str]:
     return identifier["name"], identifier["domain"]["id"]
 
 
+def _require_asset_local_identity(action: SyncAction) -> str:
+    """Import-only: CREATE/UPDATE asset local_id must equal desired_asset.local_id exactly."""
+    if action.object_kind is not SyncObjectKind.ASSET:
+        raise ImportCompileError("asset command missing local identity")
+    if action.action_type not in {SyncActionType.CREATE, SyncActionType.UPDATE}:
+        raise ImportCompileError("asset command missing local identity")
+    if not isinstance(action.local_id, str) or action.local_id == "":
+        raise ImportCompileError("import_v2 asset action missing local identity")
+    asset = action.desired_asset
+    if asset is None:
+        raise ImportCompileError("asset action missing desired spec")
+    if not isinstance(asset.local_id, str) or asset.local_id == "":
+        raise ImportCompileError("import_v2 asset action missing local identity")
+    if action.local_id != asset.local_id:
+        raise ImportCompileError(
+            "import_v2 asset action local_id must equal desired_asset.local_id"
+        )
+    return action.local_id
+
+
+def _reject_inconsistent_asset_local_identities(plan: SyncPlan) -> None:
+    for action in plan.actions:
+        if action.object_kind is SyncObjectKind.ASSET and action.action_type in {
+            SyncActionType.CREATE,
+            SyncActionType.UPDATE,
+        }:
+            _require_asset_local_identity(action)
+
+
 def _reject_duplicate_create_natural_identifiers(plan: SyncPlan) -> None:
     """Fail closed when two CREATE local identities share one Import MERGE key."""
     seen: dict[tuple[str, str], str] = {}
@@ -263,14 +298,13 @@ def _reject_duplicate_create_natural_identifiers(plan: SyncPlan) -> None:
         ):
             continue
         key = _exact_import_identifier_key(action.desired_asset)
-        local_id = action.local_id or ""
+        local_id = _require_asset_local_identity(action)
         previous = seen.get(key)
         if previous is not None and previous != local_id:
             raise ImportCompileError(
                 "import_v2 cannot represent two CREATE assets with the same name and domain"
             )
-        if local_id:
-            seen[key] = local_id
+        seen[key] = local_id
 
 
 def _asset_identifier(action: SyncAction) -> dict[str, Any]:
