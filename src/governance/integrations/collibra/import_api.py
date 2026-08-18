@@ -7,7 +7,12 @@ from typing import Any, Literal
 
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.collibra.adapters import CollibraAdapterError
-from governance.integrations.collibra.jobs import JobView, SubmissionState, observe_job
+from governance.integrations.collibra.jobs import (
+    IMPORT_SUBMISSION_UNCERTAIN,
+    JobView,
+    SubmissionState,
+    observe_job,
+)
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
     SyncAction,
@@ -121,8 +126,10 @@ class ImportJobExecutionResult:
     error: str | None = None
 
     @property
-    def submitted(self) -> bool:
-        return self.submission_state == "submitted"
+    def submitted(self) -> bool | None:
+        from governance.integrations.collibra.jobs import submission_state_as_bool
+
+        return submission_state_as_bool(self.submission_state)
 
     @property
     def terminal(self) -> bool:
@@ -508,7 +515,21 @@ def _execute_import_job_lifecycle(
     unchanged_count: int,
 ) -> ImportJobExecutionResult:
     prove_import_create_identifiers_absent(adapter, plan)
-    submission = adapter.submit_json_import(document)
+    try:
+        submission = adapter.submit_json_import(document)
+    except CollibraAdapterError:
+        return ImportJobExecutionResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            submission_state="unknown",
+            job_id=None,
+            job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error=IMPORT_SUBMISSION_UNCERTAIN,
+        )
     job_id = getattr(submission, "job_id", "") or ""
     if not job_id:
         return ImportJobExecutionResult(
@@ -521,7 +542,7 @@ def _execute_import_job_lifecycle(
             success=False,
             applied_count=0,
             unchanged_count=unchanged_count,
-            error="import job outcome=uncertain",
+            error=IMPORT_SUBMISSION_UNCERTAIN,
         )
     poll_job = getattr(adapter, "poll_job", None)
     if poll_job is None:

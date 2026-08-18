@@ -9,6 +9,7 @@ from governance.integrations.collibra.import_api import ImportJobExecutionResult
 from governance.integrations.collibra.jobs import (
     JobView,
     is_remote_terminal,
+    submission_state_as_bool,
 )
 
 IMPORT_JOB_RESULT_SCHEMA = "governance-import-job-result"
@@ -45,6 +46,7 @@ def build_import_job_result(
         "result_version": IMPORT_JOB_RESULT_VERSION,
         "stale": False,
         "submission_state": result.submission_state,
+        "submitted": submission_state_as_bool(result.submission_state),
         "success": result.success,
         **_job_fields(result.job),
     }
@@ -69,6 +71,7 @@ def build_import_job_sync_payload(
         "result_schema": IMPORT_JOB_RESULT_SCHEMA,
         "result_version": IMPORT_JOB_RESULT_VERSION,
         "submission_state": result.submission_state,
+        "submitted": submission_state_as_bool(result.submission_state),
         "success": result.success,
         **_job_fields(result.job),
     }

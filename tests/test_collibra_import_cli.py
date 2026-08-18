@@ -412,7 +412,7 @@ def _assert_structured_import_failure(payload: object, captured: str) -> None:
     assert "bearer " not in lowered
 
 
-def test_apply_import_v2_post_500_is_structured_json_failure(
+def test_apply_import_v2_post_500_returns_lifecycle_unknown_submission(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -435,14 +435,21 @@ def test_apply_import_v2_post_500_is_structured_json_failure(
     captured = capsys.readouterr()
     assert code == 1
     payload = json.loads(captured.out)
-    _assert_structured_import_failure(payload, captured.out + captured.err)
+    assert payload["result_schema"] == "governance-import-job-result"
+    assert payload["submission_state"] == "unknown"
+    assert payload["submitted"] is None
+    assert payload["success"] is False
+    assert payload["job_id"] is None
+    lowered = (captured.out + captured.err).lower()
+    assert "collibra-secret-password" not in lowered
+    assert "super-secret-password" not in lowered
     assert any(
         request.method == "POST" and urlparse(str(request.url)).path.endswith("/import/json-job")
         for request in requests
     )
 
 
-def test_sync_import_v2_post_500_is_structured_json_failure(
+def test_sync_import_v2_post_500_returns_lifecycle_unknown_submission(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -470,7 +477,10 @@ def test_sync_import_v2_post_500_is_structured_json_failure(
     captured = capsys.readouterr()
     assert code == 1
     payload = json.loads(captured.out)
-    _assert_structured_import_failure(payload, captured.out + captured.err)
+    assert payload["result_schema"] == "governance-import-job-result"
+    assert payload["submission_state"] == "unknown"
+    assert payload["submitted"] is None
+    assert payload["success"] is False
 
 
 def test_apply_import_v2_collision_is_structured_json_zero_post(
@@ -539,7 +549,7 @@ def test_apply_import_v2_missing_job_id_is_structured_json_failure(
     assert "collibra-secret-password" not in lowered
 
 
-def test_apply_import_v2_post_500_human_is_safe_exit_1(
+def test_apply_import_v2_post_500_human_reports_lifecycle_unknown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -559,8 +569,7 @@ def test_apply_import_v2_post_500_human_is_safe_exit_1(
     )
     captured = capsys.readouterr()
     assert code == 1
-    assert captured.err.startswith("error: ")
+    assert "submission_state=unknown" in captured.out
+    assert "success=false" in captured.out
     combined = (captured.out + captured.err).lower()
     assert "collibra-secret-password" not in combined
-    assert "success=true" not in combined
-    assert "completed=true" not in combined

@@ -1462,7 +1462,7 @@ def _cmd_sync(
             sys.stdout.write(format_import_sync_human(payload))
         return 0
     if isinstance(result, ImportJobExecutionResult):
-        if result.error is not None and not result.submitted:
+        if result.error is not None and result.submitted is False:
             raise CliOperationalError(result.error)
         payload = build_import_job_sync_payload(mode=mode, result=result)
         if json_output:

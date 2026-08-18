@@ -20,10 +20,12 @@ from governance.integrations.collibra.import_api import (
     prove_import_create_identifiers_absent,
 )
 from governance.integrations.collibra.jobs import (
+    SYNC_BATCH_SUBMISSION_UNCERTAIN,
     JobView,
     SubmissionState,
     is_terminal_success,
     observe_job,
+    submission_state_as_bool,
 )
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import SyncPlan
@@ -52,6 +54,7 @@ class SyncLifecycleResult:
     document: ImportDocument
     dry_run: bool
     synchronization_id: str
+    batch_submission_state: SubmissionState
     batch_job_ids: tuple[str, ...]
     batch_jobs: tuple[JobView, ...]
     finalization_submission_state: SubmissionState
@@ -64,8 +67,8 @@ class SyncLifecycleResult:
     error: str | None = None
 
     @property
-    def finalization_submitted(self) -> bool:
-        return self.finalization_submission_state == "submitted"
+    def finalization_submitted(self) -> bool | None:
+        return submission_state_as_bool(self.finalization_submission_state)
 
     @property
     def report(self) -> SyncExecutionReport:
@@ -160,6 +163,7 @@ def _batch_failure(
         document=document,
         dry_run=False,
         synchronization_id=sync_id,
+        batch_submission_state="submitted",
         batch_job_ids=batch_job_ids,
         batch_jobs=batch_jobs,
         finalization_submission_state="not_attempted",
@@ -191,6 +195,7 @@ def execute_sync_v2(
             document=document,
             dry_run=True,
             synchronization_id=sync_id,
+            batch_submission_state="not_attempted",
             batch_job_ids=(),
             batch_jobs=(),
             finalization_submission_state="not_attempted",
@@ -206,6 +211,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="not_attempted",
             batch_job_ids=(),
             batch_jobs=(),
             finalization_submission_state="not_attempted",
@@ -225,6 +231,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="not_attempted",
             batch_job_ids=(),
             batch_jobs=(),
             finalization_submission_state="not_attempted",
@@ -237,14 +244,15 @@ def execute_sync_v2(
         )
 
     prove_import_create_identifiers_absent(adapter, plan)
-    batch_submission = submit_batch(sync_id, document)
-    batch_job_id = getattr(batch_submission, "job_id", "") or ""
-    if not batch_job_id:
+    try:
+        batch_submission = submit_batch(sync_id, document)
+    except CollibraAdapterError:
         return SyncLifecycleResult(
             plan=plan,
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="unknown",
             batch_job_ids=(),
             batch_jobs=(),
             finalization_submission_state="not_attempted",
@@ -253,7 +261,25 @@ def execute_sync_v2(
             success=False,
             applied_count=0,
             unchanged_count=unchanged_count,
-            error="sync batch job outcome=uncertain",
+            error=SYNC_BATCH_SUBMISSION_UNCERTAIN,
+        )
+    batch_job_id = getattr(batch_submission, "job_id", "") or ""
+    if not batch_job_id:
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            synchronization_id=sync_id,
+            batch_submission_state="unknown",
+            batch_job_ids=(),
+            batch_jobs=(),
+            finalization_submission_state="not_attempted",
+            finalization_job_id=None,
+            finalization_job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error=SYNC_BATCH_SUBMISSION_UNCERTAIN,
         )
     batch_view, observation_error = observe_job(poll_job, batch_job_id)
     if observation_error is not None:
@@ -262,6 +288,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="submitted",
             batch_job_ids=(batch_job_id,),
             batch_jobs=(),
             finalization_submission_state="not_attempted",
@@ -295,6 +322,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="submitted",
             batch_job_ids=(batch_job_id,),
             batch_jobs=(batch_view,),
             finalization_submission_state="unknown",
@@ -312,6 +340,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="submitted",
             batch_job_ids=(batch_job_id,),
             batch_jobs=(batch_view,),
             finalization_submission_state="unknown",
@@ -329,6 +358,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="submitted",
             batch_job_ids=(batch_job_id,),
             batch_jobs=(batch_view,),
             finalization_submission_state="submitted",
@@ -347,6 +377,7 @@ def execute_sync_v2(
             document=document,
             dry_run=False,
             synchronization_id=sync_id,
+            batch_submission_state="submitted",
             batch_job_ids=(batch_job_id,),
             batch_jobs=(batch_view,),
             finalization_submission_state="submitted",
@@ -363,6 +394,7 @@ def execute_sync_v2(
         document=document,
         dry_run=False,
         synchronization_id=sync_id,
+        batch_submission_state="submitted",
         batch_job_ids=(batch_job_id,),
         batch_jobs=(batch_view,),
         finalization_submission_state="submitted",

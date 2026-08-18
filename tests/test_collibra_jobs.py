@@ -25,13 +25,19 @@ from governance.integrations.collibra import (
     mock_mapping_config,
     prove_import_create_identifiers_absent,
 )
-from governance.integrations.collibra.import_api import IMPORT_MULTIPART_FIELDS
+from governance.integrations.collibra.import_api import (
+    IMPORT_MULTIPART_FIELDS,
+    compile_import_document,
+)
 from governance.integrations.collibra.jobs import (
+    IMPORT_SUBMISSION_UNCERTAIN,
     JOB_OBSERVATION_FAILURE,
+    SYNC_BATCH_SUBMISSION_UNCERTAIN,
     classify_job,
     is_remote_terminal,
     poll_until_terminal,
     sanitize_import_error_summary,
+    submission_state_as_bool,
     timeout_view,
     validate_finite_poll_seconds,
 )
@@ -39,6 +45,10 @@ from governance.integrations.collibra.synchronization import (
     derive_synchronization_id,
     effective_synchronization_id,
     require_ignore_strategy,
+)
+from governance.plans.sync_lifecycle_result import (
+    build_sync_lifecycle_sync_payload,
+    format_sync_lifecycle_result_human,
 )
 from governance.plans.target_context import (
     build_target_context_projection,
@@ -363,7 +373,7 @@ def test_malformed_finalize_submission_is_uncertain_without_retry() -> None:
     )
     assert result.success is False
     assert result.finalization_submission_state == "unknown"
-    assert result.finalization_submitted is False
+    assert result.finalization_submitted is None
     assert result.batch_job_ids == ("batch-1",)
     assert result.finalization_job_id is None
     assert "uncertain" in (result.error or "")
@@ -1099,8 +1109,152 @@ def test_sync_finalize_write_timeout_preserves_batch_unknown_submission() -> Non
     assert result.success is False
     assert result.batch_job_ids == ("batch-1",)
     assert result.finalization_submission_state == "unknown"
+    assert result.finalization_submitted is None
     assert result.finalization_job_id is None
     assert finalize_posts == 1
+
+
+def test_submission_state_bool_aliases_do_not_collapse_unknown() -> None:
+    assert submission_state_as_bool("submitted") is True
+    assert submission_state_as_bool("not_attempted") is False
+    assert submission_state_as_bool("unknown") is None
+
+
+def test_import_submission_unknown_bool_alias_is_none() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/import/json-job"):
+            return httpx.Response(200, json={"name": "missing-id"})
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="import_v2",
+    )
+    assert result.submission_state == "unknown"
+    assert result.submitted is None
+    assert result.job_id is None
+
+
+def test_import_submit_write_timeout_returns_unknown_submission() -> None:
+    posts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/import/json-job"):
+            posts += 1
+            raise httpx.WriteTimeout("write timeout")
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="import_v2",
+    )
+    assert posts == 1
+    assert result.submission_state == "unknown"
+    assert result.submitted is None
+    assert result.job_id is None
+    assert result.success is False
+    assert result.error == IMPORT_SUBMISSION_UNCERTAIN
+
+
+def test_sync_batch_submit_write_timeout_unknown_no_finalize() -> None:
+    batch_posts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal batch_posts
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            batch_posts += 1
+            raise httpx.WriteTimeout("write timeout")
+        if path.endswith("/finalize/job"):
+            raise AssertionError("finalize must not run")
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert batch_posts == 1
+    assert result.batch_submission_state == "unknown"
+    assert result.batch_job_ids == ()
+    assert result.finalization_submission_state == "not_attempted"
+    assert result.success is False
+    assert result.error == SYNC_BATCH_SUBMISSION_UNCERTAIN
+
+
+def test_sync_batch_missing_id_unknown_no_finalize() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"name": "missing-id"})
+        if path.endswith("/finalize/job"):
+            raise AssertionError("finalize must not run")
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.batch_submission_state == "unknown"
+    assert result.batch_job_ids == ()
+    assert not any(item.url.path.endswith("/finalize/job") for item in requests)
+
+
+def test_sync_lifecycle_payload_preserves_batch_id_without_job_view() -> None:
+    result = SyncLifecycleResult(
+        plan=_create_plan(),
+        document=compile_import_document(_create_plan(), mock_mapping_config()),
+        dry_run=False,
+        synchronization_id=UUID_A,
+        batch_submission_state="submitted",
+        batch_job_ids=("batch-1",),
+        batch_jobs=(),
+        finalization_submission_state="not_attempted",
+        finalization_job_id=None,
+        finalization_job=None,
+        success=False,
+        applied_count=0,
+        unchanged_count=0,
+        error=JOB_OBSERVATION_FAILURE,
+    )
+    payload = build_sync_lifecycle_sync_payload(mode="live", result=result)
+    assert payload["result_schema"] == "governance-sync-lifecycle-result"
+    assert payload["batch_job_ids"] == ["batch-1"]
+    assert payload["batch_lifecycle"][0]["job_id"] == "batch-1"
+    assert payload["batch_lifecycle"][0]["observation_error"] == JOB_OBSERVATION_FAILURE
+    human = format_sync_lifecycle_result_human(payload)
+    assert "batch_job_id_0=batch-1" in human
 
 
 def test_poll_until_terminal_rejects_non_finite_policy() -> None:

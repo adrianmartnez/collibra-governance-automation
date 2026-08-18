@@ -18,6 +18,8 @@ IMPORT_ERRORS_PATH_PREFIX = "/rest/2.0/import/results"
 
 SubmissionState = Literal["not_attempted", "submitted", "unknown"]
 JOB_OBSERVATION_FAILURE = "could not observe job outcome"
+IMPORT_SUBMISSION_UNCERTAIN = "import job submission outcome=uncertain"
+SYNC_BATCH_SUBMISSION_UNCERTAIN = "sync batch job submission outcome=uncertain"
 
 REMOTE_STATES = frozenset({"WAITING", "RUNNING", "CANCELING", "COMPLETED", "CANCELED", "ERROR"})
 REMOTE_TERMINAL_STATES = frozenset({"COMPLETED", "CANCELED", "ERROR"})
@@ -94,6 +96,15 @@ def job_path(job_id: str) -> str:
 
 def import_errors_path(job_id: str) -> str:
     return f"{IMPORT_ERRORS_PATH_PREFIX}/{job_id}/errors"
+
+
+def submission_state_as_bool(state: SubmissionState) -> bool | None:
+    """Map tri-state submission certainty to an optional bool alias."""
+    if state == "submitted":
+        return True
+    if state == "not_attempted":
+        return False
+    return None
 
 
 def is_terminal_success(view: JobView) -> bool:
