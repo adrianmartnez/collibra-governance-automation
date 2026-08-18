@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## 1.3.0 - 2026-08-18
+
+### Added
+
+- OAuth 2.0 client-credentials for live Collibra: native `POST {base}/rest/oauth/v2/token` and external IdP (`client_secret_post` / `client_secret_basic`)
+- Bounded HTTP retry policy with Retry-After delta-seconds and HTTP-date
+- Plan-faithful Import API v2 `json-job` execution (`core_rest` | `import_v2` | `sync_v2`)
+- Documented job lifecycle and IGNORE-only `sync_v2` finalization, including poll of the finalization job
+- Conservative deterministic batching with stop-on-failure (config may only lower the hard maxima)
+- Localhost Collibra contract HTTP server and dedicated `collibra-contract` CI job
+- Read-only `governance preflight` tenant compatibility CLI
+- Secret-safe operational telemetry (`NullSink` default; `COLLIBRA_TELEMETRY=jsonl` opt-in)
+
+### Safety
+
+- Live auth remains XOR: Basic, caller-supplied Bearer, or OAuth client credentials
+- OAuth HTTP non-loopback is rejected before any token POST; embedded URL credentials are rejected
+- Import `attributesAction=REPLACE` is limited to mapping-managed attribute types; relations use `ADD_OR_IGNORE`
+- Combined `/import/synchronize/{id}/json-job`, `REMOVE_RESOURCES`, `CHANGE_STATUS`, and DELETE remain forbidden
+- Preflight performs zero remote mutations; remote HTTP is classified incompatible before credentials are sent
+- Telemetry never enters plan, snapshot, graph, hash, or impact identities
+
+### Compatibility
+
+- Public v1 contracts unchanged (`schema_version`, `plan_version`, Action contract, hashing contract)
+- Existing Basic/Bearer configs without OAuth or `execution_mode` keep 1.2.0 runtime behavior
+- Package and runtime version are now `1.3.0` (distinct from contract versions, which remain v1)
+
+### Limitations
+
+- No commercial Collibra tenant validation in this repository
+- Local contract-server tests are not a commercial-tenant stand-in
+- No provider SDK
+- No authority / conflict resolution engine
+- No automatic destructive reconciliation
+- No large-scale performance benchmarks
+- This package remains a technical governance automation project, not a hosted governance platform
+
 ## 1.2.0 - 2026-08-09
 
 ### Added
