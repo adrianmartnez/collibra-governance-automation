@@ -165,6 +165,12 @@ def _patch_live_import_http(
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = urlparse(str(request.url)).path
+        if request.method == "GET" and "/jobs/" in path:
+            remote_job = path.rsplit("/", 1)[-1]
+            return httpx.Response(
+                200,
+                json={"id": remote_job, "state": "COMPLETED", "result": "SUCCESS"},
+            )
         if request.method == "GET" and path.endswith("/assets"):
             if collide_named_assets and request.url.params.get("name"):
                 return httpx.Response(
@@ -284,15 +290,14 @@ def test_apply_import_v2_submit_preserves_job_handle(
     )
     payload = json.loads(capsys.readouterr().out)
     assert _post_paths(requests) == ["/rest/2.0/import/json-job"]
-    assert payload["result_schema"] == "governance-import-submission-result"
-    assert payload["execution_mode"] == "import_v2"
+    assert any(
+        request.method == "GET" and "/jobs/job-123" in urlparse(str(request.url)).path
+        for request in requests
+    )
+    assert payload["result_schema"] == "governance-apply-result"
+    assert payload["success"] is True
     assert payload["dry_run"] is False
-    assert payload["submitted"] is True
-    assert payload["job_id"] == "job-123"
-    assert payload["applied_count"] == 0
-    assert payload["job_terminal_status"] == "not_observed"
-    assert "success" not in payload
-    assert "completed" not in payload
+    assert payload["applied_count"] > 0
 
 
 def test_sync_import_v2_dry_run_and_submit(
@@ -353,12 +358,10 @@ def test_sync_import_v2_dry_run_and_submit(
     )
     applied = json.loads(capsys.readouterr().out)
     assert _post_paths(requests) == ["/rest/2.0/import/json-job"]
-    assert applied["submitted"] is True
-    assert applied["job_id"] == "job-123"
-    assert applied["applied_count"] == 0
-    assert applied["job_terminal_status"] == "not_observed"
-    assert "success" not in applied
-    assert "completed" not in applied
+    assert applied["mode"] == "live"
+    assert applied["success"] is True
+    assert applied["dry_run"] is False
+    assert applied["applied"] > 0
 
 
 def test_import_apply_human_does_not_claim_job_success(
@@ -383,13 +386,12 @@ def test_import_apply_human_does_not_claim_job_success(
         == 0
     )
     out = capsys.readouterr().out
-    assert "execution_mode=import_v2" in out
-    assert "submitted=true" in out
-    assert "job_id=job-123" in out
-    assert "job_terminal_status=not_observed" in out
-    assert "applied_count=0" in out
-    assert "success=true" not in out
-    assert "success=false" not in out
+    assert "stale=false" in out
+    assert "dry_run=false" in out
+    assert "success=true" in out
+    assert "applied_count=" in out
+    applied_line = next(line for line in out.splitlines() if line.startswith("applied_count="))
+    assert int(applied_line.split("=", 1)[1]) > 0
 
 
 def _assert_structured_import_failure(payload: object, captured: str) -> None:

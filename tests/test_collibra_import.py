@@ -569,6 +569,10 @@ def test_create_absent_natural_identifier_allows_submit() -> None:
             return httpx.Response(200, json=_empty_page())
         if request.method == "POST" and path.endswith("/import/json-job"):
             return httpx.Response(200, json={"id": "job-create"})
+        if request.method == "GET" and path.endswith("/jobs/job-create"):
+            return httpx.Response(
+                200, json={"id": "job-create", "state": "COMPLETED", "result": "SUCCESS"}
+            )
         return httpx.Response(500, json={"error": "unexpected"})
 
     adapter = LiveCollibraAdapter.from_settings(
@@ -578,14 +582,13 @@ def test_create_absent_natural_identifier_allows_submit() -> None:
         sleeper=lambda _s: None,
     )
     result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert isinstance(result, ImportExecutionResult)
-    assert result.submitted is True
-    assert result.job_id == "job-create"
-    assert result.applied_count == 0
-    methods = [request.method for request in requests]
-    assert methods == ["GET", "POST"]
-    assert urlparse(str(requests[0].url)).path == "/rest/2.0/assets"
-    assert urlparse(str(requests[1].url)).path == "/rest/2.0/import/json-job"
+    assert result.success is True
+    assert result.applied_count == 1
+    assert [urlparse(str(item.url)).path for item in requests] == [
+        "/rest/2.0/assets",
+        "/rest/2.0/import/json-job",
+        "/rest/2.0/jobs/job-create",
+    ]
     assert compiled.to_list()[0]["identifier"] == {
         "name": "orders",
         "domain": {"id": config.domain_ref},

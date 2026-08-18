@@ -377,6 +377,8 @@ def test_import_v2_does_not_call_synchronize_or_finalize() -> None:
         path = urlparse(str(request.url)).path
         if "/import/synchronize" in path:
             raise AssertionError("import_v2 must not call synchronize")
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(200, json={"results": [], "total": 0})
         if path.endswith("/import/json-job"):
             return httpx.Response(200, json={"id": "job-1"})
         if path.endswith("/jobs/job-1"):
