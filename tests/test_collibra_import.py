@@ -11,7 +11,9 @@ from governance.config import Settings
 from governance.integrations.collibra import (
     CollibraAssetSpec,
     CollibraAttributeSpec,
+    CollibraDesiredState,
     CollibraRelationshipSpec,
+    ImportCollisionError,
     ImportCompileError,
     ImportExecutionResult,
     LiveCollibraAdapter,
@@ -20,6 +22,7 @@ from governance.integrations.collibra import (
     SyncActionType,
     SyncObjectKind,
     SyncPlan,
+    build_sync_plan,
     compile_import_document,
     execute_collibra_plan,
     mock_mapping_config,
@@ -506,3 +509,255 @@ def test_import_v2_binds_execution_in_target_context_identity() -> None:
     assert imported["execution"] == "import_v2"
     assert core["provider"] == imported["provider"]
     assert core["endpoint"] == imported["endpoint"]
+
+
+def _empty_page() -> dict[str, object]:
+    return {"results": [], "total": 0}
+
+
+def _create_plan() -> tuple[object, SyncPlan]:
+    config = mock_mapping_config()
+    plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.CREATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id="tbl:orders",
+                reason="create",
+                desired_asset=_asset(
+                    local_id="tbl:orders",
+                    name="orders",
+                    kind="table",
+                    attrs=("local_id", "tbl:orders"),
+                ),
+            ),
+        )
+    )
+    return config, plan
+
+
+def test_create_absent_natural_identifier_allows_submit() -> None:
+    config, plan = _create_plan()
+    compiled = compile_import_document(plan, config)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            assert request.url.params.get("name") == "orders"
+            assert request.url.params.get("nameMatchMode") == "EXACT"
+            assert request.url.params.get("domainId") == config.domain_ref
+            assert request.url.params.get("typeId") is None
+            return httpx.Response(200, json=_empty_page())
+        if request.method == "POST" and path.endswith("/import/json-job"):
+            return httpx.Response(200, json={"id": "job-create"})
+        return httpx.Response(500, json={"error": "unexpected"})
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert isinstance(result, ImportExecutionResult)
+    assert result.submitted is True
+    assert result.job_id == "job-create"
+    assert result.applied_count == 0
+    methods = [request.method for request in requests]
+    assert methods == ["GET", "POST"]
+    assert urlparse(str(requests[0].url)).path == "/rest/2.0/assets"
+    assert urlparse(str(requests[1].url)).path == "/rest/2.0/import/json-job"
+    assert compiled.to_list()[0]["identifier"] == {
+        "name": "orders",
+        "domain": {"id": config.domain_ref},
+    }
+
+
+def test_unmanaged_name_domain_collision_is_fail_closed_zero_post() -> None:
+    config, plan = _create_plan()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "unmanaged-1",
+                            "name": "orders",
+                            "domain": {"id": config.domain_ref},
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+        return httpx.Response(500, json={"error": "unexpected"})
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    with pytest.raises(ImportCollisionError, match="collides"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert requests
+    assert all(request.method != "POST" for request in requests)
+    assert urlparse(str(requests[0].url)).path == "/rest/2.0/assets"
+
+
+def test_managed_existing_asset_is_update_or_unchanged_not_create() -> None:
+    config = mock_mapping_config()
+    adapter = MockCollibraAdapter(config)
+    asset = _asset(
+        local_id="tbl:orders",
+        name="orders",
+        kind="table",
+        attrs=("local_id", "tbl:orders"),
+    )
+    adapter.create_asset(asset)
+    desired = CollibraDesiredState(assets=(asset,))
+    remote = adapter.read_remote_state(desired)
+    plan = build_sync_plan(desired, remote)
+    types = {action.action_type for action in plan.actions if action.local_id == "tbl:orders"}
+    assert SyncActionType.CREATE not in types
+    assert types <= {SyncActionType.UPDATE, SyncActionType.UNCHANGED}
+
+
+def test_unmanaged_same_name_still_plans_create() -> None:
+    config = mock_mapping_config()
+    adapter = MockCollibraAdapter(config)
+    adapter.seed_unmanaged_asset(remote_id="unmanaged-1", name="orders")
+    desired = CollibraDesiredState(
+        assets=(
+            _asset(
+                local_id="tbl:orders",
+                name="orders",
+                kind="table",
+                attrs=("local_id", "tbl:orders"),
+            ),
+        )
+    )
+    remote = adapter.read_remote_state(desired)
+    plan = build_sync_plan(desired, remote)
+    action = next(item for item in plan.actions if item.local_id == "tbl:orders")
+    assert action.action_type is SyncActionType.CREATE
+    assert remote.unmanaged_assets_ignored >= 1
+
+
+def test_collision_check_http_error_is_fail_closed_zero_post() -> None:
+    config, plan = _create_plan()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500, json={"error": "unavailable"})
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    with pytest.raises(ImportCollisionError, match="collision check failed"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert all(request.method != "POST" for request in requests)
+
+
+def test_collision_check_malformed_response_is_fail_closed_zero_post() -> None:
+    config, plan = _create_plan()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(200, json={"total": 1})
+        return httpx.Response(500)
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    with pytest.raises(ImportCollisionError, match="collision check failed"):
+        execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
+    assert all(request.method != "POST" for request in requests)
+
+
+def test_collision_check_non_list_matches_is_fail_closed_zero_post() -> None:
+    config, plan = _create_plan()
+    posts: list[object] = []
+
+    class AmbiguousAdapter:
+        mode = "live"
+
+        def lookup_assets_by_natural_identifier(self, *, name: str, domain_ref: str):
+            del name, domain_ref
+            return {"results": []}
+
+        def submit_json_import(self, document: object) -> None:
+            posts.append(document)
+            raise AssertionError("POST must not run")
+
+    with pytest.raises(ImportCollisionError, match="ambiguous"):
+        execute_collibra_plan(
+            AmbiguousAdapter(),
+            plan,
+            config,
+            apply=True,
+            execution_mode="import_v2",
+        )
+    assert posts == []
+
+
+def test_create_without_lookup_capability_is_fail_closed() -> None:
+    config, plan = _create_plan()
+    posts: list[object] = []
+
+    class NoLookupAdapter:
+        mode = "live"
+
+        def submit_json_import(self, document: object) -> None:
+            posts.append(document)
+            raise AssertionError("POST must not run")
+
+    with pytest.raises(ImportCollisionError, match="unavailable"):
+        execute_collibra_plan(
+            NoLookupAdapter(),
+            plan,
+            config,
+            apply=True,
+            execution_mode="import_v2",
+        )
+    assert posts == []
+
+
+def test_create_dry_run_is_offline_and_inspectable() -> None:
+    config, plan = _create_plan()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500)
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(),
+        config,
+        transport=httpx.MockTransport(handler),
+        sleeper=lambda _s: None,
+    )
+    preview = execute_collibra_plan(adapter, plan, config, apply=False, execution_mode="import_v2")
+    compiled = compile_import_document(plan, config)
+    assert isinstance(preview, ImportExecutionResult)
+    assert requests == []
+    assert preview.submitted is False
+    assert preview.job_id is None
+    assert preview.document.canonical_json() == compiled.canonical_json()
+    assert preview.document.to_list()[0]["identifier"]["name"] == "orders"

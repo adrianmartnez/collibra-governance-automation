@@ -66,6 +66,7 @@ from governance.integrations.collibra import (
     CollibraAdapterError,
     CollibraMappingConfig,
     CollibraMappingError,
+    ImportExecutionResult,
     SyncAction,
     SyncActionType,
     SyncObjectKind,
@@ -87,10 +88,14 @@ from governance.plans import (
     PlanError,
     SavedGovernancePlan,
     build_apply_result,
+    build_import_submission_result,
+    build_import_sync_payload,
     build_saved_plan,
     build_stale_result,
     compute_remote_state_identity_value,
     format_apply_result_human,
+    format_import_submission_human,
+    format_import_sync_human,
     format_stale_human,
     identity_mismatch,
     load_saved_plan,
@@ -950,6 +955,16 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         apply=apply,
         execution_mode=settings.collibra_execution_mode,
     )
+    if isinstance(result, ImportExecutionResult):
+        payload = build_import_submission_result(
+            result=result,
+            plan_content_identity=saved.content_identity(),
+        )
+        if fmt == "json":
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_import_submission_human(payload))
+        return 0 if result.error is None else 1
     payload = build_apply_result(
         sync_plan=saved.sync_plan,
         result=result,
@@ -1401,6 +1416,15 @@ def _cmd_sync(
         apply=apply,
         execution_mode=settings.collibra_execution_mode,
     )
+    if isinstance(result, ImportExecutionResult):
+        if result.error is not None:
+            raise CliOperationalError(result.error)
+        payload = build_import_sync_payload(mode=mode, result=result)
+        if json_output:
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_import_sync_human(payload))
+        return 0
     if not result.success:
         message = result.error or _SAFE_SYNC_FAILED
         raise CliOperationalError(message)

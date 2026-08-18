@@ -263,6 +263,34 @@ class LiveCollibraAdapter:
             unmanaged_relationships_ignored=unmanaged_relationships,
         )
 
+    def lookup_assets_by_natural_identifier(
+        self,
+        *,
+        name: str,
+        domain_ref: str,
+    ) -> list[dict[str, Any]]:
+        """Read-only occupancy of an Import CREATE name+domain identifier.
+
+        Unscoped by asset type: any occupant is a MERGE collision. Managed
+        identity remains ``local_id``; this lookup does not become a second
+        identity authority.
+        """
+        if not name.strip() or not domain_ref.strip():
+            raise CollibraAdapterError(
+                "import_v2 CREATE collision check is ambiguous",
+                operation="import_collision_check",
+                endpoint_path=f"{API_PREFIX}/assets",
+                endpoint_family="core_rest",
+            )
+        return self._paginate(
+            f"{API_PREFIX}/assets",
+            {
+                "name": name,
+                "nameMatchMode": "EXACT",
+                "domainId": domain_ref,
+            },
+        )
+
     def create_asset(self, asset: CollibraAssetSpec) -> str:
         payload: dict[str, Any] = {
             "name": asset.name,

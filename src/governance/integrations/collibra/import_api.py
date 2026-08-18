@@ -36,6 +36,18 @@ class ImportCompileError(CollibraAdapterError):
         super().__init__(message, operation="compile_import", endpoint_path=IMPORT_JSON_JOB_PATH)
 
 
+class ImportCollisionError(CollibraAdapterError):
+    """Import CREATE cannot be proven free of name+domain MERGE adoption."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            message,
+            operation="import_collision_check",
+            endpoint_path="/rest/2.0/assets",
+            endpoint_family="core_rest",
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ImportCommand:
     payload: dict[str, Any]
@@ -338,6 +350,50 @@ def _relation_only_command(plan: SyncPlan, *, source_local_id: str) -> dict[str,
     }
 
 
+def _prove_create_identifiers_absent(adapter: Any, plan: SyncPlan) -> None:
+    """Fail closed unless each CREATE name+domain is observably absent.
+
+    Import MERGE identifies CREATE by name+domain, not managed ``local_id``.
+    This proof is live-submit only; ``compile_import_document`` stays offline.
+    """
+    creates = [
+        action
+        for action in plan.actions
+        if action.object_kind is SyncObjectKind.ASSET
+        and action.action_type is SyncActionType.CREATE
+    ]
+    if not creates:
+        return
+    lookup = getattr(adapter, "lookup_assets_by_natural_identifier", None)
+    if not callable(lookup):
+        raise ImportCollisionError("import_v2 CREATE collision check is unavailable")
+    seen: set[tuple[str, str]] = set()
+    for action in creates:
+        asset = action.desired_asset
+        if asset is None:
+            raise ImportCollisionError("import_v2 CREATE collision check is ambiguous")
+        name = asset.name.strip()
+        domain_ref = asset.domain_ref.strip()
+        if not name or not domain_ref:
+            raise ImportCollisionError("import_v2 CREATE collision check is ambiguous")
+        key = (name, domain_ref)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            matches = lookup(name=name, domain_ref=domain_ref)
+        except ImportCollisionError:
+            raise
+        except Exception as exc:
+            raise ImportCollisionError("import_v2 CREATE collision check failed") from exc
+        if not isinstance(matches, list):
+            raise ImportCollisionError("import_v2 CREATE collision check is ambiguous")
+        if matches:
+            raise ImportCollisionError(
+                "import_v2 CREATE identifier collides with an existing Collibra asset"
+            )
+
+
 def _add_relation(
     command: dict[str, Any],
     *,
@@ -387,6 +443,7 @@ def execute_collibra_plan(
             submission=None,
             unchanged_count=unchanged_count,
         )
+    _prove_create_identifiers_absent(adapter, plan)
     submission = adapter.submit_json_import(document)
     if not isinstance(submission, ImportSubmission) or not submission.job_id:
         raise ImportCompileError("import job response missing id")

@@ -8,6 +8,7 @@ from governance.integrations.collibra.adapters import (
 )
 from governance.integrations.collibra.endpoint import normalize_base_url
 from governance.integrations.collibra.import_api import (
+    ImportCollisionError,
     ImportCompileError,
     ImportDocument,
     ImportExecutionResult,
@@ -62,6 +63,7 @@ __all__ = [
     "CollibraRemoteState",
     "LiveCollibraAdapter",
     "MockCollibraAdapter",
+    "ImportCollisionError",
     "ImportCompileError",
     "ImportDocument",
     "ImportExecutionResult",
