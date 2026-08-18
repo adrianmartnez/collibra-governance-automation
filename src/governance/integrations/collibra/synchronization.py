@@ -208,7 +208,11 @@ def execute_sync_v2(
     max_additional_characteristics: int | None = None,
 ) -> SyncLifecycleResult:
     """Submit partitioned sync batches, poll each, then IGNORE-finalize and poll."""
-    from governance.integrations.collibra.batching import partition_document
+    from governance.integrations.collibra.batching import (
+        batch_document_counts,
+        partition_document,
+    )
+    from governance.integrations.collibra.telemetry import emit
 
     sync_id = parse_synchronization_id(synchronization_id)
     document = compile_import_document(plan, mapping_config)
@@ -270,6 +274,7 @@ def execute_sync_v2(
 
     applied = 0
     records: list[BatchLifecycleRecord] = []
+    batch_count = len(batches)
 
     for batch_index, batch in enumerate(batches):
         try:
@@ -317,6 +322,16 @@ def execute_sync_v2(
                 applied_count=applied,
                 error=SYNC_BATCH_SUBMISSION_UNCERTAIN,
             )
+        counts = batch_document_counts(batch)
+        emit(
+            operation="sync_batch",
+            endpoint_family="sync_v2",
+            batch_index=batch_index + 1,
+            batch_count=batch_count,
+            resource_count=counts.resource_count,
+            additional_characteristic_count=counts.additional_characteristic_count,
+            job_id=batch_job_id,
+        )
         batch_view, observation_error = observe_job(poll_job, batch_job_id)
         if observation_error is not None:
             records.append(
@@ -418,6 +433,15 @@ def execute_sync_v2(
             error=finalize_observation_error,
         )
     assert finalize_view is not None
+    emit(
+        operation="sync_finalize",
+        endpoint_family="sync_v2",
+        job_id=finalize_job_id,
+        remote_state=finalize_view.remote_state,
+        remote_result=finalize_view.remote_result,
+        normalized_job_state=finalize_view.normalized_state,
+        normalized_result=finalize_view.normalized_outcome,
+    )
     if not is_terminal_success(finalize_view):
         outcome = finalize_view.normalized_outcome or finalize_view.normalized_state
         return _sync_lifecycle_result(

@@ -369,6 +369,18 @@ def poll_until_terminal(
             return timeout_view(last)
         payload = fetch_job(job_id)
         last = classify_job(payload, job_id=job_id)
+        from governance.integrations.collibra.telemetry import emit
+
+        emit(
+            operation="job_poll",
+            endpoint_family="jobs",
+            endpoint_path=job_path(job_id),
+            job_id=last.job_id or job_id,
+            remote_state=last.remote_state,
+            remote_result=last.remote_result,
+            normalized_job_state=last.normalized_state,
+            normalized_result=last.normalized_outcome,
+        )
         if last.normalized_state != NORMALIZED_NON_TERMINAL:
             return last
         remaining = timeout_seconds - (monotonic_clock() - started)

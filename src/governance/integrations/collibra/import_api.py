@@ -550,7 +550,9 @@ def _execute_import_batches_lifecycle(
     *,
     unchanged_count: int,
 ) -> ImportJobExecutionResult:
+    from governance.integrations.collibra.batching import batch_document_counts
     from governance.integrations.collibra.jobs import is_terminal_success
+    from governance.integrations.collibra.telemetry import emit
 
     prove_import_create_identifiers_absent(adapter, plan)
     poll_job = getattr(adapter, "poll_job", None)
@@ -567,6 +569,7 @@ def _execute_import_batches_lifecycle(
 
     applied = 0
     records: list[BatchLifecycleRecord] = []
+    batch_count = len(batches)
     for batch_index, batch in enumerate(batches):
         try:
             submission = adapter.submit_json_import(batch)
@@ -605,6 +608,16 @@ def _execute_import_batches_lifecycle(
                 unchanged_count=unchanged_count,
                 error=IMPORT_SUBMISSION_UNCERTAIN,
             )
+        counts = batch_document_counts(batch)
+        emit(
+            operation="import_batch",
+            endpoint_family="import_v2",
+            batch_index=batch_index + 1,
+            batch_count=batch_count,
+            resource_count=counts.resource_count,
+            additional_characteristic_count=counts.additional_characteristic_count,
+            job_id=job_id,
+        )
         view, observation_error = observe_job(poll_job, job_id)
         if observation_error is not None:
             records.append(
@@ -700,6 +713,50 @@ def execute_collibra_plan(
     max_additional_characteristics: int | None = None,
 ) -> Any:
     """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
+    from governance.integrations.collibra.telemetry import emit, execution_scope
+
+    mode = (execution_mode or "core_rest").strip().lower()
+    with execution_scope(execution_mode=mode):
+        try:
+            result = _execute_collibra_plan(
+                adapter,
+                plan,
+                mapping_config,
+                apply=apply,
+                execution_mode=mode,
+                synchronization_id=synchronization_id,
+                max_resources=max_resources,
+                max_additional_characteristics=max_additional_characteristics,
+            )
+        except Exception:
+            emit(
+                operation="execution_outcome",
+                execution_mode=mode,
+                outcome="error",
+            )
+            raise
+
+        writes = 0 if result.dry_run else int(result.applied_count)
+        emit(
+            operation="execution_outcome",
+            execution_mode=mode,
+            outcome="success" if result.success else "failure",
+            writes_performed=writes,
+        )
+        return result
+
+
+def _execute_collibra_plan(
+    adapter: Any,
+    plan: SyncPlan,
+    mapping_config: CollibraMappingConfig,
+    *,
+    apply: bool,
+    execution_mode: str,
+    synchronization_id: str | None = None,
+    max_resources: int | None = None,
+    max_additional_characteristics: int | None = None,
+) -> Any:
     from governance.integrations.collibra.batching import partition_document
     from governance.integrations.collibra.sync import execute_sync_plan
     from governance.integrations.collibra.synchronization import execute_sync_v2
