@@ -73,6 +73,8 @@ class CollibraAuthRefs:
     scope_env: str | None = None
     oauth_client_auth_env: str | None = None
     timeout_seconds_env: str | None = None
+    job_poll_interval_seconds_env: str | None = None
+    job_poll_timeout_seconds_env: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         payload: dict[str, str] = {}
@@ -87,6 +89,8 @@ class CollibraAuthRefs:
             "scope_env",
             "oauth_client_auth_env",
             "timeout_seconds_env",
+            "job_poll_interval_seconds_env",
+            "job_poll_timeout_seconds_env",
         ):
             value = getattr(self, key)
             if value is not None:

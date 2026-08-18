@@ -42,6 +42,10 @@ from governance.integrations.collibra.http import (
     MAX_PAGINATION_PAGES,
     CollibraHttpExecutor,
 )
+from governance.integrations.collibra.jobs import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    DEFAULT_POLL_TIMEOUT_SECONDS,
+)
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
     CollibraAssetSpec,
@@ -78,6 +82,8 @@ class LiveCollibraAdapter:
         oauth_client_auth: str | None = None,
         transport: httpx.BaseTransport | None = None,
         page_size: int = DEFAULT_PAGE_SIZE,
+        job_poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+        job_poll_timeout_seconds: float = DEFAULT_POLL_TIMEOUT_SECONDS,
         monotonic_clock: Callable[[], float] | None = None,
         wall_clock: Callable[[], float] | None = None,
         sleeper: Callable[[float], None] | None = None,
@@ -85,6 +91,8 @@ class LiveCollibraAdapter:
         self._config = mapping_config
         self._base_url = normalize_base_url(base_url)
         self._timeout_seconds = timeout_seconds
+        self._job_poll_interval_seconds = job_poll_interval_seconds
+        self._job_poll_timeout_seconds = job_poll_timeout_seconds
         self._page_size = page_size
         self._username = username
         self._password = password
@@ -148,6 +156,8 @@ class LiveCollibraAdapter:
             token_url=settings.collibra_token_url or None,
             oauth_scope=settings.collibra_oauth_scope or None,
             oauth_client_auth=settings.collibra_oauth_client_auth or None,
+            job_poll_interval_seconds=settings.collibra_job_poll_interval_seconds,
+            job_poll_timeout_seconds=settings.collibra_job_poll_timeout_seconds,
             transport=transport,
             page_size=page_size,
             monotonic_clock=monotonic_clock,
@@ -423,6 +433,8 @@ class LiveCollibraAdapter:
             job_id,
             monotonic_clock=self._monotonic_clock,
             sleeper=self._sleeper,
+            interval_seconds=self._job_poll_interval_seconds,
+            timeout_seconds=self._job_poll_timeout_seconds,
         )
 
     def submit_sync_batch(self, synchronization_id: str, document: Any) -> Any:
@@ -465,7 +477,7 @@ class LiveCollibraAdapter:
         payload = self._request(
             "POST",
             path,
-            data={"finalizationStrategy": FINALIZATION_STRATEGY_IGNORE},
+            files={"finalizationStrategy": (None, FINALIZATION_STRATEGY_IGNORE)},
         )
         return self._job_submission(payload, operation="submit_sync_finalize", path=path)
 

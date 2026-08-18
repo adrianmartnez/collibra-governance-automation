@@ -12,9 +12,11 @@ from governance.integrations.collibra.import_api import (
     ImportCompileError,
     ImportDocument,
     ImportExecutionResult,
+    ImportJobExecutionResult,
     ImportSubmission,
     compile_import_document,
     execute_collibra_plan,
+    prove_import_create_identifiers_absent,
 )
 from governance.integrations.collibra.live import LiveCollibraAdapter
 from governance.integrations.collibra.mapping import (
@@ -47,6 +49,7 @@ from governance.integrations.collibra.sync import (
     execute_sync_plan,
 )
 from governance.integrations.collibra.synchronization import (
+    SyncLifecycleResult,
     effective_synchronization_id,
 )
 
@@ -70,12 +73,14 @@ __all__ = [
     "ImportCompileError",
     "ImportDocument",
     "ImportExecutionResult",
+    "ImportJobExecutionResult",
     "ImportSubmission",
     "PLANNER_CONTRACT_VERSION",
     "SyncAction",
     "SyncActionType",
     "SyncObjectKind",
     "SyncPlan",
+    "SyncLifecycleResult",
     "SyncResult",
     "build_collibra_adapter",
     "build_sync_plan",
@@ -83,6 +88,7 @@ __all__ = [
     "execute_collibra_plan",
     "execute_sync_plan",
     "effective_synchronization_id",
+    "prove_import_create_identifiers_absent",
     "load_mapping_config_file",
     "map_to_desired_state",
     "mapping_contains_example_placeholders",

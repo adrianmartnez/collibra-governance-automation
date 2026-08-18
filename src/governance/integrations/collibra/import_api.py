@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.collibra.adapters import CollibraAdapterError
+from governance.integrations.collibra.jobs import JobView
 from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import (
     SyncAction,
@@ -75,8 +76,8 @@ class ImportSubmission:
 class ImportExecutionResult:
     """Compile + optional json-job submit. Not terminal Import job completion.
 
-    ``submitted`` means POST /import/json-job accepted a job id. ``applied_count``
-    stays 0 until a later lifecycle PR can observe job SUCCESS.
+    Dry-run and pre-lifecycle submit inspection only. After polling completes,
+    callers receive ``ImportJobExecutionResult`` instead.
     """
 
     plan: SyncPlan
@@ -101,6 +102,29 @@ class ImportExecutionResult:
     @property
     def success(self) -> bool:
         return self.error is None
+
+
+@dataclass(frozen=True, slots=True)
+class ImportJobExecutionResult:
+    """Import json-job submit + bounded poll through terminal job state."""
+
+    plan: SyncPlan
+    document: ImportDocument
+    dry_run: bool
+    submitted: bool
+    job_id: str | None
+    job: JobView | None
+    success: bool
+    applied_count: int
+    unchanged_count: int
+    import_error_summary: dict[str, int] | None = None
+    error: str | None = None
+
+    @property
+    def terminal(self) -> bool:
+        if self.job is None:
+            return False
+        return getattr(self.job, "normalized_state", None) != "non_terminal"
 
 
 def compile_import_document(
@@ -416,11 +440,11 @@ def _relation_only_command(plan: SyncPlan, *, source_local_id: str) -> dict[str,
     }
 
 
-def _prove_create_identifiers_absent(adapter: Any, plan: SyncPlan) -> None:
+def prove_import_create_identifiers_absent(adapter: Any, plan: SyncPlan) -> None:
     """Fail closed unless each CREATE name+domain is observably absent.
 
-    Import MERGE identifies CREATE by name+domain, not managed ``local_id``.
-    This proof is live-submit only; ``compile_import_document`` stays offline.
+    Shared by import_v2 and sync_v2 live execution. Import MERGE identifies
+    CREATE by name+domain, not managed ``local_id``. Compiler stays offline.
     """
     creates = [
         action
@@ -457,6 +481,89 @@ def _prove_create_identifiers_absent(adapter: Any, plan: SyncPlan) -> None:
             )
 
 
+def _best_effort_import_error_summary(adapter: Any, job_id: str) -> dict[str, int] | None:
+    if not job_id:
+        return None
+    get_errors = getattr(adapter, "get_import_errors", None)
+    if not callable(get_errors):
+        return None
+    try:
+        summary = get_errors(job_id)
+    except Exception:
+        return None
+    if isinstance(summary, dict) and "error_count" in summary:
+        return {"error_count": int(summary["error_count"])}
+    return None
+
+
+def _execute_import_job_lifecycle(
+    adapter: Any,
+    plan: SyncPlan,
+    document: ImportDocument,
+    *,
+    unchanged_count: int,
+) -> ImportJobExecutionResult:
+    prove_import_create_identifiers_absent(adapter, plan)
+    submission = adapter.submit_json_import(document)
+    job_id = getattr(submission, "job_id", "") or ""
+    if not job_id:
+        return ImportJobExecutionResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            submitted=False,
+            job_id=None,
+            job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error="import job outcome=uncertain",
+        )
+    poll_job = getattr(adapter, "poll_job", None)
+    if poll_job is None:
+        return ImportJobExecutionResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            submitted=True,
+            job_id=job_id,
+            job=None,
+            success=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error="import_v2 requires job polling",
+        )
+    view = poll_job(job_id)
+    from governance.integrations.collibra.jobs import is_terminal_success
+
+    if is_terminal_success(view):
+        return ImportJobExecutionResult(
+            plan=plan,
+            document=document,
+            dry_run=False,
+            submitted=True,
+            job_id=job_id,
+            job=view,
+            success=True,
+            applied_count=len(document.commands),
+            unchanged_count=unchanged_count,
+        )
+    outcome = view.normalized_outcome or view.normalized_state
+    return ImportJobExecutionResult(
+        plan=plan,
+        document=document,
+        dry_run=False,
+        submitted=True,
+        job_id=job_id,
+        job=view,
+        success=False,
+        applied_count=0,
+        unchanged_count=unchanged_count,
+        import_error_summary=_best_effort_import_error_summary(adapter, job_id),
+        error=f"import job outcome={outcome}",
+    )
+
+
 def _add_relation(
     command: dict[str, Any],
     *,
@@ -480,8 +587,6 @@ def execute_collibra_plan(
     synchronization_id: str | None = None,
 ) -> Any:
     """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
-    from governance.integrations.collibra.jobs import is_terminal_success
-    from governance.integrations.collibra.models import SyncResult
     from governance.integrations.collibra.sync import execute_sync_plan
     from governance.integrations.collibra.synchronization import execute_sync_v2
 
@@ -512,51 +617,20 @@ def execute_collibra_plan(
             unchanged_count=unchanged_count,
         )
     if not document.commands:
-        return ImportExecutionResult(
+        return ImportJobExecutionResult(
             plan=plan,
             document=document,
             dry_run=False,
             submitted=False,
-            submission=None,
-            unchanged_count=unchanged_count,
-        )
-    _prove_create_identifiers_absent(adapter, plan)
-    submission = adapter.submit_json_import(document)
-    job_id = getattr(submission, "job_id", "") or ""
-    if not job_id:
-        return SyncResult(
-            success=False,
-            dry_run=False,
+            job_id=None,
+            job=None,
+            success=True,
             applied_count=0,
             unchanged_count=unchanged_count,
-            error="import job outcome=uncertain",
-            plan=plan,
         )
-    poll_job = getattr(adapter, "poll_job", None)
-    if poll_job is None:
-        return SyncResult(
-            success=False,
-            dry_run=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error="import_v2 requires job polling",
-            plan=plan,
-        )
-    view = poll_job(job_id)
-    if not is_terminal_success(view):
-        outcome = view.normalized_outcome or view.normalized_state
-        return SyncResult(
-            success=False,
-            dry_run=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error=f"import job outcome={outcome}",
-            plan=plan,
-        )
-    return SyncResult(
-        success=True,
-        dry_run=False,
-        applied_count=len(document.commands),
+    return _execute_import_job_lifecycle(
+        adapter,
+        plan,
+        document,
         unchanged_count=unchanged_count,
-        plan=plan,
     )

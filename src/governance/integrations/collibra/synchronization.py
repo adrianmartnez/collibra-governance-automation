@@ -13,10 +13,15 @@ from uuid import UUID, uuid5
 from governance.config import Settings
 from governance.integrations.collibra.adapters import CollibraAdapterError
 from governance.integrations.collibra.endpoint import normalize_base_url
-from governance.integrations.collibra.import_api import compile_import_document
-from governance.integrations.collibra.jobs import is_terminal_success
+from governance.integrations.collibra.import_api import (
+    ImportDocument,
+    _best_effort_import_error_summary,
+    compile_import_document,
+    prove_import_create_identifiers_absent,
+)
+from governance.integrations.collibra.jobs import JobView, is_terminal_success
 from governance.integrations.collibra.mapping import CollibraMappingConfig
-from governance.integrations.collibra.models import SyncPlan, SyncResult
+from governance.integrations.collibra.models import SyncPlan
 
 GOV_SYNC_NAMESPACE = UUID("a4f8c2d1-9e3b-4c7a-8f16-2d5e9b1a7c04")
 FINALIZATION_STRATEGY_IGNORE = "IGNORE"
@@ -32,6 +37,45 @@ class SyncExecutionReport:
     batch_outcomes: tuple[str, ...]
     finalization_job_id: str | None
     finalization_outcome: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class SyncLifecycleResult:
+    """sync_v2 batch submit, poll, IGNORE finalize, and finalization poll."""
+
+    plan: SyncPlan
+    document: ImportDocument
+    dry_run: bool
+    synchronization_id: str
+    batch_job_ids: tuple[str, ...]
+    batch_jobs: tuple[JobView, ...]
+    finalization_submitted: bool
+    finalization_job_id: str | None
+    finalization_job: JobView | None
+    success: bool
+    applied_count: int
+    unchanged_count: int
+    import_error_summary: dict[str, int] | None = None
+    error: str | None = None
+
+    @property
+    def report(self) -> SyncExecutionReport:
+        return SyncExecutionReport(
+            synchronization_id=self.synchronization_id,
+            batch_job_ids=self.batch_job_ids,
+            batch_outcomes=tuple(
+                job.normalized_outcome or job.normalized_state for job in self.batch_jobs
+            ),
+            finalization_job_id=self.finalization_job_id,
+            finalization_outcome=(
+                None
+                if self.finalization_job is None
+                else (
+                    self.finalization_job.normalized_outcome
+                    or self.finalization_job.normalized_state
+                )
+            ),
+        )
 
 
 def derive_synchronization_id(*, provider: str, source_name: str, endpoint: str) -> str:
@@ -89,6 +133,35 @@ def require_ignore_strategy(strategy: str) -> str:
     return FINALIZATION_STRATEGY_IGNORE
 
 
+def _batch_failure(
+    *,
+    plan: SyncPlan,
+    document: ImportDocument,
+    sync_id: str,
+    unchanged_count: int,
+    batch_job_id: str,
+    batch_view: JobView,
+    adapter: Any,
+) -> SyncLifecycleResult:
+    outcome = batch_view.normalized_outcome or batch_view.normalized_state
+    return SyncLifecycleResult(
+        plan=plan,
+        document=document,
+        dry_run=False,
+        synchronization_id=sync_id,
+        batch_job_ids=(batch_job_id,),
+        batch_jobs=(batch_view,),
+        finalization_submitted=False,
+        finalization_job_id=None,
+        finalization_job=None,
+        success=False,
+        applied_count=0,
+        unchanged_count=unchanged_count,
+        import_error_summary=_best_effort_import_error_summary(adapter, batch_job_id),
+        error=f"sync batch job outcome={outcome}",
+    )
+
+
 def execute_sync_v2(
     adapter: Any,
     plan: SyncPlan,
@@ -96,90 +169,141 @@ def execute_sync_v2(
     *,
     apply: bool,
     synchronization_id: str,
-) -> SyncResult:
+) -> SyncLifecycleResult:
     """Submit one sync batch, poll it, then IGNORE-finalize and poll that job."""
     sync_id = parse_synchronization_id(synchronization_id)
     document = compile_import_document(plan, mapping_config)
     unchanged_count = len(plan.unchanged)
     if not apply:
-        return SyncResult(
-            success=True,
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
             dry_run=True,
+            synchronization_id=sync_id,
+            batch_job_ids=(),
+            batch_jobs=(),
+            finalization_submitted=False,
+            finalization_job_id=None,
+            finalization_job=None,
+            success=True,
             applied_count=0,
             unchanged_count=unchanged_count,
-            plan=plan,
         )
     if not document.commands:
-        return SyncResult(
-            success=True,
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
             dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(),
+            batch_jobs=(),
+            finalization_submitted=False,
+            finalization_job_id=None,
+            finalization_job=None,
+            success=True,
             applied_count=0,
             unchanged_count=unchanged_count,
-            plan=plan,
         )
 
     submit_batch = getattr(adapter, "submit_sync_batch", None)
     poll_job = getattr(adapter, "poll_job", None)
     submit_finalize = getattr(adapter, "submit_sync_finalize", None)
     if submit_batch is None or poll_job is None or submit_finalize is None:
-        return SyncResult(
-            success=False,
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
             dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(),
+            batch_jobs=(),
+            finalization_submitted=False,
+            finalization_job_id=None,
+            finalization_job=None,
+            success=False,
             applied_count=0,
             unchanged_count=unchanged_count,
             error="sync_v2 requires a live Collibra adapter",
-            plan=plan,
         )
 
+    prove_import_create_identifiers_absent(adapter, plan)
     batch_submission = submit_batch(sync_id, document)
     batch_job_id = getattr(batch_submission, "job_id", "") or ""
     if not batch_job_id:
-        return SyncResult(
-            success=False,
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
             dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(),
+            batch_jobs=(),
+            finalization_submitted=False,
+            finalization_job_id=None,
+            finalization_job=None,
+            success=False,
             applied_count=0,
             unchanged_count=unchanged_count,
             error="sync batch job outcome=uncertain",
-            plan=plan,
         )
     batch_view = poll_job(batch_job_id)
     if not is_terminal_success(batch_view):
-        outcome = batch_view.normalized_outcome or batch_view.normalized_state
-        return SyncResult(
-            success=False,
-            dry_run=False,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            error=f"sync batch job outcome={outcome}",
+        return _batch_failure(
             plan=plan,
+            document=document,
+            sync_id=sync_id,
+            unchanged_count=unchanged_count,
+            batch_job_id=batch_job_id,
+            batch_view=batch_view,
+            adapter=adapter,
         )
 
     finalize_submission = submit_finalize(sync_id, strategy=FINALIZATION_STRATEGY_IGNORE)
     finalize_job_id = getattr(finalize_submission, "job_id", "") or ""
     if not finalize_job_id:
-        return SyncResult(
-            success=False,
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
             dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(batch_job_id,),
+            batch_jobs=(batch_view,),
+            finalization_submitted=False,
+            finalization_job_id=None,
+            finalization_job=None,
+            success=False,
             applied_count=0,
             unchanged_count=unchanged_count,
             error="sync finalization job outcome=uncertain",
-            plan=plan,
         )
     finalize_view = poll_job(finalize_job_id)
     if not is_terminal_success(finalize_view):
         outcome = finalize_view.normalized_outcome or finalize_view.normalized_state
-        return SyncResult(
-            success=False,
+        return SyncLifecycleResult(
+            plan=plan,
+            document=document,
             dry_run=False,
+            synchronization_id=sync_id,
+            batch_job_ids=(batch_job_id,),
+            batch_jobs=(batch_view,),
+            finalization_submitted=True,
+            finalization_job_id=finalize_job_id,
+            finalization_job=finalize_view,
+            success=False,
             applied_count=0,
             unchanged_count=unchanged_count,
+            import_error_summary=_best_effort_import_error_summary(adapter, batch_job_id),
             error=f"sync finalization job outcome={outcome}",
-            plan=plan,
         )
-    return SyncResult(
-        success=True,
+    return SyncLifecycleResult(
+        plan=plan,
+        document=document,
         dry_run=False,
+        synchronization_id=sync_id,
+        batch_job_ids=(batch_job_id,),
+        batch_jobs=(batch_view,),
+        finalization_submitted=True,
+        finalization_job_id=finalize_job_id,
+        finalization_job=finalize_view,
+        success=True,
         applied_count=len(document.commands),
         unchanged_count=unchanged_count,
-        plan=plan,
     )

@@ -14,13 +14,16 @@ from governance.integrations.collibra import (
     CollibraAdapterError,
     CollibraAssetSpec,
     CollibraAttributeSpec,
+    ImportCollisionError,
     LiveCollibraAdapter,
     SyncAction,
     SyncActionType,
+    SyncLifecycleResult,
     SyncObjectKind,
     SyncPlan,
     execute_collibra_plan,
     mock_mapping_config,
+    prove_import_create_identifiers_absent,
 )
 from governance.integrations.collibra.import_api import IMPORT_MULTIPART_FIELDS
 from governance.integrations.collibra.jobs import (
@@ -39,6 +42,17 @@ from governance.plans.target_context import (
 
 UUID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 UUID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+def _empty_assets_response() -> httpx.Response:
+    return httpx.Response(200, json={"results": [], "total": 0})
+
+
+def _maybe_empty_assets(request: httpx.Request) -> httpx.Response | None:
+    path = urlparse(str(request.url)).path
+    if request.method == "GET" and path.endswith("/assets"):
+        return _empty_assets_response()
+    return None
 
 
 class FakeClock:
@@ -193,6 +207,9 @@ def test_sync_v2_success_polls_finalize_job() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
         path = urlparse(str(request.url)).path
         body = request.content.decode("utf-8", errors="replace")
         assert "REMOVE_RESOURCES" not in body
@@ -225,9 +242,14 @@ def test_sync_v2_success_polls_finalize_job() -> None:
         synchronization_id=UUID_A,
     )
     assert result.success is True
+    assert result.finalization_job_id == "fin-1"
+    assert result.batch_job_ids == ("batch-1",)
     methods_paths = [(item.method, urlparse(str(item.url)).path) for item in requests]
-    assert methods_paths[0][0] == "POST"
-    assert methods_paths[0][1].endswith(f"/import/synchronize/{UUID_A}/batch/json-job")
+    assert ("GET", "/rest/2.0/assets") in methods_paths
+    assert any(
+        method == "POST" and path.endswith(f"/import/synchronize/{UUID_A}/batch/json-job")
+        for method, path in methods_paths
+    )
     assert ("GET", "/rest/2.0/jobs/batch-1") in methods_paths
     assert any(path.endswith("/finalize/job") for _method, path in methods_paths)
     assert ("GET", "/rest/2.0/jobs/fin-1") in methods_paths
@@ -238,6 +260,9 @@ def test_batch_failure_never_sends_finalize() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
         path = urlparse(str(request.url)).path
         if request.method == "POST" and path.endswith("/batch/json-job"):
             return httpx.Response(200, json={"id": "batch-1"})
@@ -275,6 +300,9 @@ def test_finalize_job_non_success_is_not_overall_success(
     finalize_payload: dict[str, str], needle: str
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
         path = urlparse(str(request.url)).path
         if path.endswith("/batch/json-job"):
             return httpx.Response(200, json={"id": "batch-1"})
@@ -305,6 +333,9 @@ def test_malformed_finalize_submission_is_uncertain_without_retry() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal finalize_posts
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
         path = urlparse(str(request.url)).path
         if path.endswith("/batch/json-job"):
             return httpx.Response(200, json={"id": "batch-1"})
@@ -332,6 +363,9 @@ def test_malformed_finalize_submission_is_uncertain_without_retry() -> None:
 
 def test_finalize_timeout_is_not_success() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
         path = urlparse(str(request.url)).path
         if path.endswith("/batch/json-job"):
             return httpx.Response(200, json={"id": "batch-1"})
@@ -374,6 +408,9 @@ def test_import_v2_does_not_call_synchronize_or_finalize() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
         path = urlparse(str(request.url)).path
         if "/import/synchronize" in path:
             raise AssertionError("import_v2 must not call synchronize")
@@ -495,3 +532,371 @@ def test_live_finalize_rejects_remove_before_http() -> None:
     with pytest.raises(CollibraAdapterError, match="forbidden"):
         adapter.submit_sync_finalize(UUID_A, strategy="REMOVE_RESOURCES")
     assert requests == []
+
+
+def _update_only_plan() -> SyncPlan:
+    config = mock_mapping_config()
+    asset = CollibraAssetSpec(
+        local_id="tbl:demo",
+        name="demo",
+        display_name="demo",
+        asset_type_ref=config.asset_type_refs["table"],
+        domain_ref=config.domain_ref,
+        attributes=(CollibraAttributeSpec(config.attribute_type_refs["local_id"], "tbl:demo"),),
+    )
+    return SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.UPDATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id=asset.local_id,
+                remote_id="remote-1",
+                reason="attr",
+                desired_asset=asset,
+                changed_fields=("managed_attributes",),
+            ),
+        )
+    )
+
+
+def test_sync_v2_collision_empty_occupancy_allows_batch() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200, json={"id": "batch-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        if path.endswith("/finalize/job"):
+            return httpx.Response(200, json={"id": "fin-1"})
+        if path.endswith("/jobs/fin-1"):
+            return httpx.Response(
+                200, json={"id": "fin-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert isinstance(result, SyncLifecycleResult)
+    assert result.success is True
+    assert any(
+        request.method == "GET" and urlparse(str(request.url)).path.endswith("/assets")
+        for request in requests
+    )
+    assert any(
+        request.method == "POST" and "/batch/json-job" in urlparse(str(request.url)).path
+        for request in requests
+    )
+
+
+def test_sync_v2_collision_unmanaged_occupant_zero_batch() -> None:
+    requests: list[httpx.Request] = []
+    config = mock_mapping_config()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": "unmanaged-1",
+                            "name": "demo",
+                            "domain": {"id": config.domain_ref},
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+        if "/batch/" in path or path.endswith("/finalize/job"):
+            raise AssertionError("batch/finalize must not run on collision")
+        return httpx.Response(500)
+
+    with pytest.raises(ImportCollisionError, match="collides"):
+        execute_collibra_plan(
+            _sync_adapter(handler),
+            _create_plan(),
+            config,
+            apply=True,
+            execution_mode="sync_v2",
+            synchronization_id=UUID_A,
+        )
+    assert not any("/batch/" in urlparse(str(item.url)).path for item in requests)
+    assert not any(urlparse(str(item.url)).path.endswith("/finalize/job") for item in requests)
+
+
+def test_sync_v2_collision_lookup_failure_zero_batch() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(503, json={"error": "unavailable"})
+        if "/batch/" in path or path.endswith("/finalize/job"):
+            raise AssertionError("batch/finalize must not run on lookup failure")
+        return httpx.Response(500)
+
+    with pytest.raises(ImportCollisionError, match="collision check failed"):
+        execute_collibra_plan(
+            _sync_adapter(handler),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=True,
+            execution_mode="sync_v2",
+            synchronization_id=UUID_A,
+        )
+    assert not any("/batch/" in urlparse(str(item.url)).path for item in requests)
+
+
+def test_sync_v2_collision_uses_exact_whitespace_identifier() -> None:
+    config = mock_mapping_config()
+    spaced = " demo "
+    asset = CollibraAssetSpec(
+        local_id="tbl:spaced",
+        name=spaced,
+        display_name=spaced,
+        asset_type_ref=config.asset_type_refs["table"],
+        domain_ref=config.domain_ref,
+        attributes=(CollibraAttributeSpec(config.attribute_type_refs["local_id"], "tbl:spaced"),),
+    )
+    plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.CREATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id=asset.local_id,
+                reason="create",
+                desired_asset=asset,
+            ),
+        )
+    )
+    seen_names: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            seen_names.append(str(request.url.params.get("name") or ""))
+            return _empty_assets_response()
+        return httpx.Response(500)
+
+    prove_import_create_identifiers_absent(_sync_adapter(handler), plan)
+    assert seen_names == [spaced]
+
+
+def test_sync_v2_update_only_skips_collision_get() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            raise AssertionError("UPDATE-only sync_v2 must not collision-check")
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200, json={"id": "batch-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        if path.endswith("/finalize/job"):
+            return httpx.Response(200, json={"id": "fin-1"})
+        if path.endswith("/jobs/fin-1"):
+            return httpx.Response(
+                200, json={"id": "fin-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _update_only_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.success is True
+    assert not any(
+        request.method == "GET" and urlparse(str(request.url)).path.endswith("/assets")
+        for request in requests
+    )
+
+
+def test_sync_v2_batch_failure_preserves_batch_job_id() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200,
+                json={"id": "batch-1", "state": "COMPLETED", "result": "COMPLETED_WITH_ERROR"},
+            )
+        if path.endswith("/import/results/batch-1/errors"):
+            return httpx.Response(200, json={"results": [{"row": 1}, {"row": 2}], "total": 2})
+        if path.endswith("/finalize/job"):
+            raise AssertionError("finalize must not run")
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert isinstance(result, SyncLifecycleResult)
+    assert result.success is False
+    assert result.batch_job_ids == ("batch-1",)
+    assert result.finalization_job_id is None
+    assert result.import_error_summary == {"error_count": 2}
+    dumped = str(result)
+    assert "secret-token-value-xyz" not in dumped
+
+
+def test_sync_v2_finalize_failure_preserves_both_job_ids() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200, json={"id": "batch-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        if path.endswith("/finalize/job"):
+            return httpx.Response(200, json={"id": "fin-1"})
+        if path.endswith("/jobs/fin-1"):
+            return httpx.Response(
+                200, json={"id": "fin-1", "state": "COMPLETED", "result": "FAILURE"}
+            )
+        return httpx.Response(500)
+
+    result = execute_collibra_plan(
+        _sync_adapter(handler),
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.success is False
+    assert result.batch_job_ids == ("batch-1",)
+    assert result.finalization_job_id == "fin-1"
+    assert result.finalization_submitted is True
+
+
+def test_finalize_request_is_multipart_with_ignore() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST" and request.url.path.endswith("/finalize/job"):
+            content_type = request.headers.get("content-type", "")
+            assert content_type.startswith("multipart/form-data")
+            assert "boundary=" in content_type
+            body = request.content.decode("utf-8", errors="replace")
+            assert "finalizationStrategy" in body
+            assert "IGNORE" in body
+            assert "REMOVE_RESOURCES" not in body
+            assert "CHANGE_STATUS" not in body
+            assert "missingAssetStatusId" not in body
+            return httpx.Response(200, json={"id": "fin-1"})
+        return httpx.Response(500)
+
+    adapter = _sync_adapter(handler)
+    adapter.submit_sync_finalize(UUID_A, strategy="IGNORE")
+    assert len(requests) == 1
+
+
+def test_custom_job_poll_settings_on_adapter() -> None:
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(
+            collibra_job_poll_interval_seconds=2.5,
+            collibra_job_poll_timeout_seconds=12.0,
+        ),
+        mock_mapping_config(),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(500)),
+        monotonic_clock=FakeClock(),
+        sleeper=lambda _seconds: None,
+    )
+    assert adapter._job_poll_interval_seconds == 2.5
+    assert adapter._job_poll_timeout_seconds == 12.0
+
+
+def test_custom_poll_timeout_blocks_finalize() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        empty = _maybe_empty_assets(request)
+        if empty is not None:
+            return empty
+        path = urlparse(str(request.url)).path
+        if path.endswith("/batch/json-job"):
+            return httpx.Response(200, json={"id": "batch-1"})
+        if path.endswith("/jobs/batch-1"):
+            return httpx.Response(
+                200, json={"id": "batch-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
+        if path.endswith("/finalize/job"):
+            return httpx.Response(200, json={"id": "fin-1"})
+        if path.endswith("/jobs/fin-1"):
+            return httpx.Response(200, json={"id": "fin-1", "state": "RUNNING"})
+        return httpx.Response(500)
+
+    clock = FakeClock()
+
+    def jump_sleep(seconds: float) -> None:
+        clock.now += max(seconds, 5.0)
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(
+            collibra_job_poll_interval_seconds=1.0,
+            collibra_job_poll_timeout_seconds=3.0,
+        ),
+        mock_mapping_config(),
+        transport=httpx.MockTransport(handler),
+        monotonic_clock=clock,
+        sleeper=jump_sleep,
+    )
+    result = execute_collibra_plan(
+        adapter,
+        _create_plan(),
+        mock_mapping_config(),
+        apply=True,
+        execution_mode="sync_v2",
+        synchronization_id=UUID_A,
+    )
+    assert result.success is False
+    assert "timeout" in (result.error or "")
+    assert result.finalization_job_id == "fin-1"
+
+
+def test_changing_poll_policy_does_not_change_target_context_identity() -> None:
+    base = build_target_context_projection(_settings(collibra_synchronization_id=UUID_A))
+    slower = build_target_context_projection(
+        _settings(
+            collibra_synchronization_id=UUID_A,
+            collibra_job_poll_interval_seconds=0.5,
+            collibra_job_poll_timeout_seconds=600.0,
+        )
+    )
+    assert target_context_identity(base) == target_context_identity(slower)

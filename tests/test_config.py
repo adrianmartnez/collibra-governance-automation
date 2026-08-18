@@ -220,3 +220,45 @@ def test_rejects_blank_inventory_output_path() -> None:
             postgres_source_name="source",
             inventory_output_path="",
         )
+
+
+def test_job_poll_settings_defaults() -> None:
+    settings = load_settings(dotenv_path=None, environ={})
+    assert settings.collibra_job_poll_interval_seconds == 1.0
+    assert settings.collibra_job_poll_timeout_seconds == 300.0
+
+
+def test_job_poll_settings_env_override() -> None:
+    settings = load_settings(
+        dotenv_path=None,
+        environ={
+            "COLLIBRA_JOB_POLL_INTERVAL_SECONDS": "2.0",
+            "COLLIBRA_JOB_POLL_TIMEOUT_SECONDS": "60",
+        },
+    )
+    assert settings.collibra_job_poll_interval_seconds == 2.0
+    assert settings.collibra_job_poll_timeout_seconds == 60.0
+
+
+@pytest.mark.parametrize(
+    ("interval", "timeout", "match"),
+    [
+        (0.0, 300.0, "collibra_job_poll_interval_seconds"),
+        (-1.0, 300.0, "collibra_job_poll_interval_seconds"),
+        (1.0, 0.0, "collibra_job_poll_timeout_seconds"),
+        (5.0, 2.0, "collibra_job_poll_timeout_seconds must be >="),
+    ],
+)
+def test_rejects_invalid_job_poll_settings(interval: float, timeout: float, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        Settings(
+            postgres_host="localhost",
+            postgres_port=5432,
+            postgres_db="db",
+            postgres_user="user",
+            postgres_password="pass",
+            postgres_source_name="source",
+            inventory_output_path="artifacts/out.json",
+            collibra_job_poll_interval_seconds=interval,
+            collibra_job_poll_timeout_seconds=timeout,
+        )

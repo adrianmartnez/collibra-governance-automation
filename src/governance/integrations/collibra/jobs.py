@@ -41,6 +41,12 @@ DEFAULT_POLL_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass(frozen=True, slots=True)
+class JobPollingPolicy:
+    interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS
+    timeout_seconds: float = DEFAULT_POLL_TIMEOUT_SECONDS
+
+
+@dataclass(frozen=True, slots=True)
 class JobView:
     """Inspectable job snapshot. Never includes response bodies or secrets."""
 

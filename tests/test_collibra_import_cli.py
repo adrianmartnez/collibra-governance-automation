@@ -294,10 +294,12 @@ def test_apply_import_v2_submit_preserves_job_handle(
         request.method == "GET" and "/jobs/job-123" in urlparse(str(request.url)).path
         for request in requests
     )
-    assert payload["result_schema"] == "governance-apply-result"
+    assert payload["result_schema"] == "governance-import-job-result"
+    assert payload["job_id"] == "job-123"
     assert payload["success"] is True
     assert payload["dry_run"] is False
     assert payload["applied_count"] > 0
+    assert payload["terminal"] is True
 
 
 def test_sync_import_v2_dry_run_and_submit(
@@ -358,10 +360,12 @@ def test_sync_import_v2_dry_run_and_submit(
     )
     applied = json.loads(capsys.readouterr().out)
     assert _post_paths(requests) == ["/rest/2.0/import/json-job"]
+    assert applied["result_schema"] == "governance-import-job-result"
     assert applied["mode"] == "live"
     assert applied["success"] is True
     assert applied["dry_run"] is False
-    assert applied["applied"] > 0
+    assert applied["applied_count"] > 0
+    assert applied["job_id"] == "job-123"
 
 
 def test_import_apply_human_does_not_claim_job_success(
@@ -389,9 +393,8 @@ def test_import_apply_human_does_not_claim_job_success(
     assert "stale=false" in out
     assert "dry_run=false" in out
     assert "success=true" in out
-    assert "applied_count=" in out
-    applied_line = next(line for line in out.splitlines() if line.startswith("applied_count="))
-    assert int(applied_line.split("=", 1)[1]) > 0
+    assert "job_id=job-123" in out
+    assert "terminal=true" in out
 
 
 def _assert_structured_import_failure(payload: object, captured: str) -> None:
