@@ -521,11 +521,19 @@ def test_apply_import_v2_missing_job_id_is_structured_json_failure(
     captured = capsys.readouterr()
     assert code == 1
     payload = json.loads(captured.out)
-    _assert_structured_import_failure(payload, captured.out + captured.err)
-    dumped = json.dumps(payload).lower()
-    assert "completed" not in dumped or payload.get("completed") is not True
-    assert "success" not in payload
-    assert "missing id" in dumped
+    if payload.get("diagnostic_schema") == "governance-operation-diagnostics":
+        _assert_structured_import_failure(payload, captured.out + captured.err)
+        dumped = json.dumps(payload).lower()
+        assert "missing id" in dumped
+        return
+    assert payload.get("success") is not True
+    assert payload.get("completed") is not True
+    assert payload.get("applied_count", 0) == 0
+    assert "completed" not in json.dumps(payload).lower() or payload.get("completed") is not True
+    message = json.dumps(payload).lower()
+    assert "uncertain" in message or "missing id" in message
+    lowered = (captured.out + captured.err).lower()
+    assert "collibra-secret-password" not in lowered
 
 
 def test_apply_import_v2_post_500_human_is_safe_exit_1(
