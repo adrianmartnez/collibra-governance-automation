@@ -1,6 +1,6 @@
 # collibra-governance-automation
 
-[![CI](https://github.com/fgnfmackk/collibra-governance-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/fgnfmackk/collibra-governance-automation/actions/workflows/ci.yml)
+[![CI](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml)
 
 Deterministic Governance-as-Code and governance change intelligence between metadata sources, open standards, policies, lineage, pull-request review, and governance platforms.
 
@@ -18,7 +18,7 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
-**Package version:** `1.2.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases. Package SemVer is distinct from versioned machine contracts such as `governance-action-result` v1 and `governance-impact-result` v1.
+**Package version:** `1.3.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases. Package SemVer is distinct from versioned machine contracts such as `governance-action-result` v1 and `governance-impact-result` v1.
 
 ## What is implemented
 
@@ -37,7 +37,12 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 | `governance impact` CLI + impact changes/result v1 artifacts | Contract-tested |
 | GitHub Action `operation: impact` + PR/step-summary reports | Implemented (read-only) |
 | Collibra mapping + mock adapter | Implemented (local/offline) |
-| Live Collibra Core REST API v2 adapter | Contract-tested |
+| Live Collibra Core REST API v2 adapter | Contract-tested (localhost HTTP server; no commercial tenant) |
+| OAuth client credentials (native Collibra + external IdP) | Implemented |
+| Import API v2 / sync_v2 job lifecycle | Implemented |
+| Deterministic production batching | Implemented (conservative ceilings) |
+| `governance preflight` (read-only) | Implemented |
+| Structured operational telemetry | Opt-in JSONL; off by default |
 | Safe plan-driven reconciliation (dry-run by default) | Implemented |
 | Commercial Collibra tenant validation | Not claimed |
 
@@ -77,7 +82,7 @@ No Collibra tenant is required.
 ### Bash / Linux / macOS / WSL / Git Bash
 
 ```bash
-git clone https://github.com/fgnfmackk/collibra-governance-automation.git
+git clone https://github.com/adrianmartnez/collibra-governance-automation.git
 cd collibra-governance-automation
 python -m venv .venv
 source .venv/bin/activate
@@ -95,7 +100,7 @@ docker compose down -v
 ### PowerShell / Windows
 
 ```powershell
-git clone https://github.com/fgnfmackk/collibra-governance-automation.git
+git clone https://github.com/adrianmartnez/collibra-governance-automation.git
 cd collibra-governance-automation
 python -m venv .venv
 .venv\Scripts\Activate.ps1
@@ -150,12 +155,13 @@ governance check --config PATH [--profile NAME] [--format human|json]
 governance plan --config PATH --output FILE.gplan [--profile NAME] [--format human|json]
 governance plan inspect FILE.gplan [--format human|json]
 governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json] [--apply] [--confirm-live]
+governance preflight --config PATH [--profile NAME] [--format human|json]
 governance impact --namespace NAME --changes FILE --output FILE [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--config PATH] [--profile NAME] [--format human|json]
 governance --help
 governance --version
 ```
 
-Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, and `apply` require explicit `--config` (except `plan inspect`).
+Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, `apply`, and `preflight` require explicit `--config` (except `plan inspect`).
 
 `governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
 
@@ -210,7 +216,7 @@ Additional exit code for `impact` only:
 ### Representative local output (mock demo)
 
 ```text
-governance 1.2.0
+governance 1.3.0
 ```
 
 ```text
@@ -260,17 +266,20 @@ success=true
 
 ### Live
 
-- Uses existing Settings/env auth (`COLLIBRA_BASE_URL` plus Basic or Bearer)
+- Uses existing Settings/env auth: exactly one of Basic, caller-supplied Bearer, or OAuth client credentials
+- OAuth native Collibra posts to `{base}/rest/oauth/v2/token` (no scope). External IdP uses `COLLIBRA_TOKEN_URL` with `client_secret_post` (default) or `client_secret_basic`
+- OAuth token endpoints must be HTTPS or HTTP loopback; HTTP non-loopback is rejected before any token POST
 - Requires `--mapping-config PATH` with tenant catalog refs only (no credentials in that file)
-- `diff` and dry-run `sync` may perform GET/read calls against remote managed state
+- Execution paths: `core_rest` (default), `import_v2` (json-job + poll), `sync_v2` (batched json-job, then IGNORE finalize + poll)
+- `diff` and dry-run `sync` may authenticate and perform read-only tenant calls against remote managed state
 - Remote mutations require both `--apply` and `--confirm-live`
-- Contract-tested; commercial tenant validation is not claimed
+- Localhost contract HTTP tests are not a commercial-tenant stand-in; commercial tenant validation is not claimed
 
 Example mapping shape: [`sample/collibra-mapping.example.json`](sample/collibra-mapping.example.json). Placeholders such as `<tenant-domain-id>` are intentionally non-functional and are rejected by the live CLI until replaced.
 
 ## Live usage
 
-Configure auth in the environment (not on the command line):
+Configure auth in the environment (not on the command line). Use exactly one method:
 
 ```text
 COLLIBRA_MODE=live
@@ -278,6 +287,26 @@ COLLIBRA_BASE_URL=https://your-collibra-host.example
 COLLIBRA_USERNAME=...
 COLLIBRA_PASSWORD=...
 # or COLLIBRA_BEARER_TOKEN=...
+# or COLLIBRA_CLIENT_ID=... and COLLIBRA_CLIENT_SECRET=...
+# Optional IdP: COLLIBRA_TOKEN_URL=https://idp.example/oauth/token
+```
+
+Optional execution and batching:
+
+```text
+COLLIBRA_EXECUTION_MODE=core_rest
+# COLLIBRA_EXECUTION_MODE=import_v2
+# COLLIBRA_EXECUTION_MODE=sync_v2
+```
+
+`import_v2` submits `/import/json-job` with `continueOnError=false`, `relationsAction=ADD_OR_IGNORE`, and `attributesAction=REPLACE` only for mapping-managed attribute types. `sync_v2` submits `/import/synchronize/{id}/batch/json-job`, then IGNORE-only `/finalize/job`, and is not success until the **finalization job** is `COMPLETED`+`SUCCESS`. Combined `/import/synchronize/{id}/json-job` is forbidden.
+
+Bounded retries apply to GET 429/5xx and connect failures. Writes retry connect-before-send only. Retry-After supports delta-seconds and HTTP-date.
+
+Read-only tenant checks (zero governance mutations; does not certify write capability). HTTP non-loopback is `INCOMPATIBLE` before credentials:
+
+```bash
+governance preflight --config governance.yaml --format json
 ```
 
 Use a real mapping file derived from the sample placeholders:
@@ -298,7 +327,17 @@ governance sync \
   --confirm-live
 ```
 
-Dry-run first. Live dry-run may read remote state; it does not POST/PATCH/DELETE.
+Dry-run first. Live dry-run may perform authentication and read-only tenant calls. When OAuth client credentials are configured, authentication may include the OAuth token POST. Dry-run performs zero Collibra governance mutations: it does not submit Core REST mutations, Import jobs, synchronization batches, or finalization jobs.
+
+### Operational telemetry
+
+Telemetry is off by default (`NullSink`). Opt in with `COLLIBRA_TELEMETRY=jsonl` for JSONL on stderr, or set `COLLIBRA_TELEMETRY_PATH` to write a file. Events never mix into CLI stdout JSON.
+
+One correlation ID covers a logical execution: auth, HTTP attempts/retries, pre-execution remote reads, import/sync batches, job polls, and the terminal outcome. `duration_ms` is measured from the root execution scope. Exactly one `execution_outcome` is emitted per logical execution.
+
+Batch events may include batch index/count, bounded workload counts, and `submission_state`. Job events may include `job_id` and normalized state/result. `writes_performed` is included only when known with certainty: `0` on dry-run, `applied_count` on confirmed success, omitted when failed or uncertain.
+
+Endpoint paths are query-free templates. The allowlist excludes Authorization, bearer/access tokens, client secrets, passwords, credential-bearing connection strings, raw request/response bodies, unrestricted query strings, and business-row data. Sink failures never change governance decisions. Correlation, duration, and runtime telemetry never enter plan, snapshot, graph, hash, impact, or apply-result identities.
 
 ## PostgreSQL demo
 
@@ -349,7 +388,7 @@ dry_run = execute_sync_plan(adapter, plan, apply=False)
 
 ## GitHub Action (Governance as Code)
 
-Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `1.2.0`.
+Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `1.3.0`.
 
 The Action installs this package into a fresh Action-owned virtualenv under `RUNNER_TEMP`, then runs the governance CLI with isolated Python (`python -I -m ...`). Consumer site-packages are not modified. Relative config paths resolve against `GITHUB_WORKSPACE` (the consumer must checkout their repository before `uses:`).
 
@@ -391,7 +430,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+      - uses: adrianmartnez/collibra-governance-automation@<commit-sha>
         with:
           config: governance.yaml
           operation: validate
@@ -408,7 +447,7 @@ Do not use `pull_request_target` with an untrusted PR checkout and secrets.
 
 ```yaml
 - id: gac-impact
-  uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+  uses: adrianmartnez/collibra-governance-automation@<commit-sha>
   with:
     operation: impact
     impact-namespace: analytics
@@ -429,7 +468,7 @@ For live remote reads, inject provider env vars only after an explicit same-repo
 ```yaml
 - name: Plan (same repository only)
   if: github.event.pull_request.head.repo.full_name == github.repository
-  uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+  uses: adrianmartnez/collibra-governance-automation@<commit-sha>
   with:
     config: governance.yaml
     operation: plan
@@ -461,7 +500,7 @@ permissions:
   contents: read
   pull-requests: write
 # ...
-- uses: fgnfmackk/collibra-governance-automation@<commit-sha>
+- uses: adrianmartnez/collibra-governance-automation@<commit-sha>
   with:
     config: governance.yaml
     operation: plan
@@ -474,10 +513,10 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 ### F. Version pinning
 
 - Strongest: pin the Action to a full immutable commit SHA.
-- Release consumers may pin the immutable SemVer tag `v1.2.0` once that tag is published.
-- Prior release tag `v1.1.0` remains available historically.
+- Release consumers may pin the immutable SemVer tag `v1.3.0` once that tag is published.
+- Prior release tags `v1.2.0` and `v1.1.0` remain available historically.
 - Do not use mutable `@main`.
-- Package version `1.2.0` ships with Action contract v1 and impact result contracts v1; keep Action/package compatibility explicit across releases.
+- Package version `1.3.0` ships with Action contract v1 and impact result contracts v1; keep Action/package compatibility explicit across releases.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
 
 ## Repository structure
@@ -489,7 +528,7 @@ src/governance/
   scanner/                       PostgreSQL metadata discovery
   exporters/                     deterministic inventory JSON
   integrations/
-    collibra/                    mapping, adapters, sync planning
+    collibra/                    mapping, adapters, import, jobs, batching, preflight, telemetry
     odcs/                        Open Data Contract Standard ingestion + schema
     dbt/                         dbt manifest ingestion
     openlineage/                 OpenLineage event ingestion
@@ -501,7 +540,7 @@ src/governance/
   snapshots/                     governance snapshot artifacts
   identity/                      content-identity hashing
   cli.py                         argparse CLI orchestration
-tests/                           unit/integration + fixtures (incl. impact walkthrough inputs)
+tests/                           unit/integration + fixtures; localhost Collibra contract server
 sample/                          demo SQL, GaC example, Collibra mapping example
 .github/workflows/               CI quality gates
 ```
@@ -511,8 +550,14 @@ sample/                          demo SQL, GaC example, Collibra mapping example
 ```bash
 ruff check src tests
 ruff format --check src tests
-pytest -m "not integration and not collibra_integration and not cli_integration"
+pytest -m "not integration and not collibra_integration and not cli_integration and not collibra_contract"
 python -m build
+```
+
+Contract tests (loopback HTTP only; no commercial tenant):
+
+```bash
+pytest -m collibra_contract
 ```
 
 With the demo database running:
@@ -524,24 +569,24 @@ pytest -m cli_integration
 docker compose down -v
 ```
 
-CI defines seven `ubuntu-latest` jobs:
+CI defines eight `ubuntu-latest` jobs:
 
 - `lint`
 - `unit-tests`
+- `collibra-contract` (dedicated gate; loopback only)
 - `package-validation`
 - `postgres-integration`
 - `metadata-integration`
 - `collibra-integration`
 - `cli-integration` (includes official Action `uses: ./` PASS, BLOCKED, impact CLEAR/IMPACTED/ERROR smokes)
 
-No commercial Collibra tenant, self-hosted runners, or OS matrix is required.
+No commercial Collibra tenant, self-hosted runners, or OS matrix is required. The localhost contract server is not a commercial-tenant stand-in.
 
 ## Limitations
 
 - No commercial Collibra tenant validation
-- No production-scale Collibra provider hardening
+- Local contract-server coverage is not commercial-tenant validation
 - No provider SDK or authority/conflict resolution engine
-- No OAuth acquisition/refresh
 - No automatic deletes or destructive reconciliation
 - No automatic apply/remediation from impact analysis
 - No arbitrary tenant customization beyond configured refs

@@ -3,7 +3,7 @@ description: >
   Run read-only Governance-as-Code validation, policy checks, change planning,
   and impact analysis with deterministic Action outputs, Markdown summaries,
   and optional sticky PR comments.
-author: fgnfmackk
+author: adrianmartnez
 
 branding:
   icon: check-circle

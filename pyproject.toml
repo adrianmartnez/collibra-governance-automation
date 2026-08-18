@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "collibra-governance-automation"
-version = "1.2.0"
+version = "1.3.0"
 description = "Deterministic governance change intelligence and Governance-as-Code automation: open-standard contracts and lineage, impact analysis, and an explicit Collibra integration boundary."
 readme = "README.md"
 license = "MIT"

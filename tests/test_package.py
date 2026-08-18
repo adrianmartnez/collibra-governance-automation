@@ -12,16 +12,16 @@ from governance import __version__
 
 
 def test_package_import() -> None:
-    assert __version__ == "1.2.0"
-    assert governance.__version__ == "1.2.0"
+    assert __version__ == "1.3.0"
+    assert governance.__version__ == "1.3.0"
     assert governance.__name__ == "governance"
 
 
 def test_pyproject_version_matches_runtime() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
-    assert 'version = "1.2.0"' in text
-    assert metadata.version("collibra-governance-automation") == "1.2.0"
+    assert 'version = "1.3.0"' in text
+    assert metadata.version("collibra-governance-automation") == "1.3.0"
 
 
 def test_entry_point_module_help() -> None:
@@ -40,6 +40,7 @@ def test_entry_point_module_help() -> None:
     assert "check" in result.stdout
     assert "plan" in result.stdout
     assert "apply" in result.stdout
+    assert "preflight" in result.stdout
     assert "password=" not in result.stdout
 
 
