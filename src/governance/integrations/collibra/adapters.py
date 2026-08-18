@@ -38,6 +38,10 @@ class CollibraAdapterError(RuntimeError):
         super().__init__("; ".join(parts))
 
 
+class CollibraAuthError(CollibraAdapterError):
+    """Authentication-boundary failure that omits tokens and client secrets."""
+
+
 @runtime_checkable
 class CollibraAdapter(Protocol):
     """Application-facing Collibra transport boundary.

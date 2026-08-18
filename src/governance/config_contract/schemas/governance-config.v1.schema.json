@@ -187,6 +187,11 @@
         "username_env": { "$ref": "#/$defs/envName" },
         "password_env": { "$ref": "#/$defs/envName" },
         "bearer_token_env": { "$ref": "#/$defs/envName" },
+        "client_id_env": { "$ref": "#/$defs/envName" },
+        "client_secret_env": { "$ref": "#/$defs/envName" },
+        "token_url_env": { "$ref": "#/$defs/envName" },
+        "scope_env": { "$ref": "#/$defs/envName" },
+        "oauth_client_auth_env": { "$ref": "#/$defs/envName" },
         "timeout_seconds_env": { "$ref": "#/$defs/envName" }
       }
     }

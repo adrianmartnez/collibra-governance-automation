@@ -37,6 +37,11 @@ class Settings:
     collibra_username: str = ""
     collibra_password: str = ""
     collibra_bearer_token: str = ""
+    collibra_client_id: str = ""
+    collibra_client_secret: str = ""
+    collibra_token_url: str = ""
+    collibra_oauth_scope: str = ""
+    collibra_oauth_client_auth: str = ""
     collibra_timeout_seconds: float = DEFAULT_COLLIBRA_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
@@ -86,6 +91,11 @@ class Settings:
             "collibra_username": self.collibra_username,
             "collibra_password": "***" if self.collibra_password else "",
             "collibra_bearer_token": "***" if self.collibra_bearer_token else "",
+            "collibra_client_id": self.collibra_client_id,
+            "collibra_client_secret": "***" if self.collibra_client_secret else "",
+            "collibra_token_url": self.collibra_token_url,
+            "collibra_oauth_scope": self.collibra_oauth_scope,
+            "collibra_oauth_client_auth": self.collibra_oauth_client_auth,
             "collibra_timeout_seconds": self.collibra_timeout_seconds,
         }
 
@@ -128,6 +138,11 @@ def load_settings(
         "collibra_username": env.get("COLLIBRA_USERNAME", ""),
         "collibra_password": env.get("COLLIBRA_PASSWORD", ""),
         "collibra_bearer_token": env.get("COLLIBRA_BEARER_TOKEN", ""),
+        "collibra_client_id": env.get("COLLIBRA_CLIENT_ID", ""),
+        "collibra_client_secret": env.get("COLLIBRA_CLIENT_SECRET", ""),
+        "collibra_token_url": env.get("COLLIBRA_TOKEN_URL", ""),
+        "collibra_oauth_scope": env.get("COLLIBRA_OAUTH_SCOPE", ""),
+        "collibra_oauth_client_auth": env.get("COLLIBRA_OAUTH_CLIENT_AUTH", ""),
         "collibra_timeout_seconds": float(
             env.get("COLLIBRA_TIMEOUT_SECONDS", str(DEFAULT_COLLIBRA_TIMEOUT_SECONDS))
         ),
@@ -151,5 +166,10 @@ def load_settings(
         collibra_username=str(values["collibra_username"]),
         collibra_password=str(values["collibra_password"]),
         collibra_bearer_token=str(values["collibra_bearer_token"]),
+        collibra_client_id=str(values["collibra_client_id"]),
+        collibra_client_secret=str(values["collibra_client_secret"]),
+        collibra_token_url=str(values["collibra_token_url"]),
+        collibra_oauth_scope=str(values["collibra_oauth_scope"]),
+        collibra_oauth_client_auth=str(values["collibra_oauth_client_auth"]),
         collibra_timeout_seconds=float(values["collibra_timeout_seconds"]),
     )
