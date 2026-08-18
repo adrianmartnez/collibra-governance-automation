@@ -127,6 +127,7 @@ def compile_import_document(
     ):
         raise ImportCompileError("import_v2 cannot represent relationship UPDATE/DELETE")
 
+    _reject_duplicate_create_natural_identifiers(plan)
     assets_by_local = _asset_lookup(plan)
     commands: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -180,10 +181,7 @@ def _asset_command(
         raise ImportCompileError("asset action missing desired spec")
     command: dict[str, Any] = {"resourceType": "Asset"}
     if action.action_type is SyncActionType.CREATE:
-        command["identifier"] = {
-            "name": asset.name,
-            "domain": {"id": asset.domain_ref},
-        }
+        command["identifier"] = _exact_import_asset_identifier(asset)
         command["type"] = {"id": asset.asset_type_ref}
         if asset.display_name is not None:
             command["displayName"] = asset.display_name
@@ -234,15 +232,50 @@ def _is_create_asset(action: SyncAction | None) -> bool:
     )
 
 
+def _exact_import_asset_identifier(asset: Any) -> dict[str, Any]:
+    """Import CREATE natural identifier. No trim, casefold, or other normalization."""
+    if asset is None:
+        raise ImportCompileError("asset action missing desired spec")
+    name = asset.name
+    domain_ref = asset.domain_ref
+    if not isinstance(name, str) or not name.strip():
+        raise ImportCompileError("import_v2 CREATE identifier is empty")
+    if not isinstance(domain_ref, str) or not domain_ref.strip():
+        raise ImportCompileError("import_v2 CREATE identifier is empty")
+    return {
+        "name": name,
+        "domain": {"id": domain_ref},
+    }
+
+
+def _exact_import_identifier_key(asset: Any) -> tuple[str, str]:
+    identifier = _exact_import_asset_identifier(asset)
+    return identifier["name"], identifier["domain"]["id"]
+
+
+def _reject_duplicate_create_natural_identifiers(plan: SyncPlan) -> None:
+    """Fail closed when two CREATE local identities share one Import MERGE key."""
+    seen: dict[tuple[str, str], str] = {}
+    for action in plan.actions:
+        if (
+            action.object_kind is not SyncObjectKind.ASSET
+            or action.action_type is not SyncActionType.CREATE
+        ):
+            continue
+        key = _exact_import_identifier_key(action.desired_asset)
+        local_id = action.local_id or ""
+        previous = seen.get(key)
+        if previous is not None and previous != local_id:
+            raise ImportCompileError(
+                "import_v2 cannot represent two CREATE assets with the same name and domain"
+            )
+        if local_id:
+            seen[key] = local_id
+
+
 def _asset_identifier(action: SyncAction) -> dict[str, Any]:
     if action.action_type is SyncActionType.CREATE:
-        asset = action.desired_asset
-        if asset is None:
-            raise ImportCompileError("asset action missing desired spec")
-        return {
-            "name": asset.name,
-            "domain": {"id": asset.domain_ref},
-        }
+        return _exact_import_asset_identifier(action.desired_asset)
     if action.remote_id:
         return {"id": action.remote_id}
     raise ImportCompileError("relationship endpoint cannot be identified")
@@ -369,13 +402,10 @@ def _prove_create_identifiers_absent(adapter: Any, plan: SyncPlan) -> None:
         raise ImportCollisionError("import_v2 CREATE collision check is unavailable")
     seen: set[tuple[str, str]] = set()
     for action in creates:
-        asset = action.desired_asset
-        if asset is None:
-            raise ImportCollisionError("import_v2 CREATE collision check is ambiguous")
-        name = asset.name.strip()
-        domain_ref = asset.domain_ref.strip()
-        if not name or not domain_ref:
-            raise ImportCollisionError("import_v2 CREATE collision check is ambiguous")
+        try:
+            name, domain_ref = _exact_import_identifier_key(action.desired_asset)
+        except ImportCompileError as exc:
+            raise ImportCollisionError("import_v2 CREATE collision check is ambiguous") from exc
         key = (name, domain_ref)
         if key in seen:
             continue

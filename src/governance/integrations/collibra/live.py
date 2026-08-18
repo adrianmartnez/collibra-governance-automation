@@ -288,6 +288,7 @@ class LiveCollibraAdapter:
                 "name": name,
                 "nameMatchMode": "EXACT",
                 "domainId": domain_ref,
+                "excludeMeta": "false",
             },
         )
 
