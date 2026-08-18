@@ -22,7 +22,7 @@ from governance.integrations.collibra import (
 )
 from governance.integrations.collibra.batching import HARD_MAX_ADDITIONAL_CHARACTERISTICS
 from governance.integrations.collibra.import_api import IMPORT_MULTIPART_FIELDS
-from tests.support.collibra_contract_server import (
+from support.collibra_contract_server import (
     CONTRACT_CLIENT_SECRET,
     CONTRACT_SCOPE,
     CONTRACT_TOKEN,
