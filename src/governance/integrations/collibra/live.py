@@ -425,6 +425,17 @@ class LiveCollibraAdapter:
         payload = self._request("GET", import_errors_path(job_id))
         return sanitize_import_error_summary(payload)
 
+    def read_json(self, path: str) -> Any:
+        """Issue a GET for read-only diagnostics. Never used for mutations."""
+        cleaned = path.strip()
+        if not cleaned.startswith("/"):
+            raise CollibraAdapterError(
+                "diagnostic path must be absolute",
+                operation="get",
+                endpoint_path=cleaned or "/",
+            )
+        return self._request("GET", cleaned)
+
     def poll_job(self, job_id: str) -> Any:
         from governance.integrations.collibra.jobs import poll_until_terminal
 

@@ -43,6 +43,11 @@ from governance.integrations.collibra.models import (
     SyncPlan,
     SyncResult,
 )
+from governance.integrations.collibra.preflight import (
+    format_preflight_human,
+    preflight_exit_code,
+    run_preflight,
+)
 from governance.integrations.collibra.sync import (
     PLANNER_CONTRACT_VERSION,
     build_sync_plan,
@@ -95,4 +100,7 @@ __all__ = [
     "mock_mapping_config",
     "mock_remote_id",
     "normalize_base_url",
+    "format_preflight_human",
+    "preflight_exit_code",
+    "run_preflight",
 ]
