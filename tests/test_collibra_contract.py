@@ -19,9 +19,17 @@ from governance.integrations.collibra import (
     SyncPlan,
     execute_collibra_plan,
     mock_mapping_config,
+    run_preflight,
 )
 from governance.integrations.collibra.batching import HARD_MAX_ADDITIONAL_CHARACTERISTICS
 from governance.integrations.collibra.import_api import IMPORT_MULTIPART_FIELDS
+from governance.integrations.collibra.preflight import (
+    CODE_AUTH_FAILURE,
+    CODE_LOOPBACK_HTTP,
+    CODE_MAPPING_MISSING,
+    STATUS_INCOMPATIBLE,
+    STATUS_VERIFIED,
+)
 from support.collibra_contract_server import (
     CONTRACT_CLIENT_SECRET,
     CONTRACT_SCOPE,
@@ -522,3 +530,36 @@ def test_server_rejects_non_ignore_finalize_and_combined_endpoint() -> None:
         )
         assert combined.status_code == 400
         assert server.finalize_posts == 1
+
+
+def test_preflight_loopback_zero_writes() -> None:
+    with CollibraContractServer() as server:
+        report = run_preflight(_settings(server.base_url), mock_mapping_config())
+        assert report.overall == STATUS_VERIFIED
+        assert report.writes_performed == 0
+        assert server.mutation_posts == 0
+        assert any(check.code == CODE_LOOPBACK_HTTP for check in report.checks)
+        methods = {item["method"] for item in server.sanitized_requests}
+        assert "PATCH" not in methods
+        assert "DELETE" not in methods
+        assert all(
+            item["method"] != "POST" or item["path"].endswith("/oauth/v2/token")
+            for item in server.sanitized_requests
+        )
+        _assert_no_secrets(server)
+        blob = str(report.to_dict())
+        assert CONTRACT_TOKEN not in blob
+        assert CONTRACT_CLIENT_SECRET not in blob
+
+
+def test_preflight_auth_failure_and_missing_mapping() -> None:
+    with CollibraContractServer(scenario="auth_failure") as server:
+        report = run_preflight(_settings(server.base_url), mock_mapping_config())
+        assert report.overall == STATUS_INCOMPATIBLE
+        assert any(check.code == CODE_AUTH_FAILURE for check in report.checks)
+        assert server.mutation_posts == 0
+    with CollibraContractServer(scenario="missing_mapping") as server:
+        report = run_preflight(_settings(server.base_url), mock_mapping_config())
+        assert report.overall == STATUS_INCOMPATIBLE
+        assert any(check.code == CODE_MAPPING_MISSING for check in report.checks)
+        assert server.mutation_posts == 0
