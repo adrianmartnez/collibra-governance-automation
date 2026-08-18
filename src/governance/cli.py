@@ -85,7 +85,7 @@ from governance.integrations.collibra import (
     preflight_exit_code,
     run_preflight,
 )
-from governance.integrations.collibra.telemetry import execution_scope
+from governance.integrations.collibra.telemetry import execution_scope, finish_execution
 from governance.integrations.dbt import DbtError, load_dbt_graph
 from governance.integrations.odcs import OdcsError, load_odcs_graph
 from governance.integrations.openlineage import OpenLineageError, load_openlineage_graph
@@ -752,7 +752,11 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
     try:
         desired = map_to_desired_state(model, mapping_config)
         adapter = build_collibra_adapter(settings, mapping_config)
-        with execution_scope(execution_mode=settings.collibra_execution_mode):
+        with execution_scope(
+            execution_mode=settings.collibra_execution_mode,
+            default_outcome="success",
+            default_writes_performed=0,
+        ):
             remote = adapter.read_remote_state(desired)
             sync_plan = build_sync_plan(desired, remote)
             remote_identity = compute_remote_state_identity_value(remote)
@@ -949,9 +953,19 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 remote = adapter.read_remote_state(desired)
                 observed_remote = compute_remote_state_identity_value(remote)
             except ConfigResolutionError as exc:
+                finish_execution(
+                    outcome="error",
+                    execution_mode=settings.collibra_execution_mode,
+                    writes_performed=0,
+                )
                 return _emit_resolution_error(exc, fmt, canonical=canonical)
             except Exception as exc:
                 if _is_operational_error(exc):
+                    finish_execution(
+                        outcome="error",
+                        execution_mode=settings.collibra_execution_mode,
+                        writes_performed=0,
+                    )
                     return _emit_operational(exc, fmt)
                 raise
             if observed_remote != saved.remote_state_identity:
@@ -965,6 +979,11 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 )
 
         if mismatches:
+            finish_execution(
+                outcome="failure",
+                execution_mode=settings.collibra_execution_mode,
+                writes_performed=0,
+            )
             stale = build_stale_result(mismatches)
             if fmt == "json":
                 _print_json(stale)
@@ -978,9 +997,19 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 validate_collibra_runtime(settings, canonical)
                 adapter = build_collibra_adapter(settings, mapping_config)
             except ConfigResolutionError as exc:
+                finish_execution(
+                    outcome="error",
+                    execution_mode=settings.collibra_execution_mode,
+                    writes_performed=0,
+                )
                 return _emit_resolution_error(exc, fmt, canonical=canonical)
             except Exception as exc:
                 if _is_operational_error(exc):
+                    finish_execution(
+                        outcome="error",
+                        execution_mode=settings.collibra_execution_mode,
+                        writes_performed=0,
+                    )
                     return _emit_operational(exc, fmt)
                 raise
 
@@ -1062,8 +1091,13 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
     except CliOperationalError as exc:
         return _emit_operational_message(str(exc), fmt)
 
-    with execution_scope():
+    with execution_scope(execution_mode=settings.collibra_execution_mode):
         report = run_preflight(settings, mapping_config)
+        finish_execution(
+            outcome="success" if preflight_exit_code(report) == 0 else "failure",
+            execution_mode=settings.collibra_execution_mode,
+            writes_performed=0,
+        )
     if fmt == "json":
         _print_json(report.to_dict())
     else:
@@ -1478,7 +1512,11 @@ def _cmd_diff(
     model = _scan_model(effective)
     desired = map_to_desired_state(model, mapping_config)
     adapter = build_collibra_adapter(effective, mapping_config)
-    with execution_scope():
+    with execution_scope(
+        execution_mode=effective.collibra_execution_mode,
+        default_outcome="success",
+        default_writes_performed=0,
+    ):
         remote = adapter.read_remote_state(desired)
         plan = build_sync_plan(desired, remote)
     payload = _diff_payload(mode=mode, plan=plan)

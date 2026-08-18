@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from typing import Any, Protocol, TextIO
@@ -49,6 +50,7 @@ ALLOWED_KEYS = frozenset(
 REMOTE_STATES = frozenset({"WAITING", "RUNNING", "CANCELING", "COMPLETED", "CANCELED", "ERROR"})
 REMOTE_RESULTS = frozenset({"NOT_SET", "SUCCESS", "COMPLETED_WITH_ERROR", "FAILURE", "ABORTED"})
 SUBMISSION_STATES = frozenset({"not_attempted", "submitted", "unknown"})
+_TERMINAL_OUTCOMES = frozenset({"success", "failure", "error"})
 
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -76,6 +78,12 @@ _SECRET_MARKERS = (
 
 _correlation_id: ContextVar[str | None] = ContextVar("collibra_correlation_id", default=None)
 _sink: ContextVar[TelemetrySink | None] = ContextVar("collibra_telemetry_sink", default=None)
+_execution_started: ContextVar[float | None] = ContextVar(
+    "collibra_execution_started", default=None
+)
+_execution_outcome_emitted: ContextVar[bool] = ContextVar(
+    "collibra_execution_outcome_emitted", default=False
+)
 
 
 class TelemetrySink(Protocol):
@@ -147,17 +155,28 @@ def get_sink() -> TelemetrySink:
 
 
 @contextmanager
-def execution_scope(*, execution_mode: str = "", sink: TelemetrySink | None = None):
+def execution_scope(
+    *,
+    execution_mode: str = "",
+    sink: TelemetrySink | None = None,
+    default_outcome: str | None = None,
+    default_writes_performed: int | None = None,
+):
     """Bind a correlation id for one logical Collibra execution.
 
-    Nested scopes reuse the root correlation ID and do not emit a second
-    ``execution_start``. The sink may be rebound for the nested duration.
+    Nested scopes reuse the root correlation ID, root start time, and
+    terminal-outcome state. They do not emit a second ``execution_start``.
+    The sink may be rebound for the nested duration.
     """
     existing_correlation = current_correlation_id()
     owns_correlation = existing_correlation is None
     cid_token: Token[str | None] | None = None
+    started_token: Token[float | None] | None = None
+    emitted_token: Token[bool] | None = None
     if owns_correlation:
         cid_token = _correlation_id.set(str(uuid4()))
+        started_token = _execution_started.set(time.monotonic())
+        emitted_token = _execution_outcome_emitted.set(False)
     if sink is not None:
         active = sink
     else:
@@ -168,15 +187,61 @@ def execution_scope(*, execution_mode: str = "", sink: TelemetrySink | None = No
         if owns_correlation:
             emit(operation="execution_start", execution_mode=execution_mode)
         yield current_correlation_id()
+    except Exception:
+        if owns_correlation and not _execution_outcome_emitted.get():
+            finish_execution(outcome="error", execution_mode=execution_mode)
+        raise
+    else:
+        if (
+            owns_correlation
+            and not _execution_outcome_emitted.get()
+            and default_outcome is not None
+        ):
+            finish_execution(
+                outcome=default_outcome,
+                execution_mode=execution_mode,
+                writes_performed=default_writes_performed,
+            )
     finally:
         _sink.reset(sink_token)
-        if owns_correlation and cid_token is not None:
-            _correlation_id.reset(cid_token)
+        if owns_correlation:
+            if emitted_token is not None:
+                _execution_outcome_emitted.reset(emitted_token)
+            if started_token is not None:
+                _execution_started.reset(started_token)
+            if cid_token is not None:
+                _correlation_id.reset(cid_token)
+
+
+def finish_execution(
+    *,
+    outcome: str,
+    execution_mode: str = "",
+    writes_performed: int | None = None,
+) -> None:
+    """Emit the single terminal ``execution_outcome`` for the active correlation."""
+    if current_correlation_id() is None:
+        return
+    if _execution_outcome_emitted.get():
+        return
+    _execution_outcome_emitted.set(True)
+    started = _execution_started.get()
+    duration_ms = 0 if started is None else int(max(0.0, (time.monotonic() - started) * 1000))
+    safe_outcome = outcome if outcome in _TERMINAL_OUTCOMES else "error"
+    emit(
+        operation="execution_outcome",
+        execution_mode=execution_mode,
+        outcome=safe_outcome,
+        duration_ms=duration_ms,
+        writes_performed=writes_performed,
+    )
 
 
 def emit(**fields: Any) -> None:
     """Emit one allowlisted event. Never raises to the caller."""
     try:
+        if fields.get("operation") == "execution_outcome" and current_correlation_id():
+            _execution_outcome_emitted.set(True)
         sink = get_sink()
         if isinstance(sink, NullSink):
             return

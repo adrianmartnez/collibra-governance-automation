@@ -732,12 +732,9 @@ def execute_collibra_plan(
     max_additional_characteristics: int | None = None,
 ) -> Any:
     """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
-    import time
-
-    from governance.integrations.collibra.telemetry import emit, execution_scope
+    from governance.integrations.collibra.telemetry import execution_scope, finish_execution
 
     mode = (execution_mode or "core_rest").strip().lower()
-    started = time.monotonic()
     with execution_scope(execution_mode=mode):
         try:
             result = _execute_collibra_plan(
@@ -751,28 +748,18 @@ def execute_collibra_plan(
                 max_additional_characteristics=max_additional_characteristics,
             )
         except Exception:
-            emit(
-                operation="execution_outcome",
-                execution_mode=mode,
+            finish_execution(
                 outcome="error",
-                duration_ms=_elapsed_ms(started),
+                execution_mode=mode,
             )
             raise
 
-        emit(
-            operation="execution_outcome",
-            execution_mode=mode,
+        finish_execution(
             outcome="success" if result.success else "failure",
+            execution_mode=mode,
             writes_performed=_known_writes_performed(result),
-            duration_ms=_elapsed_ms(started),
         )
         return result
-
-
-def _elapsed_ms(started: float) -> int:
-    import time
-
-    return int(max(0.0, (time.monotonic() - started) * 1000))
 
 
 def _known_writes_performed(result: Any) -> int | None:

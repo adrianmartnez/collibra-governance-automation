@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import httpx
@@ -10,12 +12,14 @@ import pytest
 
 from governance.config import Settings
 from governance.identity import plan_identity
+from governance.identity.hashing import ContentIdentity
 from governance.integrations.collibra import (
     CollibraAdapterError,
     CollibraAssetSpec,
     CollibraAttributeSpec,
     CollibraAuthError,
     CollibraDesiredState,
+    CollibraRemoteState,
     LiveCollibraAdapter,
     MockCollibraAdapter,
     SyncAction,
@@ -26,16 +30,24 @@ from governance.integrations.collibra import (
     mock_mapping_config,
 )
 from governance.integrations.collibra.import_api import ImportSubmission
+from governance.integrations.collibra.preflight import (
+    CODE_REMOTE_HTTP,
+    STATUS_INCOMPATIBLE,
+    PreflightCheck,
+    PreflightReport,
+)
 from governance.integrations.collibra.telemetry import (
     ALLOWED_KEYS,
     JsonlSink,
     RecordingSink,
     bound_sink,
     build_event,
+    emit,
     endpoint_template,
     execution_scope,
     sink_from_environ,
 )
+from governance.plans import SavedGovernancePlan
 from governance.plans.apply_result import build_apply_result
 from support.collibra_contract_server import (
     CONTRACT_CLIENT_SECRET,
@@ -273,7 +285,9 @@ def test_nested_execution_scope_reuses_one_correlation() -> None:
         )
     ids = {event["correlation_id"] for event in sink.events if "correlation_id" in event}
     assert len(ids) == 1
-    assert [event.get("operation") for event in sink.events].count("execution_start") == 1
+    operations = [event.get("operation") for event in sink.events]
+    assert operations.count("execution_start") == 1
+    assert operations.count("execution_outcome") == 1
 
 
 def test_dry_run_writes_performed_is_zero() -> None:
@@ -609,5 +623,285 @@ def test_end_to_end_import_uses_one_correlation() -> None:
     assert batches[0]["submission_state"] == "submitted"
     assert batches[0]["job_id"] == "job-import-0"
     outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert len(outcomes) == 1
     assert "writes_performed" in outcomes[0]
     assert outcomes[0]["duration_ms"] >= 0
+
+
+def _identity(digest: str) -> ContentIdentity:
+    return ContentIdentity(
+        algorithm="sha256",
+        hashing_contract_version="1",
+        digest=digest,
+    )
+
+
+def _operation_counts(sink: RecordingSink) -> tuple[int, int]:
+    operations = [event.get("operation") for event in sink.events]
+    return operations.count("execution_start"), operations.count("execution_outcome")
+
+
+class _EmptyRemoteAdapter:
+    def read_remote_state(self, desired: object) -> CollibraRemoteState:
+        del desired
+        return CollibraRemoteState()
+
+
+def test_root_scope_default_success_outcome() -> None:
+    sink = RecordingSink()
+    with execution_scope(
+        sink=sink,
+        execution_mode="core_rest",
+        default_outcome="success",
+        default_writes_performed=0,
+    ):
+        emit(operation="http_attempt", execution_mode="core_rest", status=200)
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "success"
+    assert outcomes[0]["writes_performed"] == 0
+    assert outcomes[0]["duration_ms"] >= 0
+
+
+def test_root_scope_exception_emits_error_outcome() -> None:
+    sink = RecordingSink()
+    with (
+        pytest.raises(RuntimeError, match="secret-boom"),
+        execution_scope(sink=sink, execution_mode="core_rest"),
+    ):
+        raise RuntimeError("secret-boom")
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "error"
+    blob = str(sink.events)
+    assert "secret-boom" not in blob
+    assert "RuntimeError" not in blob
+
+
+def test_nested_executor_emits_exactly_one_outcome() -> None:
+    sink = RecordingSink()
+    with execution_scope(
+        sink=sink,
+        execution_mode="core_rest",
+        default_outcome="success",
+        default_writes_performed=0,
+    ):
+        MockCollibraAdapter(mock_mapping_config()).read_remote_state(
+            CollibraDesiredState(assets=())
+        )
+        execute_collibra_plan(
+            MockCollibraAdapter(mock_mapping_config()),
+            SyncPlan(actions=()),
+            mock_mapping_config(),
+            apply=False,
+            execution_mode="core_rest",
+        )
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "success"
+
+
+def test_root_duration_includes_pre_execution_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    sink = RecordingSink()
+    clock = FakeClock()
+    monkeypatch.setattr(
+        "governance.integrations.collibra.telemetry.time.monotonic",
+        clock,
+    )
+    with execution_scope(sink=sink, execution_mode="core_rest"):
+        clock.now += 2.0
+        execute_collibra_plan(
+            MockCollibraAdapter(mock_mapping_config()),
+            SyncPlan(actions=()),
+            mock_mapping_config(),
+            apply=False,
+            execution_mode="core_rest",
+        )
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["duration_ms"] >= 2000
+
+
+def test_cli_diff_successful_read_emits_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from governance.cli import _cmd_diff
+
+    sink = RecordingSink()
+    monkeypatch.setattr("governance.cli._scan_model", lambda settings: object())
+    monkeypatch.setattr(
+        "governance.cli.map_to_desired_state",
+        lambda model, mapping: CollibraDesiredState(assets=()),
+    )
+    monkeypatch.setattr(
+        "governance.cli.build_collibra_adapter",
+        lambda settings, mapping: _EmptyRemoteAdapter(),
+    )
+    with bound_sink(sink):
+        code = _cmd_diff(
+            _settings(collibra_mode="mock"),
+            mode="mock",
+            mapping_config_path=None,
+            json_output=True,
+        )
+    capsys.readouterr()
+    assert code == 0
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "success"
+    assert outcomes[0]["writes_performed"] == 0
+
+
+def test_cli_sync_preread_error_emits_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from governance.cli import _cmd_sync
+
+    class BoomAdapter:
+        def read_remote_state(self, desired: object) -> CollibraRemoteState:
+            del desired
+            raise CollibraAdapterError("read failed", operation="get")
+
+    sink = RecordingSink()
+    monkeypatch.setattr("governance.cli._scan_model", lambda settings: object())
+    monkeypatch.setattr(
+        "governance.cli.map_to_desired_state",
+        lambda model, mapping: CollibraDesiredState(assets=()),
+    )
+    monkeypatch.setattr(
+        "governance.cli.build_collibra_adapter",
+        lambda settings, mapping: BoomAdapter(),
+    )
+    with bound_sink(sink), pytest.raises(CollibraAdapterError):
+        _cmd_sync(
+            _settings(collibra_mode="mock"),
+            mode="mock",
+            mapping_config_path=None,
+            apply=False,
+            json_output=True,
+        )
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "error"
+    blob = str(sink.events)
+    assert "read failed" not in blob
+
+
+def test_cli_apply_stale_emits_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from governance.cli import _cmd_apply
+
+    sink = RecordingSink()
+    dummy = _identity("aa" * 32)
+    saved = SavedGovernancePlan(
+        sync_plan=SyncPlan(actions=()),
+        config_identity=dummy,
+        snapshot_identity=dummy,
+        policy_identity=dummy,
+        mapping_identity=dummy,
+        target_context={},
+        target_context_identity=_identity("bb" * 32),
+        remote_state_identity=dummy,
+    )
+    canonical = SimpleNamespace(
+        targets=(object(),),
+        identity_projection=lambda: {"schema_version": "1"},
+    )
+    settings = _settings(collibra_mode="mock")
+
+    class _Snap:
+        def content_identity(self) -> ContentIdentity:
+            return dummy
+
+    class _GS:
+        @staticmethod
+        def from_model(model: object) -> _Snap:
+            del model
+            return _Snap()
+
+    class _Policies:
+        def to_identity_dict(self) -> dict[str, object]:
+            return {}
+
+    monkeypatch.setattr("governance.cli.load_saved_plan", lambda path: saved)
+    monkeypatch.setattr(
+        "governance.cli._load_canonical_and_settings",
+        lambda **kwargs: (canonical, settings),
+    )
+    monkeypatch.setattr("governance.cli.load_normalized_policies", lambda canonical: _Policies())
+    monkeypatch.setattr("governance.cli.validate_collibra_runtime", lambda *args, **kwargs: None)
+    monkeypatch.setattr("governance.cli._scan_model", lambda settings: object())
+    monkeypatch.setattr("governance.cli.GovernanceSnapshot", _GS)
+    args = Namespace(
+        format="json",
+        apply=False,
+        confirm_live=False,
+        plan_file="plan.gplan",
+        config="governance.yaml",
+        profile=None,
+    )
+    with bound_sink(sink):
+        code = _cmd_apply(args)
+    capsys.readouterr()
+    assert code == 5
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "failure"
+    assert outcomes[0]["writes_performed"] == 0
+
+
+def test_cli_preflight_incompatible_emits_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from governance.cli import _cmd_preflight
+
+    sink = RecordingSink()
+    canonical = SimpleNamespace(targets=(object(),))
+    settings = _settings(collibra_mode="mock")
+    report = PreflightReport(
+        overall=STATUS_INCOMPATIBLE,
+        mode="mock",
+        transport=None,
+        writes_performed=0,
+        checks=(
+            PreflightCheck(
+                id="transport",
+                status=STATUS_INCOMPATIBLE,
+                code=CODE_REMOTE_HTTP,
+                message="remote http rejected",
+                blocking=True,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "governance.cli._load_canonical_and_settings",
+        lambda **kwargs: (canonical, settings),
+    )
+    monkeypatch.setattr("governance.cli.run_preflight", lambda settings, mapping: report)
+    args = Namespace(format="json", config="governance.yaml", profile=None)
+    with bound_sink(sink):
+        code = _cmd_preflight(args)
+    captured = capsys.readouterr()
+    assert code == 1
+    assert '"overall": "INCOMPATIBLE"' in captured.out or '"overall":"INCOMPATIBLE"' in captured.out
+    starts, outcomes_count = _operation_counts(sink)
+    assert starts == 1
+    assert outcomes_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["outcome"] == "failure"
+    assert outcomes[0]["writes_performed"] == 0
+    assert report.overall == STATUS_INCOMPATIBLE
+    assert report.writes_performed == 0
