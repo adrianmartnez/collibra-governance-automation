@@ -26,15 +26,27 @@ class CollibraAdapterError(RuntimeError):
         operation: str,
         status_code: int | None = None,
         endpoint_path: str | None = None,
+        endpoint_family: str | None = None,
+        attempt: int | None = None,
+        exhausted: bool | None = None,
     ) -> None:
         self.operation = operation
         self.status_code = status_code
         self.endpoint_path = endpoint_path
+        self.endpoint_family = endpoint_family
+        self.attempt = attempt
+        self.exhausted = exhausted
         parts = [message, f"operation={operation}"]
         if status_code is not None:
             parts.append(f"status_code={status_code}")
         if endpoint_path is not None:
             parts.append(f"endpoint_path={endpoint_path}")
+        if endpoint_family is not None:
+            parts.append(f"endpoint_family={endpoint_family}")
+        if attempt is not None:
+            parts.append(f"attempt={attempt}")
+        if exhausted is not None:
+            parts.append(f"exhausted={exhausted}")
         super().__init__("; ".join(parts))
 
 
