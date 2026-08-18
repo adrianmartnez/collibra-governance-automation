@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## 1.3.0 - 2026-08-18
+## 1.3.0 - 2026-08-19
 
 ### Added
 
@@ -13,7 +13,7 @@
 - Conservative deterministic batching with stop-on-failure (config may only lower the hard maxima)
 - Localhost Collibra contract HTTP server and dedicated `collibra-contract` CI job
 - Read-only `governance preflight` tenant compatibility CLI
-- Secret-safe operational telemetry (`NullSink` default; `COLLIBRA_TELEMETRY=jsonl` opt-in)
+- Secret-safe operational telemetry (`NullSink` default; `COLLIBRA_TELEMETRY=jsonl` opt-in): one logical correlation across auth, HTTP retries, batches, and jobs; root `duration_ms`; exactly one terminal `execution_outcome`; `writes_performed` only when known with certainty
 
 ### Safety
 
@@ -22,7 +22,7 @@
 - Import `attributesAction=REPLACE` is limited to mapping-managed attribute types; relations use `ADD_OR_IGNORE`
 - Combined `/import/synchronize/{id}/json-job`, `REMOVE_RESOURCES`, `CHANGE_STATUS`, and DELETE remain forbidden
 - Preflight performs zero remote mutations; remote HTTP is classified incompatible before credentials are sent
-- Telemetry never enters plan, snapshot, graph, hash, or impact identities
+- Telemetry is allowlisted and fail-open: dynamic endpoint IDs and query strings are not exposed; secrets, raw payloads, and business-row data are excluded; sink failures cannot alter governance decisions; telemetry stays outside plan, snapshot, graph, hash, impact, and apply-result identities
 
 ### Compatibility
 

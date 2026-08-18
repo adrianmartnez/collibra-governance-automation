@@ -271,7 +271,7 @@ success=true
 - OAuth token endpoints must be HTTPS or HTTP loopback; HTTP non-loopback is rejected before any token POST
 - Requires `--mapping-config PATH` with tenant catalog refs only (no credentials in that file)
 - Execution paths: `core_rest` (default), `import_v2` (json-job + poll), `sync_v2` (batched json-job, then IGNORE finalize + poll)
-- `diff` and dry-run `sync` may perform GET/read calls against remote managed state
+- `diff` and dry-run `sync` may authenticate and perform read-only tenant calls against remote managed state
 - Remote mutations require both `--apply` and `--confirm-live`
 - Localhost contract HTTP tests are not a commercial-tenant stand-in; commercial tenant validation is not claimed
 
@@ -303,7 +303,7 @@ COLLIBRA_EXECUTION_MODE=core_rest
 
 Bounded retries apply to GET 429/5xx and connect failures. Writes retry connect-before-send only. Retry-After supports delta-seconds and HTTP-date.
 
-Read-only tenant checks (zero mutations; HTTP non-loopback is `INCOMPATIBLE` before credentials):
+Read-only tenant checks (zero governance mutations; does not certify write capability). HTTP non-loopback is `INCOMPATIBLE` before credentials:
 
 ```bash
 governance preflight --config governance.yaml --format json
@@ -327,7 +327,17 @@ governance sync \
   --confirm-live
 ```
 
-Dry-run first. Live dry-run may read remote state; it does not POST/PATCH/DELETE. Opt-in telemetry (`COLLIBRA_TELEMETRY=jsonl`) is secret-safe and never mixed into apply/sync JSON or canonical hashes.
+Dry-run first. Live dry-run may perform authentication and read-only tenant calls. When OAuth client credentials are configured, authentication may include the OAuth token POST. Dry-run performs zero Collibra governance mutations: it does not submit Core REST mutations, Import jobs, synchronization batches, or finalization jobs.
+
+### Operational telemetry
+
+Telemetry is off by default (`NullSink`). Opt in with `COLLIBRA_TELEMETRY=jsonl` for JSONL on stderr, or set `COLLIBRA_TELEMETRY_PATH` to write a file. Events never mix into CLI stdout JSON.
+
+One correlation ID covers a logical execution: auth, HTTP attempts/retries, pre-execution remote reads, import/sync batches, job polls, and the terminal outcome. `duration_ms` is measured from the root execution scope. Exactly one `execution_outcome` is emitted per logical execution.
+
+Batch events may include batch index/count, bounded workload counts, and `submission_state`. Job events may include `job_id` and normalized state/result. `writes_performed` is included only when known with certainty: `0` on dry-run, `applied_count` on confirmed success, omitted when failed or uncertain.
+
+Endpoint paths are query-free templates. The allowlist excludes Authorization, bearer/access tokens, client secrets, passwords, credential-bearing connection strings, raw request/response bodies, unrestricted query strings, and business-row data. Sink failures never change governance decisions. Correlation, duration, and runtime telemetry never enter plan, snapshot, graph, hash, impact, or apply-result identities.
 
 ## PostgreSQL demo
 
