@@ -277,9 +277,19 @@ def execute_sync_v2(
     batch_count = len(batches)
 
     for batch_index, batch in enumerate(batches):
+        counts = batch_document_counts(batch)
         try:
             batch_submission = submit_batch(sync_id, batch)
         except CollibraAdapterError:
+            emit(
+                operation="sync_batch",
+                endpoint_family="sync_v2",
+                batch_index=batch_index + 1,
+                batch_count=batch_count,
+                resource_count=counts.resource_count,
+                additional_characteristic_count=counts.additional_characteristic_count,
+                submission_state="unknown",
+            )
             records.append(
                 make_batch_lifecycle_record(
                     batch_index,
@@ -302,6 +312,15 @@ def execute_sync_v2(
             )
         batch_job_id = getattr(batch_submission, "job_id", "") or ""
         if not batch_job_id:
+            emit(
+                operation="sync_batch",
+                endpoint_family="sync_v2",
+                batch_index=batch_index + 1,
+                batch_count=batch_count,
+                resource_count=counts.resource_count,
+                additional_characteristic_count=counts.additional_characteristic_count,
+                submission_state="unknown",
+            )
             records.append(
                 make_batch_lifecycle_record(
                     batch_index,
@@ -322,7 +341,6 @@ def execute_sync_v2(
                 applied_count=applied,
                 error=SYNC_BATCH_SUBMISSION_UNCERTAIN,
             )
-        counts = batch_document_counts(batch)
         emit(
             operation="sync_batch",
             endpoint_family="sync_v2",
@@ -330,6 +348,7 @@ def execute_sync_v2(
             batch_count=batch_count,
             resource_count=counts.resource_count,
             additional_characteristic_count=counts.additional_characteristic_count,
+            submission_state="submitted",
             job_id=batch_job_id,
         )
         batch_view, observation_error = observe_job(poll_job, batch_job_id)
@@ -389,6 +408,11 @@ def execute_sync_v2(
     try:
         finalize_submission = submit_finalize(sync_id, strategy=FINALIZATION_STRATEGY_IGNORE)
     except CollibraAdapterError:
+        emit(
+            operation="sync_finalize",
+            endpoint_family="sync_v2",
+            submission_state="unknown",
+        )
         return _sync_lifecycle_result(
             plan=plan,
             document=document,
@@ -404,6 +428,11 @@ def execute_sync_v2(
         )
     finalize_job_id = getattr(finalize_submission, "job_id", "") or ""
     if not finalize_job_id:
+        emit(
+            operation="sync_finalize",
+            endpoint_family="sync_v2",
+            submission_state="unknown",
+        )
         return _sync_lifecycle_result(
             plan=plan,
             document=document,
@@ -417,6 +446,12 @@ def execute_sync_v2(
             applied_count=applied,
             error="sync finalization job outcome=uncertain",
         )
+    emit(
+        operation="sync_finalize",
+        endpoint_family="sync_v2",
+        submission_state="submitted",
+        job_id=finalize_job_id,
+    )
     finalize_view, finalize_observation_error = observe_job(poll_job, finalize_job_id)
     if finalize_observation_error is not None:
         return _sync_lifecycle_result(
@@ -436,6 +471,7 @@ def execute_sync_v2(
     emit(
         operation="sync_finalize",
         endpoint_family="sync_v2",
+        submission_state="submitted",
         job_id=finalize_job_id,
         remote_state=finalize_view.remote_state,
         remote_result=finalize_view.remote_result,

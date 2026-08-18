@@ -142,10 +142,13 @@ class _OAuthClientCredentialsProvider:
                 auth=auth,
             )
         except httpx.TimeoutException:
+            duration_ms = int(max(0.0, (self._monotonic_clock() - acquired_at) * 1000))
             emit(
                 operation="oauth_token",
                 endpoint_family="oauth",
                 endpoint_path=_token_endpoint_label(self._kind),
+                duration_ms=duration_ms,
+                outcome="error",
             )
             raise CollibraAuthError(
                 "oauth token request timed out",
@@ -153,10 +156,13 @@ class _OAuthClientCredentialsProvider:
                 endpoint_path=_token_endpoint_label(self._kind),
             ) from None
         except httpx.HTTPError:
+            duration_ms = int(max(0.0, (self._monotonic_clock() - acquired_at) * 1000))
             emit(
                 operation="oauth_token",
                 endpoint_family="oauth",
                 endpoint_path=_token_endpoint_label(self._kind),
+                duration_ms=duration_ms,
+                outcome="error",
             )
             raise CollibraAuthError(
                 "oauth token request failed",

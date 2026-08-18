@@ -571,9 +571,19 @@ def _execute_import_batches_lifecycle(
     records: list[BatchLifecycleRecord] = []
     batch_count = len(batches)
     for batch_index, batch in enumerate(batches):
+        counts = batch_document_counts(batch)
         try:
             submission = adapter.submit_json_import(batch)
         except CollibraAdapterError:
+            emit(
+                operation="import_batch",
+                endpoint_family="import_v2",
+                batch_index=batch_index + 1,
+                batch_count=batch_count,
+                resource_count=counts.resource_count,
+                additional_characteristic_count=counts.additional_characteristic_count,
+                submission_state="unknown",
+            )
             records.append(
                 make_batch_lifecycle_record(
                     batch_index,
@@ -592,6 +602,15 @@ def _execute_import_batches_lifecycle(
             )
         job_id = getattr(submission, "job_id", "") or ""
         if not job_id:
+            emit(
+                operation="import_batch",
+                endpoint_family="import_v2",
+                batch_index=batch_index + 1,
+                batch_count=batch_count,
+                resource_count=counts.resource_count,
+                additional_characteristic_count=counts.additional_characteristic_count,
+                submission_state="unknown",
+            )
             records.append(
                 make_batch_lifecycle_record(
                     batch_index,
@@ -608,7 +627,6 @@ def _execute_import_batches_lifecycle(
                 unchanged_count=unchanged_count,
                 error=IMPORT_SUBMISSION_UNCERTAIN,
             )
-        counts = batch_document_counts(batch)
         emit(
             operation="import_batch",
             endpoint_family="import_v2",
@@ -616,6 +634,7 @@ def _execute_import_batches_lifecycle(
             batch_count=batch_count,
             resource_count=counts.resource_count,
             additional_characteristic_count=counts.additional_characteristic_count,
+            submission_state="submitted",
             job_id=job_id,
         )
         view, observation_error = observe_job(poll_job, job_id)
@@ -713,9 +732,12 @@ def execute_collibra_plan(
     max_additional_characteristics: int | None = None,
 ) -> Any:
     """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
+    import time
+
     from governance.integrations.collibra.telemetry import emit, execution_scope
 
     mode = (execution_mode or "core_rest").strip().lower()
+    started = time.monotonic()
     with execution_scope(execution_mode=mode):
         try:
             result = _execute_collibra_plan(
@@ -733,17 +755,32 @@ def execute_collibra_plan(
                 operation="execution_outcome",
                 execution_mode=mode,
                 outcome="error",
+                duration_ms=_elapsed_ms(started),
             )
             raise
 
-        writes = 0 if result.dry_run else int(result.applied_count)
         emit(
             operation="execution_outcome",
             execution_mode=mode,
             outcome="success" if result.success else "failure",
-            writes_performed=writes,
+            writes_performed=_known_writes_performed(result),
+            duration_ms=_elapsed_ms(started),
         )
         return result
+
+
+def _elapsed_ms(started: float) -> int:
+    import time
+
+    return int(max(0.0, (time.monotonic() - started) * 1000))
+
+
+def _known_writes_performed(result: Any) -> int | None:
+    if getattr(result, "dry_run", False):
+        return 0
+    if getattr(result, "success", False):
+        return int(getattr(result, "applied_count", 0) or 0)
+    return None
 
 
 def _execute_collibra_plan(

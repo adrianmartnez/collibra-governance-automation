@@ -11,23 +11,37 @@ import pytest
 from governance.config import Settings
 from governance.identity import plan_identity
 from governance.integrations.collibra import (
+    CollibraAdapterError,
+    CollibraAssetSpec,
+    CollibraAttributeSpec,
     CollibraAuthError,
     CollibraDesiredState,
     LiveCollibraAdapter,
     MockCollibraAdapter,
+    SyncAction,
+    SyncActionType,
+    SyncObjectKind,
     SyncPlan,
     execute_collibra_plan,
     mock_mapping_config,
 )
+from governance.integrations.collibra.import_api import ImportSubmission
 from governance.integrations.collibra.telemetry import (
     ALLOWED_KEYS,
+    JsonlSink,
     RecordingSink,
     bound_sink,
     build_event,
+    endpoint_template,
     execution_scope,
     sink_from_environ,
 )
 from governance.plans.apply_result import build_apply_result
+from support.collibra_contract_server import (
+    CONTRACT_CLIENT_SECRET,
+    CONTRACT_TOKEN,
+    CollibraContractServer,
+)
 
 
 class FakeClock:
@@ -80,6 +94,25 @@ def test_build_event_drops_secrets_and_unknown_keys() -> None:
     assert "super-secret" not in str(event)
     assert "secret-token-value-xyz" not in str(event)
     assert set(event) <= ALLOWED_KEYS
+    assert "password" not in str(event)
+    assert "postgresql://" not in str(event)
+
+
+def test_endpoint_template_strips_dynamic_ids_and_queries() -> None:
+    assert endpoint_template("/rest/2.0/jobs/job-import-0?token=secret") == "/rest/2.0/jobs/{id}"
+    assert endpoint_template("/rest/2.0/assets/custom-asset-id") == "/rest/2.0/assets/{id}"
+    assert endpoint_template("/rest/2.0/domains/custom-domain-ref") == "/rest/2.0/domains/{id}"
+    assert (
+        endpoint_template("/rest/2.0/import/results/job-42/errors")
+        == "/rest/2.0/import/results/{id}/errors"
+    )
+    assert endpoint_template("/rest/2.0/assets") == "/rest/2.0/assets"
+    templated = endpoint_template("/rest/2.0/jobs/job-import-0?token=secret")
+    assert "job-import-0" not in templated
+    assert "token" not in templated
+    assert "secret" not in templated
+    assert build_event({"submission_state": "weird"})["submission_state"] == "unknown"
+    assert build_event({"submission_state": "submitted"})["submission_state"] == "submitted"
 
 
 def test_default_sink_is_null() -> None:
@@ -200,3 +233,381 @@ def test_bound_sink_receives_import_outcome() -> None:
     assert "execution_start" in operations
     assert "execution_outcome" in operations
     assert any(event.get("writes_performed") == 0 for event in sink.events)
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes
+    assert outcomes[0].get("duration_ms", 0) >= 0
+
+
+def _create_plan() -> SyncPlan:
+    config = mock_mapping_config()
+    asset = CollibraAssetSpec(
+        local_id="tbl:orders",
+        name="orders",
+        display_name="orders",
+        asset_type_ref=config.asset_type_refs["table"],
+        domain_ref=config.domain_ref,
+        attributes=(CollibraAttributeSpec(config.attribute_type_refs["local_id"], "tbl:orders"),),
+    )
+    return SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.CREATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id=asset.local_id,
+                reason="create",
+                desired_asset=asset,
+            ),
+        )
+    )
+
+
+def test_nested_execution_scope_reuses_one_correlation() -> None:
+    sink = RecordingSink()
+    with execution_scope(sink=sink, execution_mode="core_rest"):
+        execute_collibra_plan(
+            MockCollibraAdapter(mock_mapping_config()),
+            SyncPlan(actions=()),
+            mock_mapping_config(),
+            apply=False,
+            execution_mode="core_rest",
+        )
+    ids = {event["correlation_id"] for event in sink.events if "correlation_id" in event}
+    assert len(ids) == 1
+    assert [event.get("operation") for event in sink.events].count("execution_start") == 1
+
+
+def test_dry_run_writes_performed_is_zero() -> None:
+    sink = RecordingSink()
+    with bound_sink(sink):
+        execute_collibra_plan(
+            MockCollibraAdapter(mock_mapping_config()),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=False,
+            execution_mode="core_rest",
+        )
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["writes_performed"] == 0
+    assert outcomes[0]["outcome"] == "success"
+
+
+def test_confirmed_success_includes_writes_performed() -> None:
+    sink = RecordingSink()
+    with bound_sink(sink):
+        result = execute_collibra_plan(
+            MockCollibraAdapter(mock_mapping_config()),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=True,
+            execution_mode="core_rest",
+        )
+    assert result.success is True
+    assert result.applied_count == 1
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["writes_performed"] == 1
+
+
+def test_uncertain_import_submission_omits_writes_performed() -> None:
+    sink = RecordingSink()
+
+    class UncertainAdapter:
+        mode = "live"
+
+        def lookup_assets_by_natural_identifier(
+            self, *, name: str, domain_ref: str
+        ) -> list[object]:
+            del name, domain_ref
+            return []
+
+        def submit_json_import(self, document: object) -> None:
+            del document
+            raise CollibraAdapterError("timeout", operation="submit_json_import")
+
+        def poll_job(self, job_id: str) -> dict[str, str]:
+            del job_id
+            raise AssertionError("poll must not run")
+
+    with bound_sink(sink):
+        result = execute_collibra_plan(
+            UncertainAdapter(),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=True,
+            execution_mode="import_v2",
+        )
+    assert result.success is False
+    batches = [event for event in sink.events if event.get("operation") == "import_batch"]
+    assert batches
+    assert batches[0]["submission_state"] == "unknown"
+    assert "job_id" not in batches[0]
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert "writes_performed" not in outcomes[0]
+    assert outcomes[0].get("writes_performed") != 0
+
+
+def test_empty_import_job_id_emits_unknown_submission() -> None:
+    sink = RecordingSink()
+
+    class EmptyJobAdapter:
+        mode = "live"
+
+        def lookup_assets_by_natural_identifier(
+            self, *, name: str, domain_ref: str
+        ) -> list[object]:
+            del name, domain_ref
+            return []
+
+        def submit_json_import(self, document: object) -> ImportSubmission:
+            del document
+            return ImportSubmission(job_id="")
+
+        def poll_job(self, job_id: str) -> dict[str, str]:
+            del job_id
+            raise AssertionError("poll must not run")
+
+    with bound_sink(sink):
+        result = execute_collibra_plan(
+            EmptyJobAdapter(),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=True,
+            execution_mode="import_v2",
+        )
+    assert result.success is False
+    batches = [event for event in sink.events if event.get("operation") == "import_batch"]
+    assert batches[0]["submission_state"] == "unknown"
+    assert "job_id" not in batches[0]
+
+
+def test_sync_batch_and_finalize_submission_states() -> None:
+    sink = RecordingSink()
+    sync_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+    class UncertainSyncAdapter:
+        mode = "live"
+
+        def lookup_assets_by_natural_identifier(
+            self, *, name: str, domain_ref: str
+        ) -> list[object]:
+            del name, domain_ref
+            return []
+
+        def submit_sync_batch(self, synchronization_id: str, document: object) -> None:
+            del synchronization_id, document
+            raise CollibraAdapterError("timeout", operation="submit_sync_batch")
+
+        def poll_job(self, job_id: str) -> dict[str, str]:
+            del job_id
+            raise AssertionError("poll must not run")
+
+        def submit_sync_finalize(
+            self, synchronization_id: str, *, strategy: str = "IGNORE"
+        ) -> None:
+            del synchronization_id, strategy
+            raise AssertionError("finalize must not run")
+
+    with bound_sink(sink):
+        result = execute_collibra_plan(
+            UncertainSyncAdapter(),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=True,
+            execution_mode="sync_v2",
+            synchronization_id=sync_id,
+        )
+    assert result.success is False
+    batches = [event for event in sink.events if event.get("operation") == "sync_batch"]
+    assert batches[0]["submission_state"] == "unknown"
+    assert "job_id" not in batches[0]
+    assert not any(event.get("operation") == "sync_finalize" for event in sink.events)
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert "writes_performed" not in outcomes[0]
+
+
+def test_sync_finalize_emits_submitted_then_terminal_view() -> None:
+    sink = RecordingSink()
+    sync_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+    class SuccessSyncAdapter:
+        mode = "live"
+
+        def lookup_assets_by_natural_identifier(
+            self, *, name: str, domain_ref: str
+        ) -> list[object]:
+            del name, domain_ref
+            return []
+
+        def submit_sync_batch(self, synchronization_id: str, document: object) -> ImportSubmission:
+            del synchronization_id, document
+            return ImportSubmission(job_id="job-batch-0")
+
+        def poll_job(self, job_id: str):
+            from governance.integrations.collibra.jobs import classify_job
+
+            return classify_job(
+                {"id": job_id, "state": "COMPLETED", "result": "SUCCESS"},
+                job_id=job_id,
+            )
+
+        def submit_sync_finalize(
+            self, synchronization_id: str, *, strategy: str = "IGNORE"
+        ) -> ImportSubmission:
+            del synchronization_id, strategy
+            return ImportSubmission(job_id="job-finalize")
+
+    with bound_sink(sink):
+        result = execute_collibra_plan(
+            SuccessSyncAdapter(),
+            _create_plan(),
+            mock_mapping_config(),
+            apply=True,
+            execution_mode="sync_v2",
+            synchronization_id=sync_id,
+        )
+    assert result.success is True
+    batches = [event for event in sink.events if event.get("operation") == "sync_batch"]
+    assert batches[0]["submission_state"] == "submitted"
+    assert batches[0]["job_id"] == "job-batch-0"
+    finals = [event for event in sink.events if event.get("operation") == "sync_finalize"]
+    assert finals[0]["submission_state"] == "submitted"
+    assert finals[0]["job_id"] == "job-finalize"
+    assert any(event.get("remote_state") == "COMPLETED" for event in finals)
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert outcomes[0]["writes_performed"] == 1
+
+
+def test_oauth_transport_failure_includes_duration() -> None:
+    sink = RecordingSink()
+
+    class TimeoutTransport(httpx.BaseTransport):
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            del request
+            raise httpx.ConnectTimeout("timed out")
+
+    adapter = LiveCollibraAdapter.from_settings(
+        _settings(
+            collibra_bearer_token="",
+            collibra_client_id="cid",
+            collibra_client_secret="csecret",
+        ),
+        mock_mapping_config(),
+        transport=TimeoutTransport(),
+    )
+    with (
+        execution_scope(sink=sink, execution_mode="core_rest"),
+        pytest.raises(CollibraAuthError),
+    ):
+        adapter.read_json("/rest/2.0/application/info")
+    tokens = [event for event in sink.events if event.get("operation") == "oauth_token"]
+    assert tokens
+    assert tokens[0].get("duration_ms", -1) >= 0
+    assert tokens[0].get("outcome") == "error"
+    assert "status" not in tokens[0]
+    assert "csecret" not in str(sink.events)
+
+
+def test_sink_failure_does_not_change_result_or_identity() -> None:
+    class BoomSink:
+        def emit(self, event: dict[str, object]) -> None:
+            del event
+            raise OSError("boom")
+
+    plan = _create_plan()
+    adapter = MockCollibraAdapter(mock_mapping_config())
+    before_plan = plan.to_dict()
+    before_digest = plan_identity(before_plan).digest
+    with execution_scope(sink=BoomSink(), execution_mode="core_rest"):
+        result = execute_collibra_plan(
+            adapter,
+            plan,
+            mock_mapping_config(),
+            apply=False,
+            execution_mode="core_rest",
+        )
+    control = execute_collibra_plan(
+        MockCollibraAdapter(mock_mapping_config()),
+        plan,
+        mock_mapping_config(),
+        apply=False,
+        execution_mode="core_rest",
+    )
+    assert result.success is True
+    assert result.dry_run is True
+    assert result.applied_count == control.applied_count
+    assert plan.to_dict() == before_plan
+    assert plan_identity(plan.to_dict()).digest == before_digest
+    payload = build_apply_result(
+        sync_plan=plan,
+        result=result,
+        plan_content_identity=plan_identity(plan.to_dict()),
+    )
+    blob = str(payload)
+    assert "correlation_id" not in payload
+    assert "telemetry" not in payload
+    assert "duration_ms" not in blob
+
+
+def test_jsonl_sink_without_path_writes_stderr_not_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    JsonlSink().emit({"operation": "execution_start"})
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "execution_start" in captured.err
+
+
+def test_end_to_end_import_uses_one_correlation() -> None:
+    sink = RecordingSink()
+    clock = FakeClock()
+    with CollibraContractServer() as server:
+        adapter = LiveCollibraAdapter.from_settings(
+            _settings(
+                collibra_base_url=server.base_url,
+                collibra_bearer_token="",
+                collibra_client_id="contract-client",
+                collibra_client_secret=CONTRACT_CLIENT_SECRET,
+            ),
+            mock_mapping_config(),
+            monotonic_clock=clock,
+            sleeper=clock.sleep,
+        )
+        with execution_scope(sink=sink, execution_mode="import_v2"):
+            adapter.read_remote_state(CollibraDesiredState(assets=()))
+            result = execute_collibra_plan(
+                adapter,
+                _create_plan(),
+                mock_mapping_config(),
+                apply=True,
+                execution_mode="import_v2",
+            )
+    assert result.success is True
+    operations = {event.get("operation") for event in sink.events}
+    assert "oauth_token" in operations
+    assert "http_attempt" in operations
+    assert "import_batch" in operations
+    assert "job_poll" in operations
+    assert "execution_outcome" in operations
+    assert [event.get("operation") for event in sink.events].count("execution_start") == 1
+    ids = {event["correlation_id"] for event in sink.events if "correlation_id" in event}
+    assert len(ids) == 1
+    for event in sink.events:
+        if "correlation_id" in event:
+            assert event["correlation_id"] == next(iter(ids))
+        if "endpoint_path" in event:
+            assert "job-import-0" not in str(event["endpoint_path"])
+            assert "?" not in str(event["endpoint_path"])
+            assert "token=" not in str(event["endpoint_path"])
+    blob = str(sink.events)
+    assert CONTRACT_TOKEN not in blob
+    assert CONTRACT_CLIENT_SECRET not in blob
+    assert "Authorization" not in blob
+    assert "Bearer " not in blob
+    assert "access_token" not in blob
+    assert "client_secret" not in blob
+    assert "password" not in blob
+    batches = [event for event in sink.events if event.get("operation") == "import_batch"]
+    assert batches[0]["submission_state"] == "submitted"
+    assert batches[0]["job_id"] == "job-import-0"
+    outcomes = [event for event in sink.events if event.get("operation") == "execution_outcome"]
+    assert "writes_performed" in outcomes[0]
+    assert outcomes[0]["duration_ms"] >= 0

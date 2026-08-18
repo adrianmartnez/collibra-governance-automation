@@ -41,15 +41,29 @@ ALLOWED_KEYS = frozenset(
         "remote_state",
         "resource_count",
         "status",
+        "submission_state",
         "writes_performed",
     }
 )
 
 REMOTE_STATES = frozenset({"WAITING", "RUNNING", "CANCELING", "COMPLETED", "CANCELED", "ERROR"})
 REMOTE_RESULTS = frozenset({"NOT_SET", "SUCCESS", "COMPLETED_WITH_ERROR", "FAILURE", "ABORTED"})
+SUBMISSION_STATES = frozenset({"not_attempted", "submitted", "unknown"})
 
 _UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+_ID_PATH_PREFIXES = (
+    "/rest/2.0/jobs/",
+    "/rest/2.0/assets/",
+    "/rest/2.0/attributes/",
+    "/rest/2.0/relations/",
+    "/rest/2.0/domains/",
+    "/rest/2.0/assetTypes/",
+    "/rest/2.0/attributeTypes/",
+    "/rest/2.0/relationTypes/",
+    "/rest/2.0/import/results/",
+    "/rest/2.0/import/synchronize/",
 )
 _SECRET_MARKERS = (
     "authorization",
@@ -134,8 +148,16 @@ def get_sink() -> TelemetrySink:
 
 @contextmanager
 def execution_scope(*, execution_mode: str = "", sink: TelemetrySink | None = None):
-    """Bind a correlation id for one logical Collibra execution."""
-    cid_token: Token[str | None] = _correlation_id.set(str(uuid4()))
+    """Bind a correlation id for one logical Collibra execution.
+
+    Nested scopes reuse the root correlation ID and do not emit a second
+    ``execution_start``. The sink may be rebound for the nested duration.
+    """
+    existing_correlation = current_correlation_id()
+    owns_correlation = existing_correlation is None
+    cid_token: Token[str | None] | None = None
+    if owns_correlation:
+        cid_token = _correlation_id.set(str(uuid4()))
     if sink is not None:
         active = sink
     else:
@@ -143,11 +165,13 @@ def execution_scope(*, execution_mode: str = "", sink: TelemetrySink | None = No
         active = existing if existing is not None else sink_from_environ()
     sink_token: Token[TelemetrySink | None] = _sink.set(active)
     try:
-        emit(operation="execution_start", execution_mode=execution_mode)
+        if owns_correlation:
+            emit(operation="execution_start", execution_mode=execution_mode)
         yield current_correlation_id()
     finally:
-        _correlation_id.reset(cid_token)
         _sink.reset(sink_token)
+        if owns_correlation and cid_token is not None:
+            _correlation_id.reset(cid_token)
 
 
 def emit(**fields: Any) -> None:
@@ -175,17 +199,27 @@ def build_event(fields: dict[str, Any]) -> dict[str, Any]:
 
 
 def endpoint_template(value: str) -> str:
-    """Return a query-free path with UUIDs replaced by {id}."""
+    """Return a query-free path with dynamic segments replaced by {id}."""
     raw = (value or "").split("?", 1)[0]
     if "://" in raw:
         from urllib.parse import urlparse
 
         parsed = urlparse(raw)
         raw = parsed.path or raw
-    return _UUID_RE.sub("{id}", raw)
+    raw = _UUID_RE.sub("{id}", raw)
+    for prefix in _ID_PATH_PREFIXES:
+        if raw.startswith(prefix) and len(raw) > len(prefix):
+            rest = raw[len(prefix) :]
+            remainder = rest.split("/", 1)
+            suffix = f"/{remainder[1]}" if len(remainder) == 2 else ""
+            return f"{prefix}{{id}}{suffix}"
+    return raw
 
 
 def _sanitize_value(key: str, value: Any) -> Any:
+    if key == "submission_state":
+        text = str(value)
+        return text if text in SUBMISSION_STATES else "unknown"
     if key in {"remote_state", "remote_result"}:
         text = str(value)
         allowed = REMOTE_STATES if key == "remote_state" else REMOTE_RESULTS
