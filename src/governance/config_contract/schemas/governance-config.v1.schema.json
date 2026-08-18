@@ -177,7 +177,13 @@
           }
         },
         "auth": { "$ref": "#/$defs/collibraAuth" },
-        "execution_mode_env": { "$ref": "#/$defs/envName" }
+        "execution_mode_env": { "$ref": "#/$defs/envName" },
+        "synchronization_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional UUID override for Collibra synchronization identity."
+        },
+        "synchronization_id_env": { "$ref": "#/$defs/envName" }
       }
     },
     "collibraAuth": {
@@ -193,7 +199,9 @@
         "token_url_env": { "$ref": "#/$defs/envName" },
         "scope_env": { "$ref": "#/$defs/envName" },
         "oauth_client_auth_env": { "$ref": "#/$defs/envName" },
-        "timeout_seconds_env": { "$ref": "#/$defs/envName" }
+        "timeout_seconds_env": { "$ref": "#/$defs/envName" },
+        "job_poll_interval_seconds_env": { "$ref": "#/$defs/envName" },
+        "job_poll_timeout_seconds_env": { "$ref": "#/$defs/envName" }
       }
     }
   }

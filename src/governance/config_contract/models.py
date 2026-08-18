@@ -73,6 +73,8 @@ class CollibraAuthRefs:
     scope_env: str | None = None
     oauth_client_auth_env: str | None = None
     timeout_seconds_env: str | None = None
+    job_poll_interval_seconds_env: str | None = None
+    job_poll_timeout_seconds_env: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         payload: dict[str, str] = {}
@@ -87,6 +89,8 @@ class CollibraAuthRefs:
             "scope_env",
             "oauth_client_auth_env",
             "timeout_seconds_env",
+            "job_poll_interval_seconds_env",
+            "job_poll_timeout_seconds_env",
         ):
             value = getattr(self, key)
             if value is not None:
@@ -100,6 +104,8 @@ class CollibraTargetConfig:
     mode_env: str | None = None
     auth: CollibraAuthRefs | None = None
     execution_mode_env: str | None = None
+    synchronization_id: str | None = None
+    synchronization_id_env: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"mapping": {"path": self.mapping_path}}
@@ -109,6 +115,10 @@ class CollibraTargetConfig:
             payload["auth"] = self.auth.to_dict()
         if self.execution_mode_env is not None:
             payload["execution_mode_env"] = self.execution_mode_env
+        if self.synchronization_id is not None:
+            payload["synchronization_id"] = self.synchronization_id
+        if self.synchronization_id_env is not None:
+            payload["synchronization_id_env"] = self.synchronization_id_env
         return payload
 
 

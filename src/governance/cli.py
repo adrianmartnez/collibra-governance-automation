@@ -67,8 +67,10 @@ from governance.integrations.collibra import (
     CollibraMappingConfig,
     CollibraMappingError,
     ImportExecutionResult,
+    ImportJobExecutionResult,
     SyncAction,
     SyncActionType,
+    SyncLifecycleResult,
     SyncObjectKind,
     SyncPlan,
     SyncResult,
@@ -88,15 +90,21 @@ from governance.plans import (
     PlanError,
     SavedGovernancePlan,
     build_apply_result,
+    build_import_job_result,
+    build_import_job_sync_payload,
     build_import_submission_result,
     build_import_sync_payload,
     build_saved_plan,
     build_stale_result,
+    build_sync_lifecycle_result,
+    build_sync_lifecycle_sync_payload,
     compute_remote_state_identity_value,
     format_apply_result_human,
+    format_import_job_result_human,
     format_import_submission_human,
     format_import_sync_human,
     format_stale_human,
+    format_sync_lifecycle_result_human,
     identity_mismatch,
     load_saved_plan,
     plan_diagnostics_failure,
@@ -955,6 +963,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             mapping_config,
             apply=apply,
             execution_mode=settings.collibra_execution_mode,
+            synchronization_id=_synchronization_id_for_mode(settings),
         )
     except CollibraAdapterError as exc:
         return _emit_operational(exc, fmt)
@@ -968,6 +977,26 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         else:
             sys.stdout.write(format_import_submission_human(payload))
         return 0 if result.error is None else 1
+    if isinstance(result, ImportJobExecutionResult):
+        payload = build_import_job_result(
+            result=result,
+            plan_content_identity=saved.content_identity(),
+        )
+        if fmt == "json":
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_import_job_result_human(payload))
+        return 0 if result.success else 1
+    if isinstance(result, SyncLifecycleResult):
+        payload = build_sync_lifecycle_result(
+            result=result,
+            plan_content_identity=saved.content_identity(),
+        )
+        if fmt == "json":
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_sync_lifecycle_result_human(payload))
+        return 0 if result.success else 1
     payload = build_apply_result(
         sync_plan=saved.sync_plan,
         result=result,
@@ -1419,6 +1448,7 @@ def _cmd_sync(
             mapping_config,
             apply=apply,
             execution_mode=settings.collibra_execution_mode,
+            synchronization_id=_synchronization_id_for_mode(settings),
         )
     except CollibraAdapterError as exc:
         return _emit_operational(exc, "json" if json_output else "human")
@@ -1431,6 +1461,22 @@ def _cmd_sync(
         else:
             sys.stdout.write(format_import_sync_human(payload))
         return 0
+    if isinstance(result, ImportJobExecutionResult):
+        if result.error is not None and result.submitted is False:
+            raise CliOperationalError(result.error)
+        payload = build_import_job_sync_payload(mode=mode, result=result)
+        if json_output:
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_import_job_result_human(payload))
+        return 0 if result.success else 1
+    if isinstance(result, SyncLifecycleResult):
+        payload = build_sync_lifecycle_sync_payload(mode=mode, result=result)
+        if json_output:
+            _print_json(payload)
+        else:
+            sys.stdout.write(format_sync_lifecycle_result_human(payload))
+        return 0 if result.success else 1
     if not result.success:
         message = result.error or _SAFE_SYNC_FAILED
         raise CliOperationalError(message)
@@ -1479,6 +1525,16 @@ def _resolve_mapping_config_from_canonical(
 
 def _scan_model(settings: Settings) -> GovernanceModel:
     return PostgresMetadataScanner(settings).scan()
+
+
+def _synchronization_id_for_mode(settings: Settings) -> str | None:
+    if settings.collibra_execution_mode != "sync_v2":
+        return None
+    from governance.integrations.collibra.synchronization import (
+        effective_synchronization_id,
+    )
+
+    return effective_synchronization_id(settings)
 
 
 def _scan_summary(model: GovernanceModel) -> dict[str, Any]:

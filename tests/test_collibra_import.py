@@ -322,6 +322,10 @@ def test_import_submit_preserves_job_id_without_claiming_completion() -> None:
         path = urlparse(str(request.url)).path
         if request.method == "POST" and path.endswith("/import/json-job"):
             return httpx.Response(200, json={"id": "job-123"})
+        if request.method == "GET" and path.endswith("/jobs/job-123"):
+            return httpx.Response(
+                200, json={"id": "job-123", "state": "COMPLETED", "result": "SUCCESS"}
+            )
         return httpx.Response(500, json={"error": "unexpected"})
 
     adapter = LiveCollibraAdapter.from_settings(
@@ -331,17 +335,13 @@ def test_import_submit_preserves_job_id_without_claiming_completion() -> None:
         sleeper=lambda _s: None,
     )
     result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert isinstance(result, ImportExecutionResult)
-    assert len(requests) == 1
-    assert urlparse(str(requests[0].url)).path == "/rest/2.0/import/json-job"
-    assert result.job_id == "job-123"
-    assert result.submission is not None
-    assert result.submission.job_id == "job-123"
-    assert result.submitted is True
-    assert result.dry_run is False
-    assert result.applied_count == 0
+    assert [urlparse(str(item.url)).path for item in requests] == [
+        "/rest/2.0/import/json-job",
+        "/rest/2.0/jobs/job-123",
+    ]
+    assert result.success is True
+    assert result.applied_count == 1
     assert getattr(result, "completed", None) is not True
-    assert requests[0].method == "POST"
 
 
 def test_import_dry_run_returns_inspectable_document() -> None:
@@ -417,6 +417,10 @@ def test_import_preview_matches_submitted_multipart_bytes() -> None:
             assert "secret-token-value-xyz" not in body
             assert "/import/synchronize" not in path
             return httpx.Response(200, json={"id": "job-1"})
+        if request.method == "GET" and path.endswith("/jobs/job-1"):
+            return httpx.Response(
+                200, json={"id": "job-1", "state": "COMPLETED", "result": "SUCCESS"}
+            )
         return httpx.Response(500, json={"error": "unexpected"})
 
     adapter = LiveCollibraAdapter.from_settings(
@@ -429,9 +433,12 @@ def test_import_preview_matches_submitted_multipart_bytes() -> None:
     assert preview.submitted is False
     assert requests == []
     applied = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert applied.submitted is True
-    assert applied.applied_count == 0
-    assert len(requests) == 1
+    assert applied.success is True
+    assert applied.applied_count == 1
+    assert [urlparse(str(item.url)).path for item in requests] == [
+        "/rest/2.0/import/json-job",
+        "/rest/2.0/jobs/job-1",
+    ]
     assert preview.document.canonical_json() in requests[0].content
     assert "secret-token-value-xyz" not in requests[0].content.decode("utf-8", errors="replace")
 
@@ -506,9 +513,9 @@ def test_core_rest_does_not_call_import() -> None:
     assert requests == []
 
 
-def test_sync_v2_is_not_a_valid_execution_mode() -> None:
-    with pytest.raises(ValueError, match="core_rest or import_v2"):
-        _settings(collibra_execution_mode="sync_v2")
+def test_unknown_execution_mode_is_rejected() -> None:
+    with pytest.raises(ValueError, match="core_rest, import_v2, or sync_v2"):
+        _settings(collibra_execution_mode="not_a_mode")
 
 
 def test_import_v2_binds_execution_in_target_context_identity() -> None:
@@ -562,6 +569,10 @@ def test_create_absent_natural_identifier_allows_submit() -> None:
             return httpx.Response(200, json=_empty_page())
         if request.method == "POST" and path.endswith("/import/json-job"):
             return httpx.Response(200, json={"id": "job-create"})
+        if request.method == "GET" and path.endswith("/jobs/job-create"):
+            return httpx.Response(
+                200, json={"id": "job-create", "state": "COMPLETED", "result": "SUCCESS"}
+            )
         return httpx.Response(500, json={"error": "unexpected"})
 
     adapter = LiveCollibraAdapter.from_settings(
@@ -571,14 +582,13 @@ def test_create_absent_natural_identifier_allows_submit() -> None:
         sleeper=lambda _s: None,
     )
     result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert isinstance(result, ImportExecutionResult)
-    assert result.submitted is True
-    assert result.job_id == "job-create"
-    assert result.applied_count == 0
-    methods = [request.method for request in requests]
-    assert methods == ["GET", "POST"]
-    assert urlparse(str(requests[0].url)).path == "/rest/2.0/assets"
-    assert urlparse(str(requests[1].url)).path == "/rest/2.0/import/json-job"
+    assert result.success is True
+    assert result.applied_count == 1
+    assert [urlparse(str(item.url)).path for item in requests] == [
+        "/rest/2.0/assets",
+        "/rest/2.0/import/json-job",
+        "/rest/2.0/jobs/job-create",
+    ]
     assert compiled.to_list()[0]["identifier"] == {
         "name": "orders",
         "domain": {"id": config.domain_ref},
@@ -815,6 +825,10 @@ def test_whitespace_create_identifier_is_looked_up_exactly() -> None:
             return httpx.Response(200, json=_empty_page())
         if request.method == "POST" and path.endswith("/import/json-job"):
             return httpx.Response(200, json={"id": "job-ws"})
+        if request.method == "GET" and path.endswith("/jobs/job-ws"):
+            return httpx.Response(
+                200, json={"id": "job-ws", "state": "COMPLETED", "result": "SUCCESS"}
+            )
         return httpx.Response(500, json={"error": "unexpected"})
 
     adapter = LiveCollibraAdapter.from_settings(
@@ -824,9 +838,14 @@ def test_whitespace_create_identifier_is_looked_up_exactly() -> None:
         sleeper=lambda _s: None,
     )
     result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert result.submitted is True
+    assert result.success is True
     assert requests[0].url.params.get("name") == " orders "
     assert requests[0].url.params.get("name") != "orders"
+    assert [urlparse(str(item.url)).path for item in requests] == [
+        "/rest/2.0/assets",
+        "/rest/2.0/import/json-job",
+        "/rest/2.0/jobs/job-ws",
+    ]
     assert compiled.canonical_json() in requests[1].content
 
 

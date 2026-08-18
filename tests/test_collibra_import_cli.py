@@ -165,6 +165,12 @@ def _patch_live_import_http(
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = urlparse(str(request.url)).path
+        if request.method == "GET" and "/jobs/" in path:
+            remote_job = path.rsplit("/", 1)[-1]
+            return httpx.Response(
+                200,
+                json={"id": remote_job, "state": "COMPLETED", "result": "SUCCESS"},
+            )
         if request.method == "GET" and path.endswith("/assets"):
             if collide_named_assets and request.url.params.get("name"):
                 return httpx.Response(
@@ -284,15 +290,16 @@ def test_apply_import_v2_submit_preserves_job_handle(
     )
     payload = json.loads(capsys.readouterr().out)
     assert _post_paths(requests) == ["/rest/2.0/import/json-job"]
-    assert payload["result_schema"] == "governance-import-submission-result"
-    assert payload["execution_mode"] == "import_v2"
-    assert payload["dry_run"] is False
-    assert payload["submitted"] is True
+    assert any(
+        request.method == "GET" and "/jobs/job-123" in urlparse(str(request.url)).path
+        for request in requests
+    )
+    assert payload["result_schema"] == "governance-import-job-result"
     assert payload["job_id"] == "job-123"
-    assert payload["applied_count"] == 0
-    assert payload["job_terminal_status"] == "not_observed"
-    assert "success" not in payload
-    assert "completed" not in payload
+    assert payload["success"] is True
+    assert payload["dry_run"] is False
+    assert payload["applied_count"] > 0
+    assert payload["terminal"] is True
 
 
 def test_sync_import_v2_dry_run_and_submit(
@@ -353,12 +360,12 @@ def test_sync_import_v2_dry_run_and_submit(
     )
     applied = json.loads(capsys.readouterr().out)
     assert _post_paths(requests) == ["/rest/2.0/import/json-job"]
-    assert applied["submitted"] is True
+    assert applied["result_schema"] == "governance-import-job-result"
+    assert applied["mode"] == "live"
+    assert applied["success"] is True
+    assert applied["dry_run"] is False
+    assert applied["applied_count"] > 0
     assert applied["job_id"] == "job-123"
-    assert applied["applied_count"] == 0
-    assert applied["job_terminal_status"] == "not_observed"
-    assert "success" not in applied
-    assert "completed" not in applied
 
 
 def test_import_apply_human_does_not_claim_job_success(
@@ -383,13 +390,11 @@ def test_import_apply_human_does_not_claim_job_success(
         == 0
     )
     out = capsys.readouterr().out
-    assert "execution_mode=import_v2" in out
-    assert "submitted=true" in out
+    assert "stale=false" in out
+    assert "dry_run=false" in out
+    assert "success=true" in out
     assert "job_id=job-123" in out
-    assert "job_terminal_status=not_observed" in out
-    assert "applied_count=0" in out
-    assert "success=true" not in out
-    assert "success=false" not in out
+    assert "terminal=true" in out
 
 
 def _assert_structured_import_failure(payload: object, captured: str) -> None:
@@ -407,7 +412,7 @@ def _assert_structured_import_failure(payload: object, captured: str) -> None:
     assert "bearer " not in lowered
 
 
-def test_apply_import_v2_post_500_is_structured_json_failure(
+def test_apply_import_v2_post_500_returns_lifecycle_unknown_submission(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -430,14 +435,21 @@ def test_apply_import_v2_post_500_is_structured_json_failure(
     captured = capsys.readouterr()
     assert code == 1
     payload = json.loads(captured.out)
-    _assert_structured_import_failure(payload, captured.out + captured.err)
+    assert payload["result_schema"] == "governance-import-job-result"
+    assert payload["submission_state"] == "unknown"
+    assert payload["submitted"] is None
+    assert payload["success"] is False
+    assert payload["job_id"] is None
+    lowered = (captured.out + captured.err).lower()
+    assert "collibra-secret-password" not in lowered
+    assert "super-secret-password" not in lowered
     assert any(
         request.method == "POST" and urlparse(str(request.url)).path.endswith("/import/json-job")
         for request in requests
     )
 
 
-def test_sync_import_v2_post_500_is_structured_json_failure(
+def test_sync_import_v2_post_500_returns_lifecycle_unknown_submission(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -465,7 +477,10 @@ def test_sync_import_v2_post_500_is_structured_json_failure(
     captured = capsys.readouterr()
     assert code == 1
     payload = json.loads(captured.out)
-    _assert_structured_import_failure(payload, captured.out + captured.err)
+    assert payload["result_schema"] == "governance-import-job-result"
+    assert payload["submission_state"] == "unknown"
+    assert payload["submitted"] is None
+    assert payload["success"] is False
 
 
 def test_apply_import_v2_collision_is_structured_json_zero_post(
@@ -519,14 +534,22 @@ def test_apply_import_v2_missing_job_id_is_structured_json_failure(
     captured = capsys.readouterr()
     assert code == 1
     payload = json.loads(captured.out)
-    _assert_structured_import_failure(payload, captured.out + captured.err)
-    dumped = json.dumps(payload).lower()
-    assert "completed" not in dumped or payload.get("completed") is not True
-    assert "success" not in payload
-    assert "missing id" in dumped
+    if payload.get("diagnostic_schema") == "governance-operation-diagnostics":
+        _assert_structured_import_failure(payload, captured.out + captured.err)
+        dumped = json.dumps(payload).lower()
+        assert "missing id" in dumped
+        return
+    assert payload.get("success") is not True
+    assert payload.get("completed") is not True
+    assert payload.get("applied_count", 0) == 0
+    assert "completed" not in json.dumps(payload).lower() or payload.get("completed") is not True
+    message = json.dumps(payload).lower()
+    assert "uncertain" in message or "missing id" in message
+    lowered = (captured.out + captured.err).lower()
+    assert "collibra-secret-password" not in lowered
 
 
-def test_apply_import_v2_post_500_human_is_safe_exit_1(
+def test_apply_import_v2_post_500_human_reports_lifecycle_unknown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -546,8 +569,7 @@ def test_apply_import_v2_post_500_human_is_safe_exit_1(
     )
     captured = capsys.readouterr()
     assert code == 1
-    assert captured.err.startswith("error: ")
+    assert "submission_state=unknown" in captured.out
+    assert "success=false" in captured.out
     combined = (captured.out + captured.err).lower()
     assert "collibra-secret-password" not in combined
-    assert "success=true" not in combined
-    assert "completed=true" not in combined

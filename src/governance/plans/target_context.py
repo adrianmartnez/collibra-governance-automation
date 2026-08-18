@@ -23,6 +23,13 @@ def build_target_context_projection(settings: Settings) -> dict[str, Any]:
     execution = getattr(settings, "collibra_execution_mode", "core_rest")
     if execution == "import_v2":
         projection["execution"] = "import_v2"
+    elif execution == "sync_v2":
+        from governance.integrations.collibra.synchronization import (
+            effective_synchronization_id,
+        )
+
+        projection["execution"] = "sync_v2"
+        projection["effective_synchronization_id"] = effective_synchronization_id(settings)
     return projection
 
 

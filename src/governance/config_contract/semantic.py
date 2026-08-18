@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from uuid import UUID
 
 from governance.config_contract.errors import (
     CODE_SEMANTIC,
@@ -253,6 +254,33 @@ def _validate_target(target: Any, pointer: str) -> list[DiagnosticError]:
                 f"{pointer}/config/execution_mode_env",
             )
         )
+    has_sync_literal = config.get("synchronization_id") is not None
+    has_sync_env = config.get("synchronization_id_env") is not None
+    if has_sync_literal and has_sync_env:
+        errors.append(
+            DiagnosticError(
+                code=CODE_SEMANTIC,
+                path=f"{pointer}/config",
+                message="synchronization_id and synchronization_id_env are mutually exclusive",
+            )
+        )
+    if has_sync_literal:
+        literal = config.get("synchronization_id")
+        if not isinstance(literal, str) or not _is_uuid_string(literal):
+            errors.append(
+                DiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path=f"{pointer}/config/synchronization_id",
+                    message="synchronization_id must be a UUID",
+                )
+            )
+    if has_sync_env:
+        errors.extend(
+            _validate_env_name(
+                config["synchronization_id_env"],
+                f"{pointer}/config/synchronization_id_env",
+            )
+        )
 
     mapping = config.get("mapping")
     if not isinstance(mapping, dict) or "path" not in mapping:
@@ -284,6 +312,14 @@ def _validate_target(target: Any, pointer: str) -> list[DiagnosticError]:
                 if value is not None:
                     errors.extend(_validate_env_name(value, f"{pointer}/config/auth/{key}"))
     return errors
+
+
+def _is_uuid_string(value: str) -> bool:
+    try:
+        UUID(value)
+    except ValueError:
+        return False
+    return True
 
 
 def _validate_env_name(value: Any, pointer: str) -> list[DiagnosticError]:

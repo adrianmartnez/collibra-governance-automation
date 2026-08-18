@@ -621,3 +621,51 @@ def test_remote_state_mismatch_exit_5(
     # Matching target_context still performs a remote read before declaring stale.
     assert int(adapter_calls["read"]) >= 1
     assert adapter_calls["writes"] == 0
+
+
+def test_sync_id_env_value_change_is_stale_zero_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    uuid_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    uuid_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    _patch_env(
+        monkeypatch,
+        COLLIBRA_MODE="live",
+        COLLIBRA_BASE_URL="https://tenant-a.example.com",
+        COLLIBRA_BEARER_TOKEN="",
+        COLLIBRA_EXECUTION_MODE="sync_v2",
+        COLLIBRA_SYNCHRONIZATION_ID=uuid_a,
+    )
+    _patch_scanner(monkeypatch)
+    adapter_calls = _patch_adapter(monkeypatch)
+    config = _write_workspace(tmp_path)
+    plan_path = tmp_path / "plan.gplan"
+    assert (
+        main(
+            [
+                "plan",
+                "--config",
+                str(config),
+                "--output",
+                str(plan_path),
+                "--format",
+                "json",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    saved = load_saved_plan(plan_path)
+    assert saved.target_context == {"provider": "collibra", "mode": "live"}
+
+    monkeypatch.setenv("COLLIBRA_SYNCHRONIZATION_ID", uuid_b)
+    adapter_calls = _patch_adapter(monkeypatch)
+    code = main(["apply", str(plan_path), "--config", str(config), "--format", "json"])
+    assert code == 5
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stale"] is True
+    assert any(item["category"] == "target_context" for item in payload["mismatches"])
+    assert adapter_calls["read"] == 0
+    assert adapter_calls["writes"] == 0

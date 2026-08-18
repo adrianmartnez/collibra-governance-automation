@@ -109,10 +109,14 @@ def _normalize_collibra_config(config: dict[str, Any]) -> CollibraTargetConfig:
             scope_env=auth_raw.get("scope_env"),
             oauth_client_auth_env=auth_raw.get("oauth_client_auth_env"),
             timeout_seconds_env=auth_raw.get("timeout_seconds_env"),
+            job_poll_interval_seconds_env=auth_raw.get("job_poll_interval_seconds_env"),
+            job_poll_timeout_seconds_env=auth_raw.get("job_poll_timeout_seconds_env"),
         )
     return CollibraTargetConfig(
         mapping_path=mapping_path,
         mode_env=config.get("mode_env"),
         auth=auth,
         execution_mode_env=config.get("execution_mode_env"),
+        synchronization_id=config.get("synchronization_id"),
+        synchronization_id_env=config.get("synchronization_id_env"),
     )

@@ -8,6 +8,8 @@ from pathlib import Path
 
 from governance.config import (
     DEFAULT_COLLIBRA_EXECUTION_MODE,
+    DEFAULT_COLLIBRA_JOB_POLL_INTERVAL_SECONDS,
+    DEFAULT_COLLIBRA_JOB_POLL_TIMEOUT_SECONDS,
     DEFAULT_COLLIBRA_MODE,
     DEFAULT_COLLIBRA_TIMEOUT_SECONDS,
     DEFAULT_POSTGRES_DB,
@@ -76,7 +78,10 @@ def resolve_settings(
     collibra_oauth_scope = base.collibra_oauth_scope
     collibra_oauth_client_auth = base.collibra_oauth_client_auth
     collibra_timeout_seconds = base.collibra_timeout_seconds
+    collibra_job_poll_interval_seconds = base.collibra_job_poll_interval_seconds
+    collibra_job_poll_timeout_seconds = base.collibra_job_poll_timeout_seconds
     collibra_execution_mode = base.collibra_execution_mode
+    collibra_synchronization_id = base.collibra_synchronization_id
 
     if canonical.targets:
         target = canonical.targets[0]
@@ -92,7 +97,10 @@ def resolve_settings(
         collibra_oauth_scope = resolved["oauth_scope"]
         collibra_oauth_client_auth = resolved["oauth_client_auth"]
         collibra_timeout_seconds = resolved["timeout_seconds"]
+        collibra_job_poll_interval_seconds = resolved["job_poll_interval_seconds"]
+        collibra_job_poll_timeout_seconds = resolved["job_poll_timeout_seconds"]
         collibra_execution_mode = resolved["execution_mode"]
+        collibra_synchronization_id = resolved["synchronization_id"]
 
     inventory_path = str(Path(canonical.config_root) / canonical.artifacts.inventory_path)
 
@@ -117,7 +125,10 @@ def resolve_settings(
             collibra_oauth_scope=collibra_oauth_scope,
             collibra_oauth_client_auth=collibra_oauth_client_auth,
             collibra_timeout_seconds=collibra_timeout_seconds,
+            collibra_job_poll_interval_seconds=collibra_job_poll_interval_seconds,
+            collibra_job_poll_timeout_seconds=collibra_job_poll_timeout_seconds,
             collibra_execution_mode=collibra_execution_mode,
+            collibra_synchronization_id=collibra_synchronization_id,
         )
     except ValueError as exc:
         raise ConfigResolutionError(
@@ -337,9 +348,16 @@ def _resolve_collibra(
     oauth_scope = base.collibra_oauth_scope
     oauth_client_auth = base.collibra_oauth_client_auth
     timeout = base.collibra_timeout_seconds
+    job_poll_interval = base.collibra_job_poll_interval_seconds
+    job_poll_timeout = base.collibra_job_poll_timeout_seconds
     execution_mode = base.collibra_execution_mode
+    synchronization_id = base.collibra_synchronization_id
     if config.execution_mode_env is not None:
         execution_mode = env.get(config.execution_mode_env, DEFAULT_COLLIBRA_EXECUTION_MODE)
+    if config.synchronization_id is not None:
+        synchronization_id = config.synchronization_id
+    elif config.synchronization_id_env is not None:
+        synchronization_id = env.get(config.synchronization_id_env, "")
     if auth is not None:
         if auth.base_url_env is not None:
             base_url = env.get(auth.base_url_env, "")
@@ -372,6 +390,32 @@ def _resolve_collibra(
                     ) from exc
             else:
                 timeout = DEFAULT_COLLIBRA_TIMEOUT_SECONDS
+        if auth.job_poll_interval_seconds_env is not None:
+            raw = env.get(auth.job_poll_interval_seconds_env)
+            if raw is not None and raw.strip():
+                try:
+                    job_poll_interval = float(raw)
+                except ValueError as exc:
+                    raise ConfigResolutionError(
+                        "collibra job_poll_interval_seconds must be a positive number",
+                        path="/targets/0/config/auth/job_poll_interval_seconds_env",
+                        code=CODE_RUNTIME_INVALID,
+                    ) from exc
+            else:
+                job_poll_interval = DEFAULT_COLLIBRA_JOB_POLL_INTERVAL_SECONDS
+        if auth.job_poll_timeout_seconds_env is not None:
+            raw = env.get(auth.job_poll_timeout_seconds_env)
+            if raw is not None and raw.strip():
+                try:
+                    job_poll_timeout = float(raw)
+                except ValueError as exc:
+                    raise ConfigResolutionError(
+                        "collibra job_poll_timeout_seconds must be a positive number",
+                        path="/targets/0/config/auth/job_poll_timeout_seconds_env",
+                        code=CODE_RUNTIME_INVALID,
+                    ) from exc
+            else:
+                job_poll_timeout = DEFAULT_COLLIBRA_JOB_POLL_TIMEOUT_SECONDS
 
     return {
         "mode": mode,
@@ -385,7 +429,10 @@ def _resolve_collibra(
         "oauth_scope": oauth_scope,
         "oauth_client_auth": oauth_client_auth,
         "timeout_seconds": timeout,
+        "job_poll_interval_seconds": job_poll_interval,
+        "job_poll_timeout_seconds": job_poll_timeout,
         "execution_mode": execution_mode,
+        "synchronization_id": synchronization_id,
     }
 
 
@@ -549,6 +596,12 @@ def _settings_validation_path(canonical: CanonicalConfig, exc: BaseException) ->
     if "collibra_execution_mode" in text:
         if canonical.targets and canonical.targets[0].config.execution_mode_env is not None:
             return "/targets/0/config/execution_mode_env"
+        return "/targets/0/config"
+    if "collibra_synchronization_id" in text:
+        if canonical.targets and canonical.targets[0].config.synchronization_id_env is not None:
+            return "/targets/0/config/synchronization_id_env"
+        if canonical.targets and canonical.targets[0].config.synchronization_id is not None:
+            return "/targets/0/config/synchronization_id"
         return "/targets/0/config"
     if "collibra_timeout" in text:
         return _target_auth_path(canonical, "timeout_seconds_env")
