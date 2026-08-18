@@ -825,6 +825,10 @@ def test_whitespace_create_identifier_is_looked_up_exactly() -> None:
             return httpx.Response(200, json=_empty_page())
         if request.method == "POST" and path.endswith("/import/json-job"):
             return httpx.Response(200, json={"id": "job-ws"})
+        if request.method == "GET" and path.endswith("/jobs/job-ws"):
+            return httpx.Response(
+                200, json={"id": "job-ws", "state": "COMPLETED", "result": "SUCCESS"}
+            )
         return httpx.Response(500, json={"error": "unexpected"})
 
     adapter = LiveCollibraAdapter.from_settings(
@@ -834,9 +838,14 @@ def test_whitespace_create_identifier_is_looked_up_exactly() -> None:
         sleeper=lambda _s: None,
     )
     result = execute_collibra_plan(adapter, plan, config, apply=True, execution_mode="import_v2")
-    assert result.submitted is True
+    assert result.success is True
     assert requests[0].url.params.get("name") == " orders "
     assert requests[0].url.params.get("name") != "orders"
+    assert [urlparse(str(item.url)).path for item in requests] == [
+        "/rest/2.0/assets",
+        "/rest/2.0/import/json-job",
+        "/rest/2.0/jobs/job-ws",
+    ]
     assert compiled.canonical_json() in requests[1].content
 
 
