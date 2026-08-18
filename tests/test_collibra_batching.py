@@ -168,6 +168,8 @@ def test_import_v2_stop_on_failure_and_no_finalize() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(200, json={"results": [], "total": 0})
         if "/import/synchronize" in path or path.endswith("/finalize/job"):
             raise AssertionError("import_v2 must not finalize or synchronize")
         if request.method == "POST" and path.endswith("/import/json-job"):
@@ -207,6 +209,8 @@ def test_sync_v2_stop_on_failure_skips_finalize() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(200, json={"results": [], "total": 0})
         if path.endswith("/finalize/job"):
             raise AssertionError("failed batch must not finalize")
         if request.method == "POST" and path.endswith("/batch/json-job"):
@@ -253,6 +257,8 @@ def test_sync_v2_finalizes_only_after_all_batches_succeed() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = urlparse(str(request.url)).path
+        if request.method == "GET" and path.endswith("/assets"):
+            return httpx.Response(200, json={"results": [], "total": 0})
         if request.method == "POST" and path.endswith("/batch/json-job"):
             return httpx.Response(200, json={"id": next(batch_ids)})
         if request.method == "POST" and path.endswith("/finalize/job"):
