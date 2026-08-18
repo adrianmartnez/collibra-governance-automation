@@ -77,6 +77,7 @@ def resolve_settings(
     collibra_oauth_client_auth = base.collibra_oauth_client_auth
     collibra_timeout_seconds = base.collibra_timeout_seconds
     collibra_execution_mode = base.collibra_execution_mode
+    collibra_synchronization_id = base.collibra_synchronization_id
 
     if canonical.targets:
         target = canonical.targets[0]
@@ -93,6 +94,7 @@ def resolve_settings(
         collibra_oauth_client_auth = resolved["oauth_client_auth"]
         collibra_timeout_seconds = resolved["timeout_seconds"]
         collibra_execution_mode = resolved["execution_mode"]
+        collibra_synchronization_id = resolved["synchronization_id"]
 
     inventory_path = str(Path(canonical.config_root) / canonical.artifacts.inventory_path)
 
@@ -118,6 +120,7 @@ def resolve_settings(
             collibra_oauth_client_auth=collibra_oauth_client_auth,
             collibra_timeout_seconds=collibra_timeout_seconds,
             collibra_execution_mode=collibra_execution_mode,
+            collibra_synchronization_id=collibra_synchronization_id,
         )
     except ValueError as exc:
         raise ConfigResolutionError(
@@ -338,8 +341,13 @@ def _resolve_collibra(
     oauth_client_auth = base.collibra_oauth_client_auth
     timeout = base.collibra_timeout_seconds
     execution_mode = base.collibra_execution_mode
+    synchronization_id = base.collibra_synchronization_id
     if config.execution_mode_env is not None:
         execution_mode = env.get(config.execution_mode_env, DEFAULT_COLLIBRA_EXECUTION_MODE)
+    if config.synchronization_id is not None:
+        synchronization_id = config.synchronization_id
+    elif config.synchronization_id_env is not None:
+        synchronization_id = env.get(config.synchronization_id_env, "")
     if auth is not None:
         if auth.base_url_env is not None:
             base_url = env.get(auth.base_url_env, "")
@@ -386,6 +394,7 @@ def _resolve_collibra(
         "oauth_client_auth": oauth_client_auth,
         "timeout_seconds": timeout,
         "execution_mode": execution_mode,
+        "synchronization_id": synchronization_id,
     }
 
 
@@ -549,6 +558,12 @@ def _settings_validation_path(canonical: CanonicalConfig, exc: BaseException) ->
     if "collibra_execution_mode" in text:
         if canonical.targets and canonical.targets[0].config.execution_mode_env is not None:
             return "/targets/0/config/execution_mode_env"
+        return "/targets/0/config"
+    if "collibra_synchronization_id" in text:
+        if canonical.targets and canonical.targets[0].config.synchronization_id_env is not None:
+            return "/targets/0/config/synchronization_id_env"
+        if canonical.targets and canonical.targets[0].config.synchronization_id is not None:
+            return "/targets/0/config/synchronization_id"
         return "/targets/0/config"
     if "collibra_timeout" in text:
         return _target_auth_path(canonical, "timeout_seconds_env")

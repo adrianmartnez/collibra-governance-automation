@@ -17,7 +17,6 @@ from governance.integrations.collibra.models import (
 from governance.integrations.collibra.sync import _ordered_mutating_actions
 
 IMPORT_JSON_JOB_PATH = "/rest/2.0/import/json-job"
-FORBIDDEN_SYNC_PATH_FRAGMENT = "/import/synchronize"
 
 IMPORT_MULTIPART_FIELDS = {
     "continueOnError": "false",
@@ -478,15 +477,29 @@ def execute_collibra_plan(
     *,
     apply: bool,
     execution_mode: str,
+    synchronization_id: str | None = None,
 ) -> Any:
-    """Run Core REST or Import v2 for a reviewed plan. Mock always uses Core REST."""
+    """Run Core REST, Import v2, or sync_v2. Mock always uses Core REST."""
+    from governance.integrations.collibra.jobs import is_terminal_success
+    from governance.integrations.collibra.models import SyncResult
     from governance.integrations.collibra.sync import execute_sync_plan
+    from governance.integrations.collibra.synchronization import execute_sync_v2
 
     mode = (execution_mode or "core_rest").strip().lower()
     if mode == "core_rest" or getattr(adapter, "mode", None) == "mock":
         return execute_sync_plan(adapter, plan, apply=apply)
+    if mode == "sync_v2":
+        if not synchronization_id:
+            raise ImportCompileError("sync_v2 requires a synchronization id")
+        return execute_sync_v2(
+            adapter,
+            plan,
+            mapping_config,
+            apply=apply,
+            synchronization_id=synchronization_id,
+        )
     if mode != "import_v2":
-        raise ImportCompileError("collibra_execution_mode must be core_rest or import_v2")
+        raise ImportCompileError("collibra_execution_mode must be core_rest, import_v2, or sync_v2")
     document = compile_import_document(plan, mapping_config)
     unchanged_count = len(plan.unchanged)
     if not apply:
@@ -509,13 +522,41 @@ def execute_collibra_plan(
         )
     _prove_create_identifiers_absent(adapter, plan)
     submission = adapter.submit_json_import(document)
-    if not isinstance(submission, ImportSubmission) or not submission.job_id:
-        raise ImportCompileError("import job response missing id")
-    return ImportExecutionResult(
-        plan=plan,
-        document=document,
+    job_id = getattr(submission, "job_id", "") or ""
+    if not job_id:
+        return SyncResult(
+            success=False,
+            dry_run=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error="import job outcome=uncertain",
+            plan=plan,
+        )
+    poll_job = getattr(adapter, "poll_job", None)
+    if poll_job is None:
+        return SyncResult(
+            success=False,
+            dry_run=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error="import_v2 requires job polling",
+            plan=plan,
+        )
+    view = poll_job(job_id)
+    if not is_terminal_success(view):
+        outcome = view.normalized_outcome or view.normalized_state
+        return SyncResult(
+            success=False,
+            dry_run=False,
+            applied_count=0,
+            unchanged_count=unchanged_count,
+            error=f"import job outcome={outcome}",
+            plan=plan,
+        )
+    return SyncResult(
+        success=True,
         dry_run=False,
-        submitted=True,
-        submission=submission,
+        applied_count=len(document.commands),
         unchanged_count=unchanged_count,
+        plan=plan,
     )

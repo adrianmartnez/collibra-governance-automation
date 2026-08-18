@@ -46,6 +46,9 @@ from governance.integrations.collibra.sync import (
     build_sync_plan,
     execute_sync_plan,
 )
+from governance.integrations.collibra.synchronization import (
+    effective_synchronization_id,
+)
 
 __all__ = [
     "CollibraAdapter",
@@ -79,6 +82,7 @@ __all__ = [
     "compile_import_document",
     "execute_collibra_plan",
     "execute_sync_plan",
+    "effective_synchronization_id",
     "load_mapping_config_file",
     "map_to_desired_state",
     "mapping_contains_example_placeholders",

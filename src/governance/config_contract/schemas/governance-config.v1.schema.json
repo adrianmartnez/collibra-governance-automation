@@ -177,7 +177,13 @@
           }
         },
         "auth": { "$ref": "#/$defs/collibraAuth" },
-        "execution_mode_env": { "$ref": "#/$defs/envName" }
+        "execution_mode_env": { "$ref": "#/$defs/envName" },
+        "synchronization_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional UUID override for Collibra synchronization identity."
+        },
+        "synchronization_id_env": { "$ref": "#/$defs/envName" }
       }
     },
     "collibraAuth": {

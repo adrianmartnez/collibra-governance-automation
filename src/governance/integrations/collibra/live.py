@@ -24,6 +24,7 @@ Find contracts (Core REST API v2 OpenAPI):
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 
@@ -114,11 +115,13 @@ class LiveCollibraAdapter:
             verify=True,
             transport=transport,
         )
+        self._monotonic_clock = monotonic_clock or time.monotonic
+        self._sleeper = sleeper or time.sleep
         self._http = CollibraHttpExecutor(
             self._client,
-            monotonic_clock=monotonic_clock,
+            monotonic_clock=self._monotonic_clock,
             wall_clock=wall_clock,
-            sleeper=sleeper,
+            sleeper=self._sleeper,
         )
 
     @classmethod
@@ -373,11 +376,11 @@ class LiveCollibraAdapter:
 
     def submit_json_import(self, document: Any) -> Any:
         from governance.integrations.collibra.import_api import (
-            FORBIDDEN_SYNC_PATH_FRAGMENT,
             IMPORT_JSON_JOB_PATH,
-            IMPORT_MULTIPART_FIELDS,
             ImportDocument,
-            ImportSubmission,
+        )
+        from governance.integrations.collibra.synchronization import (
+            is_combined_synchronize_json_job,
         )
 
         if not isinstance(document, ImportDocument):
@@ -386,25 +389,105 @@ class LiveCollibraAdapter:
                 operation="submit_json_import",
                 endpoint_path=IMPORT_JSON_JOB_PATH,
             )
-        if FORBIDDEN_SYNC_PATH_FRAGMENT in IMPORT_JSON_JOB_PATH:
+        if is_combined_synchronize_json_job(IMPORT_JSON_JOB_PATH):
             raise CollibraAdapterError(
                 "combined synchronization import endpoint is forbidden",
                 operation="submit_json_import",
                 endpoint_path=IMPORT_JSON_JOB_PATH,
             )
+        return self._submit_import_multipart(
+            IMPORT_JSON_JOB_PATH,
+            document,
+            operation="submit_json_import",
+        )
+
+    def get_job(self, job_id: str) -> Any:
+        from governance.integrations.collibra.jobs import job_path
+
+        return self._request("GET", job_path(job_id))
+
+    def get_import_errors(self, job_id: str) -> dict[str, int]:
+        from governance.integrations.collibra.jobs import (
+            import_errors_path,
+            sanitize_import_error_summary,
+        )
+
+        payload = self._request("GET", import_errors_path(job_id))
+        return sanitize_import_error_summary(payload)
+
+    def poll_job(self, job_id: str) -> Any:
+        from governance.integrations.collibra.jobs import poll_until_terminal
+
+        return poll_until_terminal(
+            self.get_job,
+            job_id,
+            monotonic_clock=self._monotonic_clock,
+            sleeper=self._sleeper,
+        )
+
+    def submit_sync_batch(self, synchronization_id: str, document: Any) -> Any:
+        from governance.integrations.collibra.import_api import ImportDocument
+        from governance.integrations.collibra.synchronization import (
+            is_combined_synchronize_json_job,
+            parse_synchronization_id,
+        )
+
+        if not isinstance(document, ImportDocument):
+            raise CollibraAdapterError(
+                "import document is invalid",
+                operation="submit_sync_batch",
+            )
+        sync_id = parse_synchronization_id(synchronization_id)
+        path = f"{API_PREFIX}/import/synchronize/{sync_id}/batch/json-job"
+        if is_combined_synchronize_json_job(path):
+            raise CollibraAdapterError(
+                "combined synchronization import endpoint is forbidden",
+                operation="submit_sync_batch",
+                endpoint_path=path,
+            )
+        return self._submit_import_multipart(path, document, operation="submit_sync_batch")
+
+    def submit_sync_finalize(
+        self,
+        synchronization_id: str,
+        *,
+        strategy: str = "IGNORE",
+    ) -> Any:
+        from governance.integrations.collibra.synchronization import (
+            FINALIZATION_STRATEGY_IGNORE,
+            parse_synchronization_id,
+            require_ignore_strategy,
+        )
+
+        require_ignore_strategy(strategy)
+        sync_id = parse_synchronization_id(synchronization_id)
+        path = f"{API_PREFIX}/import/synchronize/{sync_id}/finalize/job"
         payload = self._request(
             "POST",
-            IMPORT_JSON_JOB_PATH,
+            path,
+            data={"finalizationStrategy": FINALIZATION_STRATEGY_IGNORE},
+        )
+        return self._job_submission(payload, operation="submit_sync_finalize", path=path)
+
+    def _submit_import_multipart(self, path: str, document: Any, *, operation: str) -> Any:
+        from governance.integrations.collibra.import_api import IMPORT_MULTIPART_FIELDS
+
+        payload = self._request(
+            "POST",
+            path,
             data=dict(IMPORT_MULTIPART_FIELDS),
             files={"file": ("import.json", document.canonical_json(), "application/json")},
         )
+        return self._job_submission(payload, operation=operation, path=path)
+
+    def _job_submission(self, payload: Any, *, operation: str, path: str) -> Any:
+        from governance.integrations.collibra.import_api import ImportSubmission
+
+        if not isinstance(payload, dict):
+            return ImportSubmission(job_id="")
         job_id = str(payload.get("id") or "")
         if not job_id:
-            raise CollibraAdapterError(
-                "import job response missing id",
-                operation="submit_json_import",
-                endpoint_path=IMPORT_JSON_JOB_PATH,
-            )
+            return ImportSubmission(job_id="")
         return ImportSubmission(job_id=job_id)
 
     def _request_auth_headers(self) -> dict[str, str]:

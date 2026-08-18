@@ -955,6 +955,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             mapping_config,
             apply=apply,
             execution_mode=settings.collibra_execution_mode,
+            synchronization_id=_synchronization_id_for_mode(settings),
         )
     except CollibraAdapterError as exc:
         return _emit_operational(exc, fmt)
@@ -1419,6 +1420,7 @@ def _cmd_sync(
             mapping_config,
             apply=apply,
             execution_mode=settings.collibra_execution_mode,
+            synchronization_id=_synchronization_id_for_mode(settings),
         )
     except CollibraAdapterError as exc:
         return _emit_operational(exc, "json" if json_output else "human")
@@ -1479,6 +1481,16 @@ def _resolve_mapping_config_from_canonical(
 
 def _scan_model(settings: Settings) -> GovernanceModel:
     return PostgresMetadataScanner(settings).scan()
+
+
+def _synchronization_id_for_mode(settings: Settings) -> str | None:
+    if settings.collibra_execution_mode != "sync_v2":
+        return None
+    from governance.integrations.collibra.synchronization import (
+        effective_synchronization_id,
+    )
+
+    return effective_synchronization_id(settings)
 
 
 def _scan_summary(model: GovernanceModel) -> dict[str, Any]:
