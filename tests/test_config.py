@@ -110,6 +110,26 @@ def test_redacted_masks_collibra_secrets() -> None:
     assert "collibra-token" not in str(redacted)
 
 
+def test_redacted_masks_oauth_client_secret() -> None:
+    settings = Settings(
+        postgres_host="localhost",
+        postgres_port=5432,
+        postgres_db="governance_demo",
+        postgres_user="postgres",
+        postgres_password="postgres",
+        postgres_source_name="governance-demo",
+        inventory_output_path="artifacts/metadata-inventory.json",
+        collibra_mode="live",
+        collibra_base_url="https://collibra.example.invalid",
+        collibra_client_id="client-id",
+        collibra_client_secret="oauth-client-secret",
+    )
+    redacted = settings.redacted()
+    assert redacted["collibra_client_secret"] == "***"
+    assert redacted["collibra_client_id"] == "client-id"
+    assert "oauth-client-secret" not in str(redacted)
+
+
 def test_rejects_blank_host() -> None:
     with pytest.raises(ValueError, match="postgres_host"):
         Settings(

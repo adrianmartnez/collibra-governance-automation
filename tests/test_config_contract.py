@@ -283,3 +283,46 @@ def test_resolve_settings_missing_database_url_env_still_errors(
     canonical = load_canonical_config(FIXTURES / "valid_minimal.yaml")
     with pytest.raises(ConfigResolutionError, match="DATABASE_URL"):
         resolve_settings(canonical, dotenv_path=str(dotenv))
+
+
+def test_oauth_env_refs_are_additive_and_change_identity(tmp_path: Path) -> None:
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text("{}", encoding="utf-8")
+    yaml_text = """schema_version: "1"
+sources:
+  - id: primary
+    provider: postgresql
+    config:
+      source_name: governance-demo
+      connection:
+        database_url_env: DATABASE_URL
+targets:
+  - id: collibra
+    provider: collibra
+    config:
+      mapping:
+        path: mapping.json
+      auth:
+        base_url_env: COLLIBRA_BASE_URL
+        client_id_env: COLLIBRA_CLIENT_ID
+        client_secret_env: COLLIBRA_CLIENT_SECRET
+"""
+    path = tmp_path / "governance.yaml"
+    path.write_text(yaml_text, encoding="utf-8")
+    canonical = load_canonical_config(path)
+    auth = canonical.targets[0].config.auth
+    assert auth is not None
+    assert auth.client_id_env == "COLLIBRA_CLIENT_ID"
+    assert auth.client_secret_env == "COLLIBRA_CLIENT_SECRET"
+    assert "client_id_env" in canonical.identity_projection()["targets"][0]["config"]["auth"]
+    without_oauth = yaml_text.replace(
+        "        client_id_env: COLLIBRA_CLIENT_ID\n"
+        "        client_secret_env: COLLIBRA_CLIENT_SECRET\n",
+        "",
+    )
+    other = tmp_path / "without-oauth.yaml"
+    other.write_text(without_oauth, encoding="utf-8")
+    base = load_canonical_config(other)
+    assert config_identity(canonical.identity_projection()) != config_identity(
+        base.identity_projection()
+    )
