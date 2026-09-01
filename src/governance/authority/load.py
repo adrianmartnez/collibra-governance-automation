@@ -28,6 +28,7 @@ from governance.domain.authority import (
     NormalizedAuthorityRule,
 )
 from governance.domain.observations import PropertyPath
+from governance.identity.canonicalize import canonical_json_bytes
 
 _AUTHORITY_KIND_SET = frozenset(AUTHORITY_NODE_KINDS)
 
@@ -37,7 +38,7 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
     if not canonical.authority.files:
         return NormalizedAuthorityPolicySet()
 
-    collected: list[tuple[AuthorityRuleKey, AuthorityDeclaration]] = []
+    collected: list[tuple[AuthorityRuleKey, AuthorityDeclaration, int, str, str]] = []
     seen_ids: dict[str, str] = {}
     errors: list[AuthorityDiagnosticError] = []
 
@@ -96,7 +97,7 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
                     file_index=index,
                 )
             )
-        for key, declaration in file_rules:
+        for key, declaration, rule_path in file_rules:
             if declaration.config_id in seen_ids:
                 errors.append(
                     AuthorityDiagnosticError(
@@ -109,7 +110,7 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
                 )
             else:
                 seen_ids[declaration.config_id] = source
-                collected.append((key, declaration))
+                collected.append((key, declaration, index, source, rule_path))
 
     if errors:
         raise AuthoritySemanticError(errors)
@@ -118,22 +119,37 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
     # same-selector / different-target ambiguity.
     by_key: dict[AuthorityRuleKey, list[AuthorityDeclaration]] = {}
     selector_to_keys: dict[AuthoritySelector, set[AuthorityRuleKey]] = {}
-    for key, declaration in collected:
+    key_origins: dict[AuthorityRuleKey, list[tuple[int, str, str]]] = {}
+    for key, declaration, file_index, source, rule_path in collected:
         by_key.setdefault(key, []).append(declaration)
         selector_to_keys.setdefault(key.selector, set()).add(key)
+        key_origins.setdefault(key, []).append((file_index, source, rule_path))
 
     ambiguity_errors: list[AuthorityDiagnosticError] = []
-    for selector, keys in selector_to_keys.items():
-        if len(keys) > 1:
+    for selector, keys in sorted(
+        selector_to_keys.items(),
+        key=lambda item: canonical_json_bytes(item[0].to_dict()),
+    ):
+        if len(keys) <= 1:
+            continue
+        # Emit one diagnostic per conflicting rule origin, deterministic by
+        # (file_index, rule_path, source).
+        origins: list[tuple[int, str, str, AuthorityRuleKey]] = []
+        for key in keys:
+            for file_index, source, rule_path in key_origins.get(key, []):
+                origins.append((file_index, rule_path, source, key))
+        origins.sort(key=lambda item: (item[0], item[1], item[2], item[3].canonical_bytes()))
+        for file_index, rule_path, source, _key in origins:
             ambiguity_errors.append(
                 AuthorityDiagnosticError(
                     code=CODE_AMBIGUOUS,
-                    path="/rules",
+                    path=rule_path,
                     message=(
                         "ambiguous authority rules share the same selector with "
                         f"different targets for {selector.to_dict()!r}"
                     ),
-                    source="",
+                    source=source,
+                    file_index=file_index,
                 )
             )
     if ambiguity_errors:
@@ -150,7 +166,10 @@ def _normalize_document(
     document: dict[str, Any],
     *,
     source: str,
-) -> tuple[list[tuple[AuthorityRuleKey, AuthorityDeclaration]], list[AuthorityDiagnosticError]]:
+) -> tuple[
+    list[tuple[AuthorityRuleKey, AuthorityDeclaration, str]],
+    list[AuthorityDiagnosticError],
+]:
     rules_raw = document.get("rules")
     if not isinstance(rules_raw, list):
         return [], [
@@ -162,7 +181,7 @@ def _normalize_document(
             )
         ]
 
-    normalized: list[tuple[AuthorityRuleKey, AuthorityDeclaration]] = []
+    normalized: list[tuple[AuthorityRuleKey, AuthorityDeclaration, str]] = []
     errors: list[AuthorityDiagnosticError] = []
     for index, item in enumerate(rules_raw):
         pointer = f"/rules/{index}"
@@ -177,7 +196,8 @@ def _normalize_document(
             )
             continue
         try:
-            normalized.append(_normalize_rule(item, pointer=pointer, source=source))
+            key, declaration = _normalize_rule(item, pointer=pointer, source=source)
+            normalized.append((key, declaration, pointer))
         except AuthoritySemanticError as exc:
             errors.extend(exc.errors)
     return normalized, errors

@@ -126,43 +126,14 @@ class PropertyObservationSet:
     observations: tuple[PropertyObservation, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "observations",
-            tuple(
-                sorted(
-                    self.observations,
-                    key=lambda item: canonical_json_bytes(item.to_identity_entry()),
-                )
-            ),
-        )
+        object.__setattr__(self, "observations", _normalize_observations(self.observations))
 
     @classmethod
     def from_observations(
         cls,
         observations: Iterable[PropertyObservation],
     ) -> PropertyObservationSet:
-        groups: dict[tuple[bytes, str, bytes], list[PropertyObservation]] = {}
-        for observation in observations:
-            if not isinstance(observation, PropertyObservation):
-                raise TypeError("observations must be PropertyObservation instances")
-            groups.setdefault(observation.grouping_key(), []).append(observation)
-
-        merged: list[PropertyObservation] = []
-        for group in groups.values():
-            base = group[0]
-            provenance_records: list[ProvenanceRecord] = []
-            for item in group:
-                provenance_records.extend(item.provenance)
-            merged.append(
-                PropertyObservation(
-                    object_identity=base.object_identity,
-                    property_path=base.property_path,
-                    value=base.value,
-                    provenance=_merge_provenance(provenance_records),
-                )
-            )
-        return cls(observations=tuple(merged))
+        return cls(observations=tuple(observations))
 
     @staticmethod
     def merge(*sets: PropertyObservationSet) -> PropertyObservationSet:
@@ -184,6 +155,38 @@ class PropertyObservationSet:
 
     def content_identity(self) -> ContentIdentity:
         return property_observation_set_identity(self.to_identity_dict())
+
+
+def _normalize_observations(
+    observations: Iterable[PropertyObservation],
+) -> tuple[PropertyObservation, ...]:
+    """Group by object/path/value, union provenance, deterministic order."""
+    groups: dict[tuple[bytes, str, bytes], list[PropertyObservation]] = {}
+    for observation in observations:
+        if not isinstance(observation, PropertyObservation):
+            raise TypeError("observations must be PropertyObservation instances")
+        groups.setdefault(observation.grouping_key(), []).append(observation)
+
+    merged: list[PropertyObservation] = []
+    for group in groups.values():
+        base = group[0]
+        provenance_records: list[ProvenanceRecord] = []
+        for item in group:
+            provenance_records.extend(item.provenance)
+        merged.append(
+            PropertyObservation(
+                object_identity=base.object_identity,
+                property_path=base.property_path,
+                value=base.value,
+                provenance=_merge_provenance(provenance_records),
+            )
+        )
+    return tuple(
+        sorted(
+            merged,
+            key=lambda item: canonical_json_bytes(item.to_identity_entry()),
+        )
+    )
 
 
 @dataclass

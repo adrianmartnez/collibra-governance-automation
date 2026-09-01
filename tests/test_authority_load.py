@@ -112,6 +112,46 @@ def test_same_selector_different_target_ambiguous(tmp_path: Path) -> None:
     with pytest.raises(AuthoritySemanticError) as exc:
         load_normalized_authority(canonical)
     assert any(error.code == CODE_AMBIGUOUS for error in exc.value.errors)
+    from governance.authority.errors import map_authority_exception_to_config_diagnostics
+
+    mapped = map_authority_exception_to_config_diagnostics(exc.value, canonical=canonical)
+    assert mapped
+    assert all(item.path == "/authority/files/0" for item in mapped)
+    assert all(item.code == "semantic_validation_failed" for item in mapped)
+    assert all(item.path != "/authority/files" for item in mapped)
+
+
+def test_cross_file_ambiguity_indexed_diagnostics(tmp_path: Path) -> None:
+    _write_authority(
+        tmp_path / "a.yaml",
+        [
+            {
+                "id": "odcs-desc",
+                "select": {"kind": "table", "property": "/description"},
+                "authority": {"provider_type": "odcs"},
+            }
+        ],
+    )
+    _write_authority(
+        tmp_path / "b.yaml",
+        [
+            {
+                "id": "dbt-desc",
+                "select": {"kind": "table", "property": "/description"},
+                "authority": {"provider_type": "dbt"},
+            }
+        ],
+    )
+    canonical = _minimal_config(tmp_path, ["a.yaml", "b.yaml"])
+    with pytest.raises(AuthoritySemanticError) as exc:
+        load_normalized_authority(canonical)
+    from governance.authority.errors import map_authority_exception_to_config_diagnostics
+
+    mapped = map_authority_exception_to_config_diagnostics(exc.value, canonical=canonical)
+    paths = sorted({item.path for item in mapped})
+    assert paths == ["/authority/files/0", "/authority/files/1"]
+    assert all(item.code == "semantic_validation_failed" for item in mapped)
+    assert "/authority/files" not in {item.path for item in mapped}
 
 
 def test_empty_and_whitespace_authority_refs_rejected(tmp_path: Path) -> None:

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.dbt import (
     map_dbt_manifest,
@@ -190,14 +188,11 @@ def test_openlineage_storage_vs_ownership_facet_provenance_isolation() -> None:
             }
         )
     ]
-    try:
-        result = map_openlineage_events_with_observations(events, namespace=NS)
-    except Exception as exc:  # pragma: no cover - skip if facet mapping unavailable
-        pytest.skip(f"OpenLineage storage/ownership fixtures unavailable: {exc}")
+    result = map_openlineage_events_with_observations(events, namespace=NS)
 
     by_path = {obs.property_path.to_pointer(): obs for obs in result.observations.observations}
-    if "/attributes/storage_layer" not in by_path or "/attributes/ownership" not in by_path:
-        pytest.skip("OpenLineage mapper did not emit storage_layer/ownership property observations")
+    assert "/attributes/storage_layer" in by_path
+    assert "/attributes/ownership" in by_path
 
     storage_obs = by_path["/attributes/storage_layer"]
     ownership_obs = by_path["/attributes/ownership"]

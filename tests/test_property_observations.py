@@ -176,3 +176,45 @@ def test_secrets_not_in_identity() -> None:
         "COLLIBRA_PASSWORD",
     ):
         assert forbidden not in blob
+
+
+def test_direct_constructor_normalizes_same_value_and_agrees() -> None:
+    from governance.domain.authority import NormalizedAuthorityPolicySet
+    from governance.domain.conflicts import analyze_property_conflicts
+
+    odcs = _obs("shared", _prov("odcs", "c1"))
+    dbt = _obs("shared", _prov("dbt", "m"))
+    direct = PropertyObservationSet(observations=(odcs, dbt))
+    via_from = PropertyObservationSet.from_observations([odcs, dbt])
+    assert len(direct.observations) == 1
+    assert len(direct.observations[0].provenance) == 2
+    assert direct.content_identity() == via_from.content_identity()
+
+    report = analyze_property_conflicts(direct, NormalizedAuthorityPolicySet())
+    assert len(report.results) == 1
+    assert report.results[0].state == "AGREEMENT"
+    assert report.results[0].reason == "AGREEMENT"
+
+
+def test_direct_constructor_dedupes_duplicate_provenance() -> None:
+    record = _prov("odcs", "c1")
+    a = _obs("v", record)
+    b = _obs("v", record)
+    direct = PropertyObservationSet(observations=(a, b))
+    assert len(direct.observations) == 1
+    assert direct.observations[0].provenance == (record,)
+
+
+def test_direct_constructor_keeps_distinct_values() -> None:
+    direct = PropertyObservationSet(
+        observations=(_obs("A", _prov("odcs", "c1")), _obs("B", _prov("dbt", "m")))
+    )
+    assert {item.value for item in direct.observations} == {"A", "B"}
+
+
+def test_direct_constructor_reorder_same_identity() -> None:
+    a = _obs("A", _prov("odcs", "c1"))
+    b = _obs("B", _prov("dbt", "m"))
+    forward = PropertyObservationSet(observations=(a, b))
+    reverse = PropertyObservationSet(observations=(b, a))
+    assert forward.content_identity() == reverse.content_identity()

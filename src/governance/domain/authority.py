@@ -190,11 +190,7 @@ class NormalizedAuthorityPolicySet:
     rules: tuple[NormalizedAuthorityRule, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "rules",
-            tuple(sorted(self.rules, key=lambda rule: rule.key.canonical_bytes())),
-        )
+        object.__setattr__(self, "rules", _normalize_authority_rules(self.rules))
 
     def to_identity_dict(self) -> dict[str, Any]:
         return {
@@ -214,3 +210,20 @@ class NormalizedAuthorityPolicySet:
         return tuple(
             rule for rule in self.rules if rule.key.selector.matches(identity, property_path)
         )
+
+
+def _normalize_authority_rules(
+    rules: tuple[NormalizedAuthorityRule, ...] | list[NormalizedAuthorityRule],
+) -> tuple[NormalizedAuthorityRule, ...]:
+    """Collapse same AuthorityRuleKey (union declarations); keep different keys separate."""
+    by_key: dict[AuthorityRuleKey, list[AuthorityDeclaration]] = {}
+    for rule in rules:
+        if not isinstance(rule, NormalizedAuthorityRule):
+            raise TypeError("rules must be NormalizedAuthorityRule instances")
+        by_key.setdefault(rule.key, []).extend(rule.declarations)
+
+    collapsed = tuple(
+        NormalizedAuthorityRule(key=key, declarations=tuple(declarations))
+        for key, declarations in by_key.items()
+    )
+    return tuple(sorted(collapsed, key=lambda rule: rule.key.canonical_bytes()))

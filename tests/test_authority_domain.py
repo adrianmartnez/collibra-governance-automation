@@ -143,3 +143,86 @@ def test_ambiguous_programmatic_set_allowed_in_domain() -> None:
         PATH_DESC,
     )
     assert len(matching) == 2
+
+
+def test_direct_constructor_collapses_same_key_declarations() -> None:
+    key = AuthorityRuleKey(selector=_selector(), authority=_target("odcs"))
+    combined = NormalizedAuthorityPolicySet(
+        rules=(
+            NormalizedAuthorityRule(
+                key=key,
+                declarations=(
+                    AuthorityDeclaration("rule-a", "first"),
+                    AuthorityDeclaration("rule-b", "second"),
+                ),
+            ),
+        )
+    )
+    split = NormalizedAuthorityPolicySet(
+        rules=(
+            NormalizedAuthorityRule(
+                key=key,
+                declarations=(AuthorityDeclaration("rule-a", "first"),),
+            ),
+            NormalizedAuthorityRule(
+                key=key,
+                declarations=(AuthorityDeclaration("rule-b", "second"),),
+            ),
+        )
+    )
+    assert len(combined.rules) == 1
+    assert len(split.rules) == 1
+    assert len(split.rules[0].declarations) == 2
+    assert {d.config_id for d in split.rules[0].declarations} == {"rule-a", "rule-b"}
+    assert combined.content_identity() == split.content_identity()
+
+
+def test_direct_constructor_reorder_same_identity() -> None:
+    key_a = AuthorityRuleKey(selector=_selector(), authority=_target("odcs"))
+    key_b = AuthorityRuleKey(
+        selector=_selector(path=PropertyPath(("name",))),
+        authority=_target("dbt"),
+    )
+    a = NormalizedAuthorityRule(key=key_a, declarations=(AuthorityDeclaration("a"),))
+    b = NormalizedAuthorityRule(key=key_b, declarations=(AuthorityDeclaration("b"),))
+    forward = NormalizedAuthorityPolicySet(rules=(a, b))
+    reverse = NormalizedAuthorityPolicySet(rules=(b, a))
+    assert forward.content_identity() == reverse.content_identity()
+
+
+def test_incompatible_keys_remain_separate_for_invalid_bypass() -> None:
+    from governance.domain.conflicts import analyze_property_conflicts
+    from governance.domain.observations import PropertyObservation, PropertyObservationSet
+
+    selector = _selector()
+    forward = NormalizedAuthorityPolicySet(
+        rules=(
+            NormalizedAuthorityRule(
+                key=AuthorityRuleKey(selector=selector, authority=_target("odcs")),
+                declarations=(AuthorityDeclaration("a"),),
+            ),
+            NormalizedAuthorityRule(
+                key=AuthorityRuleKey(selector=selector, authority=_target("dbt")),
+                declarations=(AuthorityDeclaration("b"),),
+            ),
+        )
+    )
+    assert len(forward.rules) == 2
+    observations = PropertyObservationSet(
+        observations=(
+            PropertyObservation(
+                object_identity=GraphNodeIdentity(NS, NODE_KIND_TABLE, "orders"),
+                property_path=PATH_DESC,
+                value="A",
+                provenance=(ProvenanceRecord("odcs", "c1"),),
+            ),
+            PropertyObservation(
+                object_identity=GraphNodeIdentity(NS, NODE_KIND_TABLE, "orders"),
+                property_path=PATH_DESC,
+                value="B",
+                provenance=(ProvenanceRecord("dbt", "m"),),
+            ),
+        )
+    )
+    report = analyze_property_conflicts(observations, forward)
+    assert report.results[0].state == "INVALID_OR_AMBIGUOUS_AUTHORITY"
