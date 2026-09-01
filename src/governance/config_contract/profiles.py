@@ -10,7 +10,7 @@ from governance.config_contract.errors import (
     DiagnosticError,
 )
 
-_OVERLAY_KEYS = ("sources", "targets", "artifacts", "policies")
+_OVERLAY_KEYS = ("sources", "targets", "artifacts", "policies", "authority")
 
 
 def select_profile_name(
@@ -79,7 +79,7 @@ def apply_profile_overlay(document: dict[str, Any], profile_name: str | None) ->
                     )
                 ]
             )
-        if key in {"artifacts", "policies"} and isinstance(value, dict):
+        if key in {"artifacts", "policies", "authority"} and isinstance(value, dict):
             base = merged.get(key)
             if isinstance(base, dict):
                 merged[key] = _deep_merge_maps(base, value, path=f"/profiles/{profile_name}/{key}")

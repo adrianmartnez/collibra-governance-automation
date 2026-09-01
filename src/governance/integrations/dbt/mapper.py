@@ -30,6 +30,11 @@ from governance.domain.graph import (
     GraphNodeIdentity,
     ProvenanceRecord,
 )
+from governance.domain.observations import (
+    GovernanceMappingResult,
+    PropertyObservationBuilder,
+    PropertyPath,
+)
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.dbt.errors import (
     CODE_MAPPING,
@@ -51,10 +56,22 @@ def map_dbt_manifest(
     default_database: str | None = None,
 ) -> GovernanceGraph:
     """Validate and map a dbt Manifest into a GovernanceGraph."""
+    return map_dbt_manifest_with_observations(
+        document, namespace=namespace, default_database=default_database
+    ).graph
+
+
+def map_dbt_manifest_with_observations(
+    document: Mapping[str, Any],
+    *,
+    namespace: str,
+    default_database: str | None = None,
+) -> GovernanceMappingResult:
+    """Validate and map a dbt Manifest into a graph with property observations."""
     ns = _require_namespace(namespace)
     default_db = _require_default_database(default_database)
     validated = validate_dbt_manifest(document)
-    return _build_graph(validated, namespace=ns, default_database=default_db)
+    return _map_dbt_result(validated, namespace=ns, default_database=default_db)
 
 
 def load_dbt_graph(
@@ -64,10 +81,22 @@ def load_dbt_graph(
     default_database: str | None = None,
 ) -> GovernanceGraph:
     """Load a dbt Manifest JSON file and map it into a GovernanceGraph."""
+    return load_dbt_graph_with_observations(
+        path, namespace=namespace, default_database=default_database
+    ).graph
+
+
+def load_dbt_graph_with_observations(
+    path: str | Path,
+    *,
+    namespace: str,
+    default_database: str | None = None,
+) -> GovernanceMappingResult:
+    """Load a dbt Manifest JSON file and map it with property observations."""
     ns = _require_namespace(namespace)
     default_db = _require_default_database(default_database)
     document = load_dbt_manifest(path)
-    return map_dbt_manifest(document, namespace=ns, default_database=default_db)
+    return map_dbt_manifest_with_observations(document, namespace=ns, default_database=default_db)
 
 
 def _require_namespace(namespace: object) -> str:
@@ -144,6 +173,33 @@ def _dbt_provenance(unique_id: str, dbt_version: str) -> ProvenanceRecord:
         source_version=dbt_version,
         observation_mode="declared",
     )
+
+
+def _observe_node(
+    builder: PropertyObservationBuilder,
+    node: GraphNode,
+    provenance: ProvenanceRecord,
+) -> None:
+    """Emit top-level property observations for a provenanced dbt node."""
+    if not node.provenance:
+        return
+    builder.observe(node.identity, PropertyPath(("name",)), node.name, provenance)
+    if node.description is not None:
+        builder.observe(
+            node.identity,
+            PropertyPath(("description",)),
+            node.description,
+            provenance,
+        )
+    attributes = node.to_dict()["attributes"]
+    assert isinstance(attributes, dict)
+    for key, value in attributes.items():
+        builder.observe(
+            node.identity,
+            PropertyPath(("attributes", key)),
+            value,
+            provenance,
+        )
 
 
 def _effective_database(
@@ -295,6 +351,7 @@ def _map_columns(
     provenance: ProvenanceRecord,
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
 ) -> None:
     if not isinstance(columns, Mapping):
         return
@@ -306,15 +363,15 @@ def _map_columns(
         column_identity = GraphNodeIdentity(
             namespace, NODE_KIND_COLUMN, name, parent=parent_identity
         )
-        nodes.append(
-            GraphNode(
-                identity=column_identity,
-                name=name,
-                description=_normalize_description(column.get("description")),
-                attributes=_column_attributes(column),
-                provenance=(provenance,),
-            )
+        column_node = GraphNode(
+            identity=column_identity,
+            name=name,
+            description=_normalize_description(column.get("description")),
+            attributes=_column_attributes(column),
+            provenance=(provenance,),
         )
+        nodes.append(column_node)
+        _observe_node(observations, column_node, provenance)
         edges.append(
             GraphEdge(
                 source=parent_identity,
@@ -335,6 +392,7 @@ def _map_model(
     path: str,
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
     seen_containers: set[GraphNodeIdentity],
     registry: dict[str, GraphNodeIdentity],
 ) -> None:
@@ -349,15 +407,15 @@ def _map_model(
         assert isinstance(fqn, list)
         logical_id = _transformation_logical_id(package_name, fqn)
         identity = GraphNodeIdentity(namespace, NODE_KIND_TRANSFORMATION, logical_id)
-        nodes.append(
-            GraphNode(
-                identity=identity,
-                name=model["name"],
-                description=_normalize_description(model.get("description")),
-                attributes=_model_attributes(model),
-                provenance=(provenance,),
-            )
+        transform_node = GraphNode(
+            identity=identity,
+            name=model["name"],
+            description=_normalize_description(model.get("description")),
+            attributes=_model_attributes(model),
+            provenance=(provenance,),
         )
+        nodes.append(transform_node)
+        _observe_node(observations, transform_node, provenance)
         registry[unique_id] = identity
         _map_columns(
             model.get("columns"),
@@ -366,6 +424,7 @@ def _map_model(
             provenance=provenance,
             nodes=nodes,
             edges=edges,
+            observations=observations,
         )
         return
 
@@ -383,15 +442,15 @@ def _map_model(
         seen_containers=seen_containers,
     )
     table_identity = GraphNodeIdentity(namespace, NODE_KIND_TABLE, alias, parent=dataset_identity)
-    nodes.append(
-        GraphNode(
-            identity=table_identity,
-            name=alias,
-            description=_normalize_description(model.get("description")),
-            attributes=_model_attributes(model),
-            provenance=(provenance,),
-        )
+    table_node = GraphNode(
+        identity=table_identity,
+        name=alias,
+        description=_normalize_description(model.get("description")),
+        attributes=_model_attributes(model),
+        provenance=(provenance,),
     )
+    nodes.append(table_node)
+    _observe_node(observations, table_node, provenance)
     edges.append(
         GraphEdge(
             source=dataset_identity,
@@ -409,6 +468,7 @@ def _map_model(
         provenance=provenance,
         nodes=nodes,
         edges=edges,
+        observations=observations,
     )
 
 
@@ -421,6 +481,7 @@ def _map_source(
     path: str,
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
     seen_containers: set[GraphNodeIdentity],
     registry: dict[str, GraphNodeIdentity],
 ) -> None:
@@ -443,15 +504,15 @@ def _map_source(
     table_identity = GraphNodeIdentity(
         namespace, NODE_KIND_TABLE, identifier, parent=dataset_identity
     )
-    nodes.append(
-        GraphNode(
-            identity=table_identity,
-            name=identifier,
-            description=_normalize_description(source.get("description")),
-            attributes=_source_attributes(source),
-            provenance=(provenance,),
-        )
+    table_node = GraphNode(
+        identity=table_identity,
+        name=identifier,
+        description=_normalize_description(source.get("description")),
+        attributes=_source_attributes(source),
+        provenance=(provenance,),
     )
+    nodes.append(table_node)
+    _observe_node(observations, table_node, provenance)
     edges.append(
         GraphEdge(
             source=dataset_identity,
@@ -469,6 +530,7 @@ def _map_source(
         provenance=provenance,
         nodes=nodes,
         edges=edges,
+        observations=observations,
     )
 
 
@@ -512,12 +574,12 @@ def _map_dependencies(
             # Unsupported / unknown resource types are omitted deterministically.
 
 
-def _build_graph(
+def _map_dbt_result(
     document: Mapping[str, Any],
     *,
     namespace: str,
     default_database: str | None,
-) -> GovernanceGraph:
+) -> GovernanceMappingResult:
     metadata = document["metadata"]
     assert isinstance(metadata, Mapping)
     dbt_version = metadata["dbt_version"]
@@ -525,6 +587,7 @@ def _build_graph(
 
     graph_nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
+    observations = PropertyObservationBuilder()
     registry: dict[str, GraphNodeIdentity] = {}
     seen_containers: set[GraphNodeIdentity] = set()
 
@@ -545,6 +608,7 @@ def _build_graph(
             path=_pointer("/nodes", unique_id),
             nodes=graph_nodes,
             edges=edges,
+            observations=observations,
             seen_containers=seen_containers,
             registry=registry,
         )
@@ -565,6 +629,7 @@ def _build_graph(
             path=_pointer("/sources", unique_id),
             nodes=graph_nodes,
             edges=edges,
+            observations=observations,
             seen_containers=seen_containers,
             registry=registry,
         )
@@ -588,7 +653,10 @@ def _build_graph(
     )
 
     try:
-        return GovernanceGraph.from_parts(graph_nodes, edges)
+        return GovernanceMappingResult(
+            graph=GovernanceGraph.from_parts(graph_nodes, edges),
+            observations=observations.build(),
+        )
     except DbtMappingError:
         raise
     except (TypeError, ValueError) as exc:

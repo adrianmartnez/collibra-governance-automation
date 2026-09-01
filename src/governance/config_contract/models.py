@@ -165,6 +165,14 @@ class PoliciesConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class AuthorityConfig:
+    files: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, list[str]]:
+        return {"files": list(self.files)}
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalConfig:
     """Effective normalized configuration (no secrets, no absolute paths)."""
 
@@ -174,6 +182,7 @@ class CanonicalConfig:
     artifacts: ArtifactsConfig
     policies: PoliciesConfig
     config_root: str
+    authority: AuthorityConfig = AuthorityConfig()
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -184,6 +193,8 @@ class CanonicalConfig:
         }
         if self.targets:
             payload["targets"] = [target.to_dict() for target in self.targets]
+        if self.authority.files:
+            payload["authority"] = self.authority.to_dict()
         return payload
 
     def identity_projection(self) -> dict[str, Any]:
@@ -195,4 +206,6 @@ class CanonicalConfig:
         }
         if self.targets:
             payload["targets"] = [target.to_dict() for target in self.targets]
+        if self.authority.files:
+            payload["authority"] = self.authority.to_dict()
         return payload

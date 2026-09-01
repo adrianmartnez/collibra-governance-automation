@@ -100,6 +100,41 @@ def validate_semantics(document: dict[str, Any]) -> None:
                     except ConfigSemanticError as exc:
                         errors.extend(exc.errors)
 
+    authority = document.get("authority")
+    if authority is not None:
+        if not isinstance(authority, dict):
+            errors.append(
+                DiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path="/authority",
+                    message="authority must be a mapping",
+                )
+            )
+        else:
+            files = authority.get("files", [])
+            if files is None:
+                errors.append(
+                    DiagnosticError(
+                        code=CODE_SEMANTIC,
+                        path="/authority/files",
+                        message="authority.files must not be null",
+                    )
+                )
+            elif not isinstance(files, list):
+                errors.append(
+                    DiagnosticError(
+                        code=CODE_SEMANTIC,
+                        path="/authority/files",
+                        message="authority.files must be an array",
+                    )
+                )
+            else:
+                for index, item in enumerate(files):
+                    try:
+                        normalize_relative_path(item, pointer=f"/authority/files/{index}")
+                    except ConfigSemanticError as exc:
+                        errors.extend(exc.errors)
+
     if errors:
         raise ConfigSemanticError(errors)
 

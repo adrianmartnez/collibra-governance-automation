@@ -167,7 +167,7 @@ Without `--config`, legacy operational commands keep the v1.0 environment-based 
 
 ## Governance-as-Code (optional)
 
-Declare sources, optional Collibra targets, artifact paths, and policy file hooks in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml).
+Declare sources, optional Collibra targets, artifact paths, policy file hooks, and optional metadata authority files in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml).
 
 ```bash
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/governance_demo}"
@@ -254,6 +254,45 @@ remote_only=0
 applied=0
 success=true
 ```
+
+### Metadata authority (v1)
+
+Optional GaC side-files declare which provider is authoritative for a governed property when observations disagree. Reference them from `governance.yaml`:
+
+```yaml
+authority:
+  files:
+    - authority/metadata-authority.example.yaml
+```
+
+See [`sample/authority/metadata-authority.example.yaml`](sample/authority/metadata-authority.example.yaml).
+
+Authority document envelope:
+
+```yaml
+authority_schema: governance-authority
+authority_version: "1"
+rules:
+  - id: table-description-from-odcs
+    description: ODCS owns contractual table descriptions.
+    select:
+      kind: table
+      property: /description
+      namespace: production   # optional; omit for global kind+property rules
+    authority:
+      provider_type: odcs
+      source_ref: customer-contract   # optional; omit for provider-only authority
+```
+
+Semantics:
+
+- Selectors match exactly on `kind` + `property` (+ optional `namespace`). Matching is case-preserving strip normalization (same rules as graph namespace / provenance).
+- Specificity: namespace+kind+property (rank 2) beats kind+property (rank 1). The authority target (`provider_type` / optional `source_ref`) does **not** change rank.
+- Missing rule ⇒ no guessed winner. Equal-authority conflicting authorized values remain unresolved.
+- No first/last/timestamp ordering; credential-bearing fields are rejected by schema.
+- Profiles may replace `authority.files` like `policies.files`.
+- `config_identity` includes non-empty `authority.files` refs (list order material). `authority_identity` hashes only semantic rule keys (ids/descriptions/paths excluded).
+- This release validates and loads authority configuration; it does **not** block `apply` on unresolved conflicts (that is a later milestone).
 
 ## Mock vs live
 
@@ -398,7 +437,7 @@ The Action installs this package into a fresh Action-owned virtualenv under `RUN
 
 | Input | Default | Notes |
 | --- | --- | --- |
-| `config` | `""` | Required for `validate`/`check`/`plan` (Phase A). Optional for `impact` (policy relevance only) |
+| `config` | `""` | Required for `validate`/`check`/`plan` (Phase A). Optional for `impact` (validates config/authority and enables policy matching) |
 | `profile` | `""` | Forwarded as `--profile` when non-empty; for impact requires `config` |
 | `operation` | `plan` | `validate` \| `check` \| `plan` \| `impact` (Action mode, not Collibra `--mode`) |
 | `output-format` | `human` | Console only (`human` \| `json`); does not change artifacts or step summary |
@@ -459,7 +498,7 @@ Do not use `pull_request_target` with an untrusted PR checkout and secrets.
     output-directory: .governance
 ```
 
-At least one of `impact-odcs`, `impact-dbt-manifest`, or `impact-openlineage` is required. Source lists are JSON arrays (not comma-separated). Optional `config`/`profile` enable policy relevance matching only (not policy blocking). Upload `${{ steps.gac-impact.outputs.artifacts-path }}` to retain `impact-result.json` and `report.md`.
+At least one of `impact-odcs`, `impact-dbt-manifest`, or `impact-openlineage` is required. Source lists are JSON arrays (not comma-separated). Optional `config`/`profile` validate governance configuration (including authority side-files) and enable policy matching (not policy blocking). Upload `${{ steps.gac-impact.outputs.artifacts-path }}` to retain `impact-result.json` and `report.md`.
 
 ### C. Trusted deterministic planning
 
@@ -586,9 +625,9 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required. Th
 
 - No commercial Collibra tenant validation
 - Local contract-server coverage is not commercial-tenant validation
-- No provider SDK or authority/conflict resolution engine
 - No automatic deletes or destructive reconciliation
 - No automatic apply/remediation from impact analysis
+- No plan/apply blocking on unresolved property conflicts yet
 - No arbitrary tenant customization beyond configured refs
 - No transactional REST snapshot across concurrent mutations
 - No large-scale performance benchmark

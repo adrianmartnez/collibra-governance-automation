@@ -24,6 +24,11 @@ from governance.domain.lineage import (
     ColumnLineageAssertion,
     materialize_column_lineage_edges,
 )
+from governance.domain.observations import (
+    GovernanceMappingResult,
+    PropertyObservationBuilder,
+    PropertyPath,
+)
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.openlineage.errors import (
     CODE_MAPPING,
@@ -51,10 +56,19 @@ def map_openlineage_events(
     namespace: str,
 ) -> GovernanceGraph:
     """Validate and map OpenLineage events into a GovernanceGraph."""
+    return map_openlineage_events_with_observations(events, namespace=namespace).graph
+
+
+def map_openlineage_events_with_observations(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    namespace: str,
+) -> GovernanceMappingResult:
+    """Validate and map OpenLineage events into a graph with property observations."""
     ns = _require_namespace(namespace)
     validated = validate_openlineage_events(events)
     try:
-        return _build_graph(validated, namespace=ns)
+        return _map_openlineage_result(validated, namespace=ns)
     except (TypeError, ValueError) as exc:
         raise OpenLineageMappingError(
             [
@@ -69,9 +83,16 @@ def map_openlineage_events(
 
 def load_openlineage_graph(path: str | Path, *, namespace: str) -> GovernanceGraph:
     """Load an OpenLineage JSON file and map it into a GovernanceGraph."""
+    return load_openlineage_graph_with_observations(path, namespace=namespace).graph
+
+
+def load_openlineage_graph_with_observations(
+    path: str | Path, *, namespace: str
+) -> GovernanceMappingResult:
+    """Load an OpenLineage JSON file and map it with property observations."""
     ns = _require_namespace(namespace)
     events = load_openlineage_events(path)
-    return map_openlineage_events(events, namespace=ns)
+    return map_openlineage_events_with_observations(events, namespace=ns)
 
 
 def _require_namespace(namespace: object) -> str:
@@ -480,6 +501,118 @@ def _dataset_node_provenance(state: _DatasetState) -> tuple[ProvenanceRecord, ..
     return tuple(records)
 
 
+def _observe_with_provenances(
+    builder: PropertyObservationBuilder,
+    identity: GraphNodeIdentity,
+    property_path: PropertyPath,
+    value: Any,
+    provenances: Sequence[ProvenanceRecord],
+) -> None:
+    for provenance in provenances:
+        builder.observe(identity, property_path, value, provenance)
+
+
+def _observe_dataset_node(
+    builder: PropertyObservationBuilder,
+    *,
+    identity: GraphNodeIdentity,
+    display_name: str,
+    attributes: Mapping[str, Any],
+    state: _DatasetState,
+) -> None:
+    """Emit property observations with facet-exact provenance (never node union)."""
+    hierarchy = state.facets.get("hierarchy")
+    if hierarchy is not None and _is_physical_hierarchy(hierarchy.material["hierarchy"]):
+        name_provenances = hierarchy.provenances
+    else:
+        name_provenances = state.dataset_provenances
+    _observe_with_provenances(
+        builder,
+        identity,
+        PropertyPath(("name",)),
+        display_name,
+        name_provenances,
+    )
+
+    dataset_type = state.facets.get("datasetType")
+    if dataset_type is not None:
+        for key in ("dataset_type", "dataset_subtype"):
+            if key in attributes:
+                _observe_with_provenances(
+                    builder,
+                    identity,
+                    PropertyPath(("attributes", key)),
+                    attributes[key],
+                    dataset_type.provenances,
+                )
+
+    storage = state.facets.get("storage")
+    if storage is not None:
+        for key in ("storage_layer", "file_format"):
+            if key in attributes:
+                _observe_with_provenances(
+                    builder,
+                    identity,
+                    PropertyPath(("attributes", key)),
+                    attributes[key],
+                    storage.provenances,
+                )
+
+    ownership = state.facets.get("ownership")
+    if ownership is not None and "ownership" in attributes:
+        _observe_with_provenances(
+            builder,
+            identity,
+            PropertyPath(("attributes", "ownership")),
+            attributes["ownership"],
+            ownership.provenances,
+        )
+
+    if hierarchy is not None and "hierarchy" in attributes:
+        _observe_with_provenances(
+            builder,
+            identity,
+            PropertyPath(("attributes", "hierarchy")),
+            attributes["hierarchy"],
+            hierarchy.provenances,
+        )
+
+
+def _observe_column_node(
+    builder: PropertyObservationBuilder,
+    node: GraphNode,
+    provenances: Sequence[ProvenanceRecord],
+) -> None:
+    """Emit schema/lineage column property observations with exact provenances."""
+    if not provenances:
+        return
+    _observe_with_provenances(
+        builder,
+        node.identity,
+        PropertyPath(("name",)),
+        node.name,
+        provenances,
+    )
+    if node.description is not None:
+        _observe_with_provenances(
+            builder,
+            node.identity,
+            PropertyPath(("description",)),
+            node.description,
+            provenances,
+        )
+    attributes = node.to_dict()["attributes"]
+    assert isinstance(attributes, dict)
+    for key, value in attributes.items():
+        _observe_with_provenances(
+            builder,
+            node.identity,
+            PropertyPath(("attributes", key)),
+            value,
+            provenances,
+        )
+
+
 def _resolve_identity(
     state: _DatasetState,
     *,
@@ -517,6 +650,7 @@ def _map_schema_fields(
     provenances: Sequence[ProvenanceRecord],
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
 ) -> None:
     for field_item in fields:
         name = str(field_item["name"])
@@ -532,15 +666,15 @@ def _map_schema_fields(
             desc: str | None = description
         else:
             desc = None
-        nodes.append(
-            GraphNode(
-                identity=column_identity,
-                name=name,
-                description=desc,
-                attributes=attrs,
-                provenance=tuple(provenances),
-            )
+        column_node = GraphNode(
+            identity=column_identity,
+            name=name,
+            description=desc,
+            attributes=attrs,
+            provenance=tuple(provenances),
         )
+        nodes.append(column_node)
+        _observe_column_node(observations, column_node, provenances)
         edges.append(
             GraphEdge(
                 source=parent_identity,
@@ -559,6 +693,7 @@ def _map_schema_fields(
                 provenances=provenances,
                 nodes=nodes,
                 edges=edges,
+                observations=observations,
             )
 
 
@@ -593,6 +728,7 @@ def _ensure_lineage_column(
     columns: dict[GraphNodeIdentity, GraphNode],
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
 ) -> None:
     existing = columns.get(column_identity)
     if existing is None:
@@ -605,6 +741,8 @@ def _ensure_lineage_column(
         )
         nodes.append(node)
         columns[column_identity] = node
+        # Lineage-only columns: observe /name with columnLineage provenances.
+        _observe_column_node(observations, node, provenances)
         edges.append(
             GraphEdge(
                 source=parent_identity,
@@ -634,6 +772,7 @@ def _emit_column_lineage_edges(
     identities: Mapping[tuple[str, str], GraphNodeIdentity],
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
 ) -> None:
     if not registry:
         return
@@ -667,6 +806,7 @@ def _emit_column_lineage_edges(
             columns=columns,
             nodes=nodes,
             edges=edges,
+            observations=observations,
         )
         _ensure_lineage_column(
             column_identity=input_column,
@@ -675,6 +815,7 @@ def _emit_column_lineage_edges(
             columns=columns,
             nodes=nodes,
             edges=edges,
+            observations=observations,
         )
         assertions.append(
             ColumnLineageAssertion(
@@ -686,11 +827,11 @@ def _emit_column_lineage_edges(
     edges.extend(materialize_column_lineage_edges(assertions))
 
 
-def _build_graph(
+def _map_openlineage_result(
     events: Sequence[Mapping[str, Any]],
     *,
     namespace: str,
-) -> GovernanceGraph:
+) -> GovernanceMappingResult:
     dataset_states: dict[tuple[str, str], _DatasetState] = {}
     column_lineage: dict[_ColumnLineageKey, list[ProvenanceRecord]] = {}
     run_states: dict[str, _RunState] = {}
@@ -796,6 +937,7 @@ def _build_graph(
 
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
+    observations = PropertyObservationBuilder()
     seen_containers: set[GraphNodeIdentity] = set()
     identities: dict[tuple[str, str], GraphNodeIdentity] = {}
 
@@ -810,15 +952,23 @@ def _build_graph(
         )
         identities[key] = identity
         display_name = identity.logical_id if identity.kind == NODE_KIND_TABLE else state.ol_name
+        attributes = _dataset_attributes(state)
 
         nodes.append(
             GraphNode(
                 identity=identity,
                 name=display_name,
                 description=None,
-                attributes=_dataset_attributes(state),
+                attributes=attributes,
                 provenance=_dataset_node_provenance(state),
             )
+        )
+        _observe_dataset_node(
+            observations,
+            identity=identity,
+            display_name=display_name,
+            attributes=attributes,
+            state=state,
         )
 
         if identity.kind == NODE_KIND_TABLE:
@@ -845,6 +995,7 @@ def _build_graph(
                     provenances=schema_facet.provenances,
                     nodes=nodes,
                     edges=edges,
+                    observations=observations,
                 )
 
     _emit_column_lineage_edges(
@@ -853,6 +1004,7 @@ def _build_graph(
         identities=identities,
         nodes=nodes,
         edges=edges,
+        observations=observations,
     )
 
     for run_state in run_states.values():
@@ -873,4 +1025,7 @@ def _build_graph(
             edges=edges,
         )
 
-    return GovernanceGraph.from_parts(nodes, edges)
+    return GovernanceMappingResult(
+        graph=GovernanceGraph.from_parts(nodes, edges),
+        observations=observations.build(),
+    )

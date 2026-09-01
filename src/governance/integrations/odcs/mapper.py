@@ -18,6 +18,11 @@ from governance.domain.graph import (
     GraphNodeIdentity,
     ProvenanceRecord,
 )
+from governance.domain.observations import (
+    GovernanceMappingResult,
+    PropertyObservationBuilder,
+    PropertyPath,
+)
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.integrations.odcs.errors import (
     CODE_MAPPING,
@@ -30,17 +35,31 @@ from governance.integrations.odcs.schema import validate_odcs_document
 
 def map_odcs_document(document: Mapping[str, Any], *, namespace: str) -> GovernanceGraph:
     """Validate and map an ODCS document into a GovernanceGraph."""
+    return map_odcs_document_with_observations(document, namespace=namespace).graph
+
+
+def map_odcs_document_with_observations(
+    document: Mapping[str, Any], *, namespace: str
+) -> GovernanceMappingResult:
+    """Validate and map an ODCS document into a graph with property observations."""
     ns = _require_namespace(namespace)
     validated = validate_odcs_document(document)
     _assert_sibling_identity_uniqueness(validated)
-    return _build_graph(validated, namespace=ns)
+    return _map_odcs_result(validated, namespace=ns)
 
 
 def load_odcs_graph(path: str | Path, *, namespace: str) -> GovernanceGraph:
     """Load an ODCS file and map it into a GovernanceGraph."""
+    return load_odcs_graph_with_observations(path, namespace=namespace).graph
+
+
+def load_odcs_graph_with_observations(
+    path: str | Path, *, namespace: str
+) -> GovernanceMappingResult:
+    """Load an ODCS file and map it into a graph with property observations."""
     ns = _require_namespace(namespace)
     document = load_odcs_document(path)
-    return map_odcs_document(document, namespace=ns)
+    return map_odcs_document_with_observations(document, namespace=ns)
 
 
 def _require_namespace(namespace: object) -> str:
@@ -277,6 +296,33 @@ def _odcs_provenance(
     )
 
 
+def _observe_node(
+    builder: PropertyObservationBuilder,
+    node: GraphNode,
+    provenance: ProvenanceRecord,
+) -> None:
+    """Emit top-level property observations for a provenanced ODCS node."""
+    if not node.provenance:
+        return
+    builder.observe(node.identity, PropertyPath(("name",)), node.name, provenance)
+    if node.description is not None:
+        builder.observe(
+            node.identity,
+            PropertyPath(("description",)),
+            node.description,
+            provenance,
+        )
+    attributes = node.to_dict()["attributes"]
+    assert isinstance(attributes, dict)
+    for key, value in attributes.items():
+        builder.observe(
+            node.identity,
+            PropertyPath(("attributes", key)),
+            value,
+            provenance,
+        )
+
+
 def _contract_attributes(document: Mapping[str, Any]) -> dict[str, Any]:
     attrs: dict[str, Any] = {
         "api_version": document["apiVersion"],
@@ -394,6 +440,7 @@ def _map_items_properties(
     provenance: ProvenanceRecord,
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
     items_path: str,
 ) -> None:
     """Recurse through nested ``items`` wrappers; attach named properties to parent column."""
@@ -409,6 +456,7 @@ def _map_items_properties(
                 provenance=provenance,
                 nodes=nodes,
                 edges=edges,
+                observations=observations,
                 base_path=f"{path}/properties",
             )
         current = current.get("items")
@@ -423,6 +471,7 @@ def _map_properties(
     provenance: ProvenanceRecord,
     nodes: list[GraphNode],
     edges: list[GraphEdge],
+    observations: PropertyObservationBuilder,
     base_path: str,
 ) -> None:
     if not isinstance(properties, list):
@@ -451,15 +500,15 @@ def _map_properties(
         description = prop.get("description")
         if description is not None and not isinstance(description, str):
             description = None
-        nodes.append(
-            GraphNode(
-                identity=column_identity,
-                name=name,
-                description=description,
-                attributes=_column_attributes(prop),
-                provenance=(provenance,),
-            )
+        column_node = GraphNode(
+            identity=column_identity,
+            name=name,
+            description=description,
+            attributes=_column_attributes(prop),
+            provenance=(provenance,),
         )
+        nodes.append(column_node)
+        _observe_node(observations, column_node, provenance)
         edges.append(
             GraphEdge(
                 source=parent_identity,
@@ -475,6 +524,7 @@ def _map_properties(
             provenance=provenance,
             nodes=nodes,
             edges=edges,
+            observations=observations,
             base_path=f"{prop_path}/properties",
         )
         _map_items_properties(
@@ -484,11 +534,12 @@ def _map_properties(
             provenance=provenance,
             nodes=nodes,
             edges=edges,
+            observations=observations,
             items_path=f"{prop_path}/items",
         )
 
 
-def _build_graph(document: Mapping[str, Any], *, namespace: str) -> GovernanceGraph:
+def _map_odcs_result(document: Mapping[str, Any], *, namespace: str) -> GovernanceMappingResult:
     try:
         contract_id = _require_mapped_str(
             document.get("id"),
@@ -507,6 +558,7 @@ def _build_graph(document: Mapping[str, Any], *, namespace: str) -> GovernanceGr
         )
         nodes: list[GraphNode] = []
         edges: list[GraphEdge] = []
+        observations = PropertyObservationBuilder()
 
         contract_name = document.get("name")
         if not isinstance(contract_name, str) or not contract_name.strip():
@@ -522,15 +574,15 @@ def _build_graph(document: Mapping[str, Any], *, namespace: str) -> GovernanceGr
                 purpose = purpose_val
 
         contract_identity = GraphNodeIdentity(namespace, NODE_KIND_CONTRACT, contract_id)
-        nodes.append(
-            GraphNode(
-                identity=contract_identity,
-                name=contract_name,
-                description=purpose,
-                attributes=_contract_attributes(document),
-                provenance=(provenance,),
-            )
+        contract_node = GraphNode(
+            identity=contract_identity,
+            name=contract_name,
+            description=purpose,
+            attributes=_contract_attributes(document),
+            provenance=(provenance,),
         )
+        nodes.append(contract_node)
+        _observe_node(observations, contract_node, provenance)
 
         schema_entries = document.get("schema")
         if isinstance(schema_entries, list):
@@ -557,15 +609,15 @@ def _build_graph(document: Mapping[str, Any], *, namespace: str) -> GovernanceGr
                 dataset_description = schema_obj.get("description")
                 if dataset_description is not None and not isinstance(dataset_description, str):
                     dataset_description = None
-                nodes.append(
-                    GraphNode(
-                        identity=dataset_identity,
-                        name=schema_name,
-                        description=dataset_description,
-                        attributes=_dataset_attributes(schema_obj),
-                        provenance=(provenance,),
-                    )
+                dataset_node = GraphNode(
+                    identity=dataset_identity,
+                    name=schema_name,
+                    description=dataset_description,
+                    attributes=_dataset_attributes(schema_obj),
+                    provenance=(provenance,),
                 )
+                nodes.append(dataset_node)
+                _observe_node(observations, dataset_node, provenance)
                 edges.append(
                     GraphEdge(
                         source=contract_identity,
@@ -581,10 +633,14 @@ def _build_graph(document: Mapping[str, Any], *, namespace: str) -> GovernanceGr
                     provenance=provenance,
                     nodes=nodes,
                     edges=edges,
+                    observations=observations,
                     base_path=f"{schema_path}/properties",
                 )
 
-        return GovernanceGraph.from_parts(nodes, edges)
+        return GovernanceMappingResult(
+            graph=GovernanceGraph.from_parts(nodes, edges),
+            observations=observations.build(),
+        )
     except OdcsMappingError:
         raise
     except (TypeError, ValueError) as exc:

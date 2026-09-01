@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any, Literal, TextIO
 
 from governance import __version__
+from governance.authority.errors import (
+    AuthorityError,
+    map_authority_exception_to_config_diagnostics,
+)
+from governance.authority.load import load_normalized_authority
 from governance.config import Settings, load_settings
 from governance.config_contract import (
     CanonicalConfig,
@@ -201,6 +206,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for item in exc.errors:
             print(f"  {item.path or '/'}: {item.message} ({item.code})", file=sys.stderr)
         return 1
+    except AuthorityError as exc:
+        mapped = map_authority_exception_to_config_diagnostics(exc)
+        print(f"error: {_SAFE_CONFIG}", file=sys.stderr)
+        for item in mapped:
+            print(f"  {item.path or '/'}: {item.message} ({item.code})", file=sys.stderr)
+        return 1
     except Exception as exc:
         if _is_operational_error(exc):
             print(f"error: {_safe_error_message(exc)}", file=sys.stderr)
@@ -238,6 +249,7 @@ def _run(argv: list[str] | None) -> int:
             config_path,
             profile=getattr(args, "profile", None),
         )
+        load_normalized_authority(canonical)
         if command in {"diff", "sync"} and not canonical.targets:
             raise CliOperationalError(_SAFE_TARGET_REQUIRED)
         settings = resolve_settings(canonical)
@@ -528,7 +540,10 @@ def _build_parser() -> argparse.ArgumentParser:
     impact.add_argument(
         "--config",
         metavar="PATH",
-        help="Optional governance.yaml used only to load configured policies.",
+        help=(
+            "Optional governance.yaml used to validate governance configuration "
+            "and load configured policies."
+        ),
     )
     impact.add_argument(
         "--profile",
@@ -605,7 +620,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     config_path = Path(args.config)
     json_output = bool(args.json)
     try:
-        _canonical, identity = validate_governance_config(
+        canonical, identity = validate_governance_config(
             config_path,
             profile=getattr(args, "profile", None),
         )
@@ -616,6 +631,19 @@ def _cmd_config(args: argparse.Namespace) -> int:
         else:
             print("ok=false")
             for item in exc.errors:
+                print(f"error path={item.path or '/'} code={item.code} message={item.message}")
+        return 1
+
+    try:
+        load_normalized_authority(canonical)
+    except AuthorityError as exc:
+        mapped = map_authority_exception_to_config_diagnostics(exc, canonical=canonical)
+        payload = diagnostics_failure(mapped)
+        if json_output:
+            _print_json(payload)
+        else:
+            print("ok=false")
+            for item in mapped:
                 print(f"error path={item.path or '/'} code={item.code} message={item.message}")
         return 1
 
@@ -1119,6 +1147,25 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     if not odcs_paths and not dbt_paths and not openlineage_paths:
         raise CliUsageError("at least one of --odcs, --dbt-manifest, or --openlineage is required")
 
+    policy_set = None
+    affected_policies = ()
+    config_path = getattr(args, "config", None)
+    if config_path is not None:
+        try:
+            canonical = load_canonical_config(
+                config_path,
+                profile=getattr(args, "profile", None),
+            )
+        except ConfigContractError as exc:
+            return _emit_config_contract_error(exc, fmt)
+        authority_error = _validate_authority(canonical, fmt)
+        if authority_error is not None:
+            return authority_error
+        try:
+            policy_set = load_normalized_policies(canonical)
+        except PolicyError as exc:
+            return _emit_policy_error(exc, fmt)
+
     try:
         changed_nodes = load_impact_changes(args.changes, expected_namespace=namespace)
     except ImpactError as exc:
@@ -1151,21 +1198,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
             fmt,
         )
 
-    policy_set = None
-    affected_policies = ()
-    config_path = getattr(args, "config", None)
-    if config_path is not None:
-        try:
-            canonical = load_canonical_config(
-                config_path,
-                profile=getattr(args, "profile", None),
-            )
-        except ConfigContractError as exc:
-            return _emit_config_contract_error(exc, fmt)
-        try:
-            policy_set = load_normalized_policies(canonical)
-        except PolicyError as exc:
-            return _emit_policy_error(exc, fmt)
+    if policy_set is not None:
         affected_policies = match_affected_policies(policy_set, impact.policy_relevant_nodes)
 
     payload = build_impact_result(
@@ -1286,11 +1319,35 @@ def _load_canonical_and_settings(
         canonical = load_canonical_config(config_path, profile=profile)
     except ConfigContractError as exc:
         return _emit_config_contract_error(exc, fmt)
+    authority_error = _validate_authority(canonical, fmt)
+    if authority_error is not None:
+        return authority_error
     try:
         settings = resolve_settings(canonical)
     except ConfigResolutionError as exc:
         return _emit_resolution_error(exc, fmt, canonical=canonical)
     return canonical, settings
+
+
+def _validate_authority(canonical: CanonicalConfig, fmt: OutputFormat) -> int | None:
+    try:
+        load_normalized_authority(canonical)
+    except AuthorityError as exc:
+        return _emit_authority_error(exc, fmt, canonical=canonical)
+    return None
+
+
+def _emit_authority_error(
+    exc: AuthorityError,
+    fmt: OutputFormat,
+    *,
+    canonical: CanonicalConfig | None = None,
+) -> int:
+    mapped = map_authority_exception_to_config_diagnostics(exc, canonical=canonical)
+    return _emit_config_contract_error(
+        ConfigContractError(mapped),
+        fmt,
+    )
 
 
 def _emit_config_contract_error(exc: ConfigContractError, fmt: OutputFormat) -> int:

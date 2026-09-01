@@ -1,0 +1,30 @@
+# Sample metadata authority rules for Governance-as-Code demos.
+# No credentials. Paths/refs are logical provenance identifiers.
+authority_schema: governance-authority
+authority_version: "1"
+rules:
+  - id: table-description-from-odcs-provider
+    description: ODCS owns table descriptions when present (provider-only).
+    select:
+      kind: table
+      property: /description
+    authority:
+      provider_type: odcs
+
+  - id: column-description-from-odcs-source
+    description: ODCS contract source_ref owns column descriptions.
+    select:
+      kind: column
+      property: /description
+    authority:
+      provider_type: odcs
+      source_ref: customer-contract
+
+  - id: production-table-name-from-dbt
+    description: In production namespace, dbt owns table names (rank-2 selector).
+    select:
+      kind: table
+      property: /name
+      namespace: production
+    authority:
+      provider_type: dbt

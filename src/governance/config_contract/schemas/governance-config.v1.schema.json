@@ -31,7 +31,11 @@
     },
     "policies": {
       "$ref": "#/$defs/policies",
-      "description": "Declarative policy file references. Not evaluated in this release."
+      "description": "Declarative policy file references."
+    },
+    "authority": {
+      "$ref": "#/$defs/authority",
+      "description": "Declarative metadata authority file references."
     },
     "profiles": {
       "type": "object",
@@ -70,6 +74,17 @@
         }
       }
     },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" },
+          "description": "Relative authority file paths. Validated for path safety only."
+        }
+      }
+    },
     "profileOverlay": {
       "type": "object",
       "additionalProperties": false,
@@ -87,7 +102,8 @@
           "items": { "$ref": "#/$defs/target" }
         },
         "artifacts": { "$ref": "#/$defs/artifacts" },
-        "policies": { "$ref": "#/$defs/policies" }
+        "policies": { "$ref": "#/$defs/policies" },
+        "authority": { "$ref": "#/$defs/authority" }
       }
     },
     "source": {

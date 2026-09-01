@@ -14,7 +14,7 @@ inputs:
     description: >
       Workspace-relative path to governance.yaml.
       Required for validate/check/plan (enforced in Phase A).
-      Optional for impact (policy relevance only).
+      Optional for impact (validates config/authority and enables policy matching).
     required: false
     default: ""
   profile:
