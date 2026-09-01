@@ -19,7 +19,19 @@
         "additionalProperties": false,
         "required": ["code", "path", "message"],
         "properties": {
-          "code": { "type": "string", "minLength": 1 },
+          "code": {
+            "type": "string",
+            "enum": [
+              "read_error",
+              "parse_error",
+              "invalid_object_identity",
+              "namespace_mismatch",
+              "source_error",
+              "unknown_object",
+              "unknown_property",
+              "write_error"
+            ]
+          },
           "path": { "type": "string" },
           "message": { "type": "string", "minLength": 1 }
         }

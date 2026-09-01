@@ -191,7 +191,9 @@ def _write_workspace(
     return config
 
 
-def _write_authority(path: Path, *, provider_type: str, property_path: str = "/description") -> Path:
+def _write_authority(
+    path: Path, *, provider_type: str, property_path: str = "/description"
+) -> Path:
     import yaml
 
     document = {
@@ -453,9 +455,7 @@ def test_unresolved_relevant_conflict_blocks_plan_exit_4(
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is False
     assert payload["diagnostic_schema"] == "governance-reconciliation-diagnostics"
-    assert any(
-        item["code"] == "unresolved_property_conflict" for item in payload["errors"]
-    )
+    assert any(item["code"] == "unresolved_property_conflict" for item in payload["errors"])
     assert int(adapter_calls["writes"]) == 0
 
 
@@ -494,18 +494,14 @@ def test_resolved_conflict_plan_uses_authorized_data_type(
     config = _write_workspace(tmp_path, authority_files=["auth.yaml"])
 
     dbt_doc = _dbt_manifest(description="customers table")
-    dbt_doc["nodes"]["model.pkg.customers"]["columns"]["customer_id"]["data_type"] = (
-        "uuid"
-    )
+    dbt_doc["nodes"]["model.pkg.customers"]["columns"]["customer_id"]["data_type"] = "uuid"
     dbt_path = tmp_path / "manifest.json"
     dbt_path.write_text(json.dumps(dbt_doc), encoding="utf-8")
 
     ol_event = {
         "eventTime": "2024-01-01T00:00:00Z",
         "producer": "https://example.com/producer/1.0",
-        "schemaURL": (
-            "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/DatasetEvent"
-        ),
+        "schemaURL": ("https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/DatasetEvent"),
         "dataset": {
             "namespace": "postgres://host",
             "name": "governance_demo.commerce.customers",
@@ -513,8 +509,7 @@ def test_resolved_conflict_plan_uses_authorized_data_type(
                 "hierarchy": {
                     "_producer": "https://facet/hierarchy",
                     "_schemaURL": (
-                        "https://openlineage.io/spec/facets/1-0-0/"
-                        "HierarchyDatasetFacet.json"
+                        "https://openlineage.io/spec/facets/1-0-0/HierarchyDatasetFacet.json"
                     ),
                     "hierarchy": [
                         {"type": "DATABASE", "name": "governance_demo"},
@@ -525,8 +520,7 @@ def test_resolved_conflict_plan_uses_authorized_data_type(
                 "schema": {
                     "_producer": "https://facet/schema",
                     "_schemaURL": (
-                        "https://openlineage.io/spec/facets/1-1-1/"
-                        "SchemaDatasetFacet.json"
+                        "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json"
                     ),
                     "fields": [{"name": "customer_id", "type": "varchar"}],
                 },
@@ -582,9 +576,7 @@ def test_unrelated_external_conflict_does_not_block_plan(
     ghost_event = {
         "eventTime": "2024-01-01T00:00:00Z",
         "producer": "https://example.com/producer/1.0",
-        "schemaURL": (
-            "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/DatasetEvent"
-        ),
+        "schemaURL": ("https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/DatasetEvent"),
         "dataset": {
             "namespace": "postgres://host",
             "name": "other.ghost.table",
@@ -592,8 +584,7 @@ def test_unrelated_external_conflict_does_not_block_plan(
                 "hierarchy": {
                     "_producer": "https://facet/hierarchy",
                     "_schemaURL": (
-                        "https://openlineage.io/spec/facets/1-0-0/"
-                        "HierarchyDatasetFacet.json"
+                        "https://openlineage.io/spec/facets/1-0-0/HierarchyDatasetFacet.json"
                     ),
                     "hierarchy": [
                         {"type": "DATABASE", "name": "other"},
@@ -604,8 +595,7 @@ def test_unrelated_external_conflict_does_not_block_plan(
                 "ownership": {
                     "_producer": "https://facet/ownership",
                     "_schemaURL": (
-                        "https://openlineage.io/spec/facets/1-0-0/"
-                        "OwnershipDatasetFacet.json"
+                        "https://openlineage.io/spec/facets/1-0-0/OwnershipDatasetFacet.json"
                     ),
                     "owners": [{"name": "alpha", "type": "USER"}],
                 },
@@ -613,12 +603,8 @@ def test_unrelated_external_conflict_does_not_block_plan(
         },
     }
     ghost_b_event = json.loads(json.dumps(ghost_event))
-    ghost_b_event["dataset"]["facets"]["ownership"]["owners"] = [
-        {"name": "beta", "type": "USER"}
-    ]
-    ghost_b_event["dataset"]["facets"]["ownership"]["_producer"] = (
-        "https://facet/ownership-b"
-    )
+    ghost_b_event["dataset"]["facets"]["ownership"]["owners"] = [{"name": "beta", "type": "USER"}]
+    ghost_b_event["dataset"]["facets"]["ownership"]["_producer"] = "https://facet/ownership-b"
     ghost_a = tmp_path / "ghost-a.json"
     ghost_b = tmp_path / "ghost-b.json"
     ghost_a.write_text(json.dumps([ghost_event]), encoding="utf-8")
@@ -754,9 +740,7 @@ def test_apply_stale_when_authority_materially_changes_zero_writes(
             rules=(
                 NormalizedAuthorityRule(
                     key=AuthorityRuleKey(
-                        selector=AuthoritySelector(
-                            kind=NODE_KIND_TABLE, property_path=path
-                        ),
+                        selector=AuthoritySelector(kind=NODE_KIND_TABLE, property_path=path),
                         authority=AuthorityTarget(provider_type=provider),
                     ),
                     declarations=(AuthorityDeclaration(f"rule-{provider}"),),
@@ -787,9 +771,7 @@ def test_apply_stale_when_authority_materially_changes_zero_writes(
         saved_assumptions=saved_boundary,
         conflict_report=analyze_property_conflicts(observations, _authority("odcs")),
     )
-    assert with_odcs["actions"][0]["properties"][0]["decision"]["effective_value"] == (
-        "from-odcs"
-    )
+    assert with_odcs["actions"][0]["properties"][0]["decision"]["effective_value"] == ("from-odcs")
 
     _patch_env(monkeypatch)
     _patch_scanner(monkeypatch)
@@ -804,9 +786,7 @@ def test_apply_stale_when_authority_materially_changes_zero_writes(
         with_odcs
     ).to_dict()
     without = {key: value for key, value in payload.items() if key != "content_identity"}
-    payload["content_identity"] = plan_identity(
-        without, plan_version=PLAN_VERSION_V2
-    ).to_dict()
+    payload["content_identity"] = plan_identity(without, plan_version=PLAN_VERSION_V2).to_dict()
     plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     config = _write_workspace(tmp_path, authority_files=["auth.yaml"])

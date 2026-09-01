@@ -19,7 +19,16 @@
         "additionalProperties": false,
         "required": ["code", "path", "message"],
         "properties": {
-          "code": { "type": "string", "minLength": 1 },
+          "code": {
+            "type": "string",
+            "enum": [
+              "source_error",
+              "reconciliation_object_identity_conflict",
+              "unresolved_property_conflict",
+              "invalid_or_ambiguous_authority",
+              "unsupported_effective_value"
+            ]
+          },
           "path": { "type": "string" },
           "message": { "type": "string", "minLength": 1 }
         }

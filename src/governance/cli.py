@@ -125,27 +125,6 @@ from governance.plans import (
     version_mismatch,
     write_saved_plan,
 )
-from governance.reconciliation import (
-    ExplainError,
-    ReconciliationError,
-    ReconciliationSourceBundle,
-    apply_reconciliation_overlay,
-    assumptions_content_identity,
-    build_explain_result,
-    build_physical_reconciliation_index,
-    build_reconciliation_assumptions,
-    canonical_explain_json,
-    compose_reconciliation_sources,
-    cross_check_known_objects,
-    explain_diagnostics_failure,
-    format_explain_human,
-    has_reconciliation_source_flags,
-    load_object_identity,
-    reconciliation_diagnostics_failure,
-    recompute_assumptions_on_saved_boundary,
-    validate_assumptions_safety,
-    write_explain_artifact,
-)
 from governance.plans.errors import (
     CODE_TARGET_CONTEXT_INCONSISTENT,
     PlanDiagnosticError,
@@ -162,6 +141,27 @@ from governance.policy import (
     format_policy_report_human,
     load_normalized_policies,
     policy_diagnostics_failure,
+)
+from governance.reconciliation import (
+    ExplainError,
+    ReconciliationError,
+    ReconciliationSourceBundle,
+    apply_reconciliation_overlay,
+    assumptions_content_identity,
+    build_explain_result,
+    build_physical_reconciliation_index,
+    build_reconciliation_assumptions,
+    canonical_explain_json,
+    compose_reconciliation_sources,
+    cross_check_known_objects,
+    explain_diagnostics_failure,
+    format_explain_human,
+    has_reconciliation_source_flags,
+    load_object_identity,
+    recompute_assumptions_on_saved_boundary,
+    reconciliation_diagnostics_failure,
+    validate_assumptions_safety,
+    write_explain_artifact,
 )
 from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner
 from governance.snapshots import GovernanceSnapshot
@@ -1005,9 +1005,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                     category="reconciliation",
                     expected=PLAN_VERSION_V2,
                     observed=saved.plan_version,
-                    message=(
-                        "legacy plan missing reconciliation assumptions; regenerate v2"
-                    ),
+                    message=("legacy plan missing reconciliation assumptions; regenerate v2"),
                 )
             ]
         )
@@ -1040,9 +1038,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                         category="reconciliation",
                         expected=PLAN_VERSION_V2,
                         observed=saved.plan_version,
-                        message=(
-                            "legacy plan missing reconciliation assumptions; regenerate v2"
-                        ),
+                        message=("legacy plan missing reconciliation assumptions; regenerate v2"),
                     )
                 ]
             )
@@ -1340,9 +1336,7 @@ def _cmd_explain(args: argparse.Namespace) -> int:
         dbt_paths=dbt_paths,
         openlineage_paths=openlineage_paths,
     ):
-        raise CliUsageError(
-            "at least one of --odcs, --dbt-manifest, or --openlineage is required"
-        )
+        raise CliUsageError("at least one of --odcs, --dbt-manifest, or --openlineage is required")
 
     try:
         canonical = load_canonical_config(
@@ -1383,10 +1377,7 @@ def _cmd_explain(args: argparse.Namespace) -> int:
             property_filter=property_filter,
         )
         output_path = getattr(args, "output", None)
-        if output_path is not None:
-            written = write_explain_artifact(result, output_path)
-        else:
-            written = None
+        written = write_explain_artifact(result, output_path) if output_path is not None else None
     except ExplainError as exc:
         return _emit_explain_error(exc, fmt)
 
@@ -1395,7 +1386,7 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(format_explain_human(result))
         if written is not None:
-            sys.stdout.write(f"artifact_written={written}\n")
+            sys.stdout.write(f"artifact_written={format_human_value(str(written))}\n")
     return 0
 
 

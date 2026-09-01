@@ -141,22 +141,27 @@ def test_same_namespace_enforced_on_chain() -> None:
 
 
 def test_transformation_contract_incomplete_return_none() -> None:
-    assert project_physical_local_id(
-        GraphNodeIdentity(NS, NODE_KIND_TRANSFORMATION, "model.pkg.orders")
-    ) is None
-    assert project_physical_local_id(
-        GraphNodeIdentity(NS, NODE_KIND_CONTRACT, "contract-orders")
-    ) is None
+    assert (
+        project_physical_local_id(
+            GraphNodeIdentity(NS, NODE_KIND_TRANSFORMATION, "model.pkg.orders")
+        )
+        is None
+    )
+    assert (
+        project_physical_local_id(GraphNodeIdentity(NS, NODE_KIND_CONTRACT, "contract-orders"))
+        is None
+    )
 
     # Generic ODCS-style dataset without data_source parent.
-    assert project_physical_local_id(
-        GraphNodeIdentity(NS, NODE_KIND_DATASET, "orders")
-    ) is None
+    assert project_physical_local_id(GraphNodeIdentity(NS, NODE_KIND_DATASET, "orders")) is None
     # Incomplete table chain (missing data_source ancestor).
     orphan_dataset = GraphNodeIdentity(NS, NODE_KIND_DATASET, "commerce")
-    assert project_physical_local_id(
-        GraphNodeIdentity(NS, NODE_KIND_TABLE, "customers", parent=orphan_dataset)
-    ) is None
+    assert (
+        project_physical_local_id(
+            GraphNodeIdentity(NS, NODE_KIND_TABLE, "customers", parent=orphan_dataset)
+        )
+        is None
+    )
     # data_source with parent is not projectable.
     nested_ds = GraphNodeIdentity(
         NS,

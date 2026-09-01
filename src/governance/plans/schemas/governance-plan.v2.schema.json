@@ -64,13 +64,24 @@
         "mode": { "type": "string", "enum": ["mock", "live"] }
       }
     },
+    "graphNodeKind": {
+      "type": "string",
+      "enum": [
+        "data_source",
+        "dataset",
+        "table",
+        "column",
+        "contract",
+        "transformation"
+      ]
+    },
     "graphNodeIdentity": {
       "type": "object",
       "additionalProperties": false,
       "required": ["namespace", "kind", "logical_id", "parent"],
       "properties": {
         "namespace": { "type": "string", "minLength": 1 },
-        "kind": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/graphNodeKind" },
         "logical_id": { "type": "string", "minLength": 1 },
         "parent": {
           "oneOf": [
@@ -78,6 +89,108 @@
             { "$ref": "#/$defs/graphNodeIdentity" }
           ]
         }
+      }
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_type",
+        "source_ref",
+        "source_version",
+        "observation_mode"
+      ],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": ["declared", "observed", "derived"]
+        }
+      }
+    },
+    "valueGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": true,
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/provenanceRecord" }
+        }
+      }
+    },
+    "authorityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type"],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authoritySelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "property"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/graphNodeKind" },
+        "property": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorityRuleKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "select"],
+      "properties": {
+        "authority": { "$ref": "#/$defs/authorityTarget" },
+        "select": { "$ref": "#/$defs/authoritySelector" }
+      }
+    },
+    "conflictState": {
+      "type": "string",
+      "enum": [
+        "SINGLE_OBSERVATION",
+        "AGREEMENT",
+        "RESOLVED_BY_AUTHORITY",
+        "UNRESOLVED_CONFLICT",
+        "INVALID_OR_AMBIGUOUS_AUTHORITY"
+      ]
+    },
+    "conflictReason": {
+      "type": "string",
+      "enum": [
+        "SINGLE_OBSERVATION",
+        "AGREEMENT",
+        "RESOLVED_BY_AUTHORITY",
+        "NO_AUTHORITY_RULE",
+        "AUTHORITATIVE_SOURCE_NOT_OBSERVED",
+        "AUTHORITATIVE_SOURCE_CONFLICTED",
+        "INVALID_OR_AMBIGUOUS_AUTHORITY"
+      ]
+    },
+    "conflictDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "value_groups"],
+      "properties": {
+        "state": { "$ref": "#/$defs/conflictState" },
+        "reason": { "$ref": "#/$defs/conflictReason" },
+        "value_groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/valueGroup" }
+        },
+        "effective_value": true,
+        "winning_rule_key": { "$ref": "#/$defs/authorityRuleKey" }
       }
     },
     "reconciliationAssumptions": {
@@ -133,18 +246,6 @@
             { "$ref": "#/$defs/conflictDecision" }
           ]
         }
-      }
-    },
-    "conflictDecision": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["state", "reason", "value_groups"],
-      "properties": {
-        "state": { "type": "string", "minLength": 1 },
-        "reason": { "type": "string", "minLength": 1 },
-        "value_groups": { "type": "array" },
-        "effective_value": true,
-        "winning_rule_key": { "type": "object" }
       }
     }
   }

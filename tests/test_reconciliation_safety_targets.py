@@ -97,9 +97,7 @@ def test_assessment_matrix_safe_states() -> None:
     assert assess_reconciliation(single).safe is True
     assert assess_reconciliation(single).applicable is True
 
-    agreement = _result_for(
-        _obs(PATH_DESCRIPTION, "shared", _prov("odcs"), _prov("dbt", "m"))
-    )
+    agreement = _result_for(_obs(PATH_DESCRIPTION, "shared", _prov("odcs"), _prov("dbt", "m")))
     assert assess_reconciliation(agreement).reason == REASON_SAFE
 
     authority = NormalizedAuthorityPolicySet(

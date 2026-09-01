@@ -198,9 +198,7 @@ def test_recompute_null_to_present_changes_identity() -> None:
     )
     after = assumptions_content_identity(recomputed)
     assert recomputed["actions"][0]["properties"][0]["decision"] is not None
-    assert recomputed["actions"][0]["properties"][0]["decision"]["state"] == (
-        "SINGLE_OBSERVATION"
-    )
+    assert recomputed["actions"][0]["properties"][0]["decision"]["state"] == ("SINGLE_OBSERVATION")
     assert before != after
 
 
@@ -339,3 +337,64 @@ def test_unrelated_unresolved_conflict_does_not_block_safety() -> None:
         "assumptions_version": "1",
     }
     validate_assumptions_safety(assumptions, report)
+
+
+def test_empty_description_mutation_material_when_remote_absent() -> None:
+    """Empty string description must not collapse to None for mutation detection."""
+    from governance.integrations.collibra.models import CollibraAttributeSpec, CollibraRemoteAsset
+    from governance.reconciliation.assumptions import build_reconciliation_assumptions
+
+    identity = _table_identity()
+    local_id = "tbl:governance-demo/governance_demo/commerce/customers"
+    mapping = _mapping()
+    desc_ref = mapping.attribute_type_refs["description"]
+    baseline = _asset(local_id, "customers")
+    reconciled = CollibraAssetSpec(
+        local_id=local_id,
+        name="customers",
+        asset_type_ref="mock:asset-type:table",
+        domain_ref="mock:domain:governance",
+        display_name="customers",
+        attributes=(CollibraAttributeSpec(desc_ref, ""),),
+    )
+    desired_baseline = CollibraDesiredState(assets=(baseline,))
+    desired_reconciled = CollibraDesiredState(assets=(reconciled,))
+    index = PhysicalReconciliationIndex(by_local_id={local_id: identity}, namespace=NS)
+    sync_plan = SyncPlan(
+        actions=(
+            SyncAction(
+                action_type=SyncActionType.UPDATE,
+                object_kind=SyncObjectKind.ASSET,
+                local_id=local_id,
+                remote_id="remote-1",
+                desired_asset=reconciled,
+                reason="description update",
+            ),
+        )
+    )
+    remote = CollibraRemoteAsset(
+        remote_id="remote-1",
+        local_id=local_id,
+        name="customers",
+        asset_type_ref="mock:asset-type:table",
+        domain_ref="mock:domain:governance",
+        display_name="customers",
+        managed_attributes=(),
+    )
+    assumptions = build_reconciliation_assumptions(
+        baseline_desired=desired_baseline,
+        reconciled_desired=desired_reconciled,
+        remote_state=CollibraRemoteState(assets=(remote,)),
+        sync_plan=sync_plan,
+        conflict_report=PropertyConflictReport(),
+        mapping_config=mapping,
+        physical_index=index,
+    )
+    desc_props = [
+        item
+        for action in assumptions["actions"]
+        for item in action["properties"]
+        if item["property"] == "/description"
+    ]
+    assert desc_props
+    assert "mutation" in desc_props[0]["roles"]

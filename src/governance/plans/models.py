@@ -72,9 +72,7 @@ class SavedGovernancePlan:
             if self.reconciliation_assumptions is None:
                 raise ValueError("reconciliation_assumptions required for plan_version 2")
             if self.reconciliation_assumptions_identity is None:
-                raise ValueError(
-                    "reconciliation_assumptions_identity required for plan_version 2"
-                )
+                raise ValueError("reconciliation_assumptions_identity required for plan_version 2")
             payload["reconciliation_assumptions"] = self.reconciliation_assumptions
             payload["reconciliation_assumptions_identity"] = (
                 self.reconciliation_assumptions_identity.to_dict()

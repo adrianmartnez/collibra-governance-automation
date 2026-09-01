@@ -36,7 +36,9 @@ class DiagnosticError:
         return {"code": self.code, "message": self.message, "path": self.path}
 
 
-def _sorted_errors(errors: list[DiagnosticError] | tuple[DiagnosticError, ...]) -> list[dict[str, str]]:
+def _sorted_errors(
+    errors: list[DiagnosticError] | tuple[DiagnosticError, ...],
+) -> list[dict[str, str]]:
     ordered = sorted(errors, key=lambda item: (item.path, item.code, item.message))
     return [item.to_dict() for item in ordered]
 

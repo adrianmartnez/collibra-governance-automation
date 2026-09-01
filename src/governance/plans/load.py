@@ -96,9 +96,21 @@ def _from_validated_document(document: dict[str, Any]) -> SavedGovernancePlan:
     reconciliation_assumptions_identity = None
     if plan_version == "2":
         reconciliation_assumptions = document["reconciliation_assumptions"]
-        reconciliation_assumptions_identity = _identity(
-            document["reconciliation_assumptions_identity"]
-        )
+        stored_assumptions_identity = _identity(document["reconciliation_assumptions_identity"])
+        from governance.reconciliation.assumptions import assumptions_content_identity
+
+        observed_assumptions_identity = assumptions_content_identity(reconciliation_assumptions)
+        if observed_assumptions_identity.to_dict() != stored_assumptions_identity.to_dict():
+            raise PlanIntegrityError(
+                [
+                    PlanDiagnosticError(
+                        code=CODE_IDENTITY,
+                        path="/reconciliation_assumptions_identity",
+                        message="reconciliation assumptions identity mismatch",
+                    )
+                ]
+            )
+        reconciliation_assumptions_identity = stored_assumptions_identity
 
     return SavedGovernancePlan(
         sync_plan=sync_plan,

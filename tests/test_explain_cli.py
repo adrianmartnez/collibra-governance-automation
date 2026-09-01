@@ -69,8 +69,7 @@ def _obs(
 def _bundle(*observations: PropertyObservation) -> ReconciliationSourceBundle:
     obs_set = PropertyObservationSet.from_observations(observations)
     known_map = {
-        item.object_identity.canonical_bytes(): item.object_identity
-        for item in observations
+        item.object_identity.canonical_bytes(): item.object_identity for item in observations
     }
     known = tuple(known_map.values())
     return ReconciliationSourceBundle(observations=obs_set, known_objects=known)
@@ -364,3 +363,45 @@ def test_content_identity_stable_under_path_reorder(
     assert first["content_identity"] == second["content_identity"]
     assert str(left) not in json.dumps(first)
     assert str(right) not in json.dumps(second)
+
+
+def test_human_output_escapes_artifact_written_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost:5432/db")
+    monkeypatch.setenv("COLLIBRA_MODE", "mock")
+    config = _write_explain_workspace(tmp_path)
+    odcs_path = tmp_path / "contract.json"
+    odcs_path.write_text(json.dumps(_minimal_odcs()), encoding="utf-8")
+    dataset = _dataset_identity_from_odcs()
+    obj = tmp_path / "object.json"
+    obj.write_text(json.dumps(dataset.to_dict(), indent=2) + "\n", encoding="utf-8")
+    output = tmp_path / "explain-out.json"
+
+    def _fake_write(result: dict, path: str | Path) -> Path:
+        del result, path
+        return Path("line1\tline2")
+
+    monkeypatch.setattr("governance.cli.write_explain_artifact", _fake_write)
+    code = main(
+        [
+            "explain",
+            "--config",
+            str(config),
+            "--namespace",
+            NS,
+            "--object-identity",
+            str(obj),
+            "--odcs",
+            str(odcs_path),
+            "--output",
+            str(output),
+            "--format",
+            "human",
+        ]
+    )
+    assert code == 0
+    human = capsys.readouterr().out
+    assert "artifact_written=line1\\tline2" in human

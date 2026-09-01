@@ -19,9 +19,7 @@ REASON_INVALID = "invalid_or_ambiguous_authority"
 REASON_UNSUPPORTED = "unsupported_effective_value"
 REASON_NOT_MAPPED = "not_reconciliation_mapped"
 
-SAFE_STATES = frozenset(
-    {"SINGLE_OBSERVATION", "AGREEMENT", "RESOLVED_BY_AUTHORITY"}
-)
+SAFE_STATES = frozenset({"SINGLE_OBSERVATION", "AGREEMENT", "RESOLVED_BY_AUTHORITY"})
 UNSAFE_STATES = frozenset({"UNRESOLVED_CONFLICT", "INVALID_OR_AMBIGUOUS_AUTHORITY"})
 
 
@@ -46,7 +44,9 @@ def assess_reconciliation(
     object_identity = identity if identity is not None else result.object_identity
     path = property_path if property_path is not None else result.property_path
 
-    if target_field_for_path(path) is None or not path_applicable_to_identity(path, object_identity):
+    if target_field_for_path(path) is None or not path_applicable_to_identity(
+        path, object_identity
+    ):
         return ReconciliationAssessment(
             applicable=False,
             safe=False,

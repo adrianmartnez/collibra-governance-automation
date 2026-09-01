@@ -103,9 +103,7 @@ def _apply_target_to_asset(
     type_ref = mapping_config.attribute_type_refs[type_key]
 
     if converted.has_value:
-        attrs = _set_or_remove_attr(
-            attrs, type_ref=type_ref, has_value=True, value=converted.value
-        )
+        attrs = _set_or_remove_attr(attrs, type_ref=type_ref, has_value=True, value=converted.value)
     elif remote_asset is None:
         attrs = _set_or_remove_attr(attrs, type_ref=type_ref, has_value=False, value=None)
     else:
@@ -176,9 +174,7 @@ def apply_reconciliation_overlay(
             )
             applied.append(result)
 
-    ordered_assets = tuple(
-        assets_by_id[asset.local_id] for asset in baseline_desired.assets
-    )
+    ordered_assets = tuple(assets_by_id[asset.local_id] for asset in baseline_desired.assets)
     return OverlayResult(
         desired=CollibraDesiredState(
             assets=ordered_assets,

@@ -20,8 +20,8 @@ from governance.integrations.collibra.models import (
 )
 from governance.reconciliation.errors import (
     CODE_INVALID_OR_AMBIGUOUS_AUTHORITY,
-    CODE_UNSUPPORTED_EFFECTIVE_VALUE,
     CODE_UNRESOLVED_PROPERTY_CONFLICT,
+    CODE_UNSUPPORTED_EFFECTIVE_VALUE,
     DiagnosticError,
     ReconciliationError,
 )
@@ -106,7 +106,7 @@ def _attr_changed(
     rec_val = get_asset_attr(reconciled, mapping_config=mapping_config, field=field)
     remote_val = get_remote_attr(remote, mapping_config=mapping_config, field=field)
     overlay_changed = base_val != rec_val
-    mutation_material = (rec_val or None) != (remote_val or None)
+    mutation_material = rec_val != remote_val
     return mutation_material, overlay_changed
 
 
@@ -300,9 +300,7 @@ def recompute_assumptions_on_saved_boundary(
                 "properties": properties_out,
             }
         )
-    actions_out.sort(
-        key=lambda item: (item["object_kind"], item["local_id"], item["action_type"])
-    )
+    actions_out.sort(key=lambda item: (item["object_kind"], item["local_id"], item["action_type"]))
     return {
         "actions": actions_out,
         "assumptions_schema": RECONCILIATION_ASSUMPTIONS_SCHEMA,

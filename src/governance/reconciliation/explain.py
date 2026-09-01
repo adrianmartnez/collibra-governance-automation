@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from governance.domain.authority import NormalizedAuthorityPolicySet
-from governance.domain.conflicts import PropertyConflictReport, analyze_property_conflicts
+from governance.domain.conflicts import analyze_property_conflicts
 from governance.domain.graph import GraphNodeIdentity
 from governance.domain.observations import PropertyPath
-from governance.identity.canonicalize import canonical_json_bytes
 from governance.identity.hashing import explain_result_identity
 from governance.identity.json_values import canonical_value_fingerprint
 from governance.impact.contracts import format_human_value, identity_from_dict
@@ -76,7 +75,9 @@ def load_object_identity(path: str | Path, *, namespace: str) -> GraphNodeIdenti
                 DiagnosticError(
                     code=CODE_INVALID_OBJECT_IDENTITY,
                     path="/object_identity",
-                    message="object identity keys must be exactly namespace, kind, logical_id, parent",
+                    message=(
+                        "object identity keys must be exactly namespace, kind, logical_id, parent"
+                    ),
                 )
             ]
         )
@@ -215,7 +216,12 @@ def format_explain_human(result: dict[str, Any]) -> str:
     for prop in result["properties"]:
         if prop["has_effective_value"]:
             effective = format_human_value(
-                json.dumps(prop["effective_value"], sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+                json.dumps(
+                    prop["effective_value"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=True,
+                )
             )
             effective_repr = f"effective_value={effective}"
         else:
@@ -232,10 +238,13 @@ def format_explain_human(result: dict[str, Any]) -> str:
         )
         winning = prop.get("winning_rule_key")
         if winning is not None:
-            lines.append(
-                "AUTHORITY "
-                f"rule={format_human_value(json.dumps(winning, sort_keys=True, separators=(',', ':'), ensure_ascii=True))}"
+            winning_json = json.dumps(
+                winning,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
             )
+            lines.append(f"AUTHORITY rule={format_human_value(winning_json)}")
         effective_fp = None
         if prop["has_effective_value"]:
             effective_fp = canonical_value_fingerprint(prop["effective_value"])
@@ -268,9 +277,7 @@ def format_explain_human(result: dict[str, Any]) -> str:
 
 def write_explain_artifact(result: dict[str, Any], path: str | Path) -> Path:
     target = Path(path)
-    payload = (
-        json.dumps(result, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
-    )
+    payload = json.dumps(result, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
     try:
         return atomic_write_text(target, payload)
     except OSError as exc:

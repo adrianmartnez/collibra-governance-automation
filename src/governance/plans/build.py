@@ -45,9 +45,7 @@ def build_saved_plan(
 ) -> SavedGovernancePlan:
     projection = build_target_context_projection(settings)
     assumptions = (
-        empty_assumptions()
-        if reconciliation_assumptions is None
-        else reconciliation_assumptions
+        empty_assumptions() if reconciliation_assumptions is None else reconciliation_assumptions
     )
     assumptions_identity = assumptions_content_identity(assumptions)
     return SavedGovernancePlan(
