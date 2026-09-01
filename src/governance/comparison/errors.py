@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from governance.snapshots.errors import SnapshotError
+
 DIAGNOSTIC_SCHEMA = "governance-comparison-diagnostics"
 DIAGNOSTIC_VERSION = "1"
 
@@ -47,6 +49,30 @@ ALL_DIAGNOSTIC_CODES = frozenset(
         CODE_WRITE_ERROR,
     }
 )
+
+
+_SNAPSHOT_COMPARE_MESSAGES: dict[str, str] = {
+    CODE_READ_ERROR: "unable to read snapshot",
+    CODE_PARSE_ERROR: "invalid snapshot JSON",
+    CODE_INVALID_SNAPSHOT_ROOT: "snapshot root must be a mapping",
+    CODE_UNSUPPORTED_SNAPSHOT_SCHEMA: "unsupported snapshot schema",
+    CODE_UNSUPPORTED_SNAPSHOT_VERSION: "unsupported snapshot version",
+    CODE_MISSING_CONTENT_IDENTITY: "snapshot content_identity is required",
+    CODE_INTEGRITY_MISMATCH: "snapshot content_identity mismatch",
+    CODE_INVALID_SNAPSHOT_PAYLOAD: "invalid snapshot payload",
+}
+
+
+def snapshot_compare_diagnostic(exc: SnapshotError, *, side: str) -> DiagnosticError:
+    """Map snapshot load errors to bounded comparison diagnostics without host paths."""
+    code = getattr(exc, "code", CODE_INVALID_SNAPSHOT_PAYLOAD)
+    raw_path = getattr(exc, "path", "/")
+    mapped_path = f"/{side}" if raw_path in {"", "/"} else f"/{side}{raw_path}"
+    message = _SNAPSHOT_COMPARE_MESSAGES.get(
+        code,
+        _SNAPSHOT_COMPARE_MESSAGES[CODE_INVALID_SNAPSHOT_PAYLOAD],
+    )
+    return DiagnosticError(code=code, path=mapped_path, message=message)
 
 
 @dataclass(frozen=True, slots=True)

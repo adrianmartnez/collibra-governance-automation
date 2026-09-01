@@ -94,3 +94,83 @@ def test_compare_cli_usage_missing_baseline() -> None:
     # argparse SystemExit → main maps to non-zero; typically 2
     code = main(["compare", "--candidate", "x.json"])
     assert code == 2
+
+
+def test_compare_missing_baseline_diagnostics_no_host_path(tmp_path: Path, capsys) -> None:
+    missing_a = tmp_path / "deep" / "missing-a.json"
+    missing_b = tmp_path / "other" / "missing-b.json"
+    other_a = tmp_path / "deep" / "also-missing-a.json"
+    other_b = tmp_path / "other" / "also-missing-b.json"
+    assert (
+        main(
+            [
+                "compare",
+                "--baseline",
+                str(missing_a),
+                "--candidate",
+                str(other_a),
+                "--format",
+                "json",
+            ]
+        )
+        == 4
+    )
+    out_a = json.loads(capsys.readouterr().out)
+    assert (
+        main(
+            [
+                "compare",
+                "--baseline",
+                str(missing_b),
+                "--candidate",
+                str(other_b),
+                "--format",
+                "json",
+            ]
+        )
+        == 4
+    )
+    out_b = json.loads(capsys.readouterr().out)
+    assert out_a == out_b
+    serialized = json.dumps(out_a)
+    assert str(tmp_path) not in serialized
+    assert "missing-a.json" not in serialized
+    assert "missing-b.json" not in serialized
+    assert out_a["errors"][0]["path"] == "/baseline"
+    assert out_a["errors"][0]["message"] == "unable to read snapshot"
+
+
+def test_compare_missing_candidate_human_no_host_path(tmp_path: Path, capsys) -> None:
+    baseline = tmp_path / "baseline.json"
+    write_snapshot(build_snapshot(), baseline)
+    missing = tmp_path / "nested" / "candidate-missing.json"
+    code = main(["compare", "--baseline", str(baseline), "--candidate", str(missing)])
+    assert code == 4
+    err = capsys.readouterr().err
+    assert str(tmp_path) not in err
+    assert "candidate-missing.json" not in err
+    assert "/candidate" in err
+
+
+def test_compare_nan_snapshot_exit_4_not_1(tmp_path: Path, capsys) -> None:
+    baseline = tmp_path / "baseline.json"
+    candidate = tmp_path / "candidate.json"
+    write_snapshot(build_snapshot(), baseline)
+    candidate.write_text('{"snapshot_schema": NaN}\n', encoding="utf-8")
+    code = main(
+        [
+            "compare",
+            "--baseline",
+            str(baseline),
+            "--candidate",
+            str(candidate),
+            "--format",
+            "json",
+        ]
+    )
+    assert code == 4
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"][0]["code"] == "parse_error"
+    assert payload["errors"][0]["path"] == "/candidate"
+    assert str(tmp_path) not in json.dumps(payload)
+    assert "traceback" not in json.dumps(payload).lower()

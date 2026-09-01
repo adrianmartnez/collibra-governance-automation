@@ -115,8 +115,8 @@ class ProjectedSnapshot:
     snapshot: GovernanceSnapshot
 
 
-def _side_path(side: str, suffix: str) -> str:
-    return f"/{side}{suffix}"
+def _diagnostic_path(side: str, *segments: str) -> str:
+    return PropertyPath((side, *segments)).to_pointer()
 
 
 def _present(value: Any) -> ComparablePropertyValue:
@@ -149,7 +149,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_INVALID_SNAPSHOT_PAYLOAD,
-                path=_side_path(side, "/governance"),
+                path=_diagnostic_path(side, "governance"),
                 message="snapshot must contain exactly one data_source",
             )
         )
@@ -160,7 +160,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_INVALID_SNAPSHOT_PAYLOAD,
-                path=_side_path(side, "/governance"),
+                path=_diagnostic_path(side, "governance"),
                 message="snapshot must contain exactly one database",
             )
         )
@@ -172,7 +172,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_SNAPSHOT_ENVELOPE_MISMATCH,
-                path=_side_path(side, "/source/name"),
+                path=_diagnostic_path(side, "source", "name"),
                 message="envelope source name does not match model data_source.name",
             )
         )
@@ -180,7 +180,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_SNAPSHOT_ENVELOPE_MISMATCH,
-                path=_side_path(side, "/source/database"),
+                path=_diagnostic_path(side, "source", "database"),
                 message="envelope database name does not match model database.name",
             )
         )
@@ -188,7 +188,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_SNAPSHOT_ENVELOPE_MISMATCH,
-                path=_side_path(side, "/source/system_type"),
+                path=_diagnostic_path(side, "source", "system_type"),
                 message="envelope system_type does not match model data_source.system_type",
             )
         )
@@ -197,7 +197,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_INVALID_SNAPSHOT_PAYLOAD,
-                path=_side_path(side, "/scan/scanner"),
+                path=_diagnostic_path(side, "scan", "scanner"),
                 message="scanner must be a non-empty string",
             )
         )
@@ -210,7 +210,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_INVALID_SNAPSHOT_PAYLOAD,
-                path=_side_path(side, "/scan"),
+                path=_diagnostic_path(side, "scan"),
                 message="system_type and scanner_contract_version must be non-empty strings",
             )
         )
@@ -219,7 +219,7 @@ def validate_snapshot_shape_and_envelope(
         errors.append(
             DiagnosticError(
                 code=CODE_SCANNER_CONTRACT_MISMATCH,
-                path=_side_path(side, "/scan/scanner_contract_version"),
+                path=_diagnostic_path(side, "scan", "scanner_contract_version"),
                 message=(
                     f"scanner_contract_version must be {SCANNER_CONTRACT_VERSION!r}; "
                     f"got {snapshot.scanner_contract_version!r}"
@@ -253,7 +253,7 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
             errors.append(
                 DiagnosticError(
                     code=CODE_DUPLICATE_SNAPSHOT_OBJECT_ID,
-                    path=_side_path(side, f"/objects/{raw_id}"),
+                    path=_diagnostic_path(side, "objects", raw_id),
                     message=f"duplicate snapshot object id: {raw_id}",
                 )
             )
@@ -262,7 +262,7 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
             errors.append(
                 DiagnosticError(
                     code=CODE_DUPLICATE_COMPARISON_IDENTITY,
-                    path=_side_path(side, f"/identity/{identity.kind}"),
+                    path=_diagnostic_path(side, "identity", identity.kind),
                     message=f"duplicate comparison identity for kind={identity.kind}",
                 )
             )
@@ -292,7 +292,7 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
         errors.append(
             DiagnosticError(
                 code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                path=_side_path(side, "/governance/database/datasource_id"),
+                path=_diagnostic_path(side, "governance", "database", "datasource_id"),
                 message="database.datasource_id does not resolve to data_source",
             )
         )
@@ -315,7 +315,9 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(side, f"/governance/schemas/{schema.name}/database_id"),
+                    path=_diagnostic_path(
+                        side, "governance", "schemas", schema.name, "database_id"
+                    ),
                     message="schema.database_id does not resolve to database",
                 )
             )
@@ -337,8 +339,13 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
                 errors.append(
                     DiagnosticError(
                         code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                        path=_side_path(
-                            side, f"/governance/tables/{schema.name}/{table.name}/schema_id"
+                        path=_diagnostic_path(
+                            side,
+                            "governance",
+                            "tables",
+                            schema.name,
+                            table.name,
+                            "schema_id",
                         ),
                         message="table.schema_id does not resolve to containing schema",
                     )
@@ -386,9 +393,14 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
                     errors.append(
                         DiagnosticError(
                             code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                            path=_side_path(
+                            path=_diagnostic_path(
                                 side,
-                                f"/governance/primary_keys/{schema.name}/{table.name}/{pk.name}/table_id",
+                                "governance",
+                                "primary_keys",
+                                schema.name,
+                                table.name,
+                                pk.name,
+                                "table_id",
                             ),
                             message="primary_key.table_id does not resolve to containing table",
                         )
@@ -414,9 +426,14 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
                     errors.append(
                         DiagnosticError(
                             code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                            path=_side_path(
+                            path=_diagnostic_path(
                                 side,
-                                f"/governance/foreign_keys/{schema.name}/{table.name}/{fk.name}/table_id",
+                                "governance",
+                                "foreign_keys",
+                                schema.name,
+                                table.name,
+                                fk.name,
+                                "table_id",
                             ),
                             message="foreign_key.table_id does not resolve to containing table",
                         )
@@ -443,7 +460,7 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(side, f"/governance/relationships/{relationship.name}"),
+                    path=_diagnostic_path(side, "governance", "relationships", relationship.name),
                     message="relationship.from_table_id does not resolve",
                 )
             )
@@ -453,7 +470,7 @@ def project_snapshot(snapshot: GovernanceSnapshot, *, side: str) -> ProjectedSna
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(side, f"/governance/relationships/{relationship.name}"),
+                    path=_diagnostic_path(side, "governance", "relationships", relationship.name),
                     message="relationship source schema unresolved",
                 )
             )
@@ -529,7 +546,7 @@ def _resolve_column_refs(
     column_by_id: dict[str, Column],
     table_by_id: dict[str, Table],
     side: str,
-    context: str,
+    path_segments: tuple[str, ...],
     errors: list[DiagnosticError],
 ) -> list[dict[str, Any]] | None:
     resolved: list[dict[str, Any]] = []
@@ -538,7 +555,7 @@ def _resolve_column_refs(
         errors.append(
             DiagnosticError(
                 code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                path=_side_path(side, context),
+                path=_diagnostic_path(side, *path_segments),
                 message="parent table unresolved for column refs",
             )
         )
@@ -551,7 +568,7 @@ def _resolve_column_refs(
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(side, context),
+                    path=_diagnostic_path(side, *path_segments),
                     message=f"column ref does not resolve: {column_id}",
                 )
             )
@@ -560,7 +577,7 @@ def _resolve_column_refs(
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(side, context),
+                    path=_diagnostic_path(side, *path_segments),
                     message=f"column {column_id} does not belong to parent table",
                 )
             )
@@ -591,7 +608,7 @@ def _patch_pk_fk_refs(
                 column_by_id=column_by_id,
                 table_by_id=table_by_id,
                 side=side,
-                context=f"/governance/primary_keys/{pk.name}/column_ids",
+                path_segments=("governance", "primary_keys", pk.name, "column_ids"),
                 errors=errors,
             )
             if refs is not None:
@@ -616,7 +633,7 @@ def _patch_pk_fk_refs(
                 column_by_id=column_by_id,
                 table_by_id=table_by_id,
                 side=side,
-                context=f"/governance/foreign_keys/{fk.name}/column_ids",
+                path_segments=("governance", "foreign_keys", fk.name, "column_ids"),
                 errors=errors,
             )
             ref_table_identity = raw_to_identity.get(fk.referenced_table_id)
@@ -624,8 +641,12 @@ def _patch_pk_fk_refs(
                 errors.append(
                     DiagnosticError(
                         code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                        path=_side_path(
-                            side, f"/governance/foreign_keys/{fk.name}/referenced_table_id"
+                        path=_diagnostic_path(
+                            side,
+                            "governance",
+                            "foreign_keys",
+                            fk.name,
+                            "referenced_table_id",
                         ),
                         message="referenced_table_id does not resolve to a table",
                     )
@@ -635,7 +656,7 @@ def _patch_pk_fk_refs(
                 errors.append(
                     DiagnosticError(
                         code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                        path=_side_path(side, f"/governance/foreign_keys/{fk.name}"),
+                        path=_diagnostic_path(side, "governance", "foreign_keys", fk.name),
                         message="column_ids and referenced_column_ids length mismatch",
                     )
                 )
@@ -647,7 +668,12 @@ def _patch_pk_fk_refs(
                 column_by_id=column_by_id,
                 table_by_id=table_by_id,
                 side=side,
-                context=f"/governance/foreign_keys/{fk.name}/referenced_column_ids",
+                path_segments=(
+                    "governance",
+                    "foreign_keys",
+                    fk.name,
+                    "referenced_column_ids",
+                ),
                 errors=errors,
             )
             if source_refs is None or ref_cols is None:
@@ -685,8 +711,12 @@ def _patch_relationship_refs(
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(
-                        side, f"/governance/relationships/{relationship.name}/to_table_id"
+                    path=_diagnostic_path(
+                        side,
+                        "governance",
+                        "relationships",
+                        relationship.name,
+                        "to_table_id",
                     ),
                     message="relationship.to_table_id does not resolve to a table",
                 )
@@ -701,9 +731,12 @@ def _patch_relationship_refs(
                 errors.append(
                     DiagnosticError(
                         code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                        path=_side_path(
+                        path=_diagnostic_path(
                             side,
-                            f"/governance/relationships/{relationship.name}/foreign_key_id",
+                            "governance",
+                            "relationships",
+                            relationship.name,
+                            "foreign_key_id",
                         ),
                         message="relationship.foreign_key_id does not resolve to a foreign_key",
                     )
@@ -713,9 +746,12 @@ def _patch_relationship_refs(
                 errors.append(
                     DiagnosticError(
                         code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                        path=_side_path(
+                        path=_diagnostic_path(
                             side,
-                            f"/governance/relationships/{relationship.name}/foreign_key_id",
+                            "governance",
+                            "relationships",
+                            relationship.name,
+                            "foreign_key_id",
                         ),
                         message=(
                             "foreign_key source table does not match relationship.from_table_id"
@@ -727,9 +763,12 @@ def _patch_relationship_refs(
                 errors.append(
                     DiagnosticError(
                         code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                        path=_side_path(
+                        path=_diagnostic_path(
                             side,
-                            f"/governance/relationships/{relationship.name}/foreign_key_id",
+                            "governance",
+                            "relationships",
+                            relationship.name,
+                            "foreign_key_id",
                         ),
                         message=(
                             "foreign_key referenced table does not match relationship.to_table_id"
@@ -745,8 +784,12 @@ def _patch_relationship_refs(
             errors.append(
                 DiagnosticError(
                     code=CODE_INVALID_SNAPSHOT_REFERENCES,
-                    path=_side_path(
-                        side, f"/governance/relationships/{relationship.name}/from_table_id"
+                    path=_diagnostic_path(
+                        side,
+                        "governance",
+                        "relationships",
+                        relationship.name,
+                        "from_table_id",
                     ),
                     message="relationship.from_table_id does not resolve",
                 )

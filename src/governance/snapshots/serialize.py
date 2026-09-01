@@ -19,6 +19,7 @@ from governance.domain import (
     Table,
 )
 from governance.identity import ContentIdentity, snapshot_identity
+from governance.identity.json_values import validate_json_value
 from governance.io.atomic import atomic_write_text
 from governance.snapshots.errors import (
     SnapshotCompatibilityError,
@@ -63,9 +64,21 @@ def load_snapshot(path: str | Path) -> GovernanceSnapshot:
             path="/",
         ) from exc
 
+    def _reject_non_standard_json(_value: str) -> None:
+        raise ValueError("non-standard JSON literal")
+
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
+        payload = json.loads(text, parse_constant=_reject_non_standard_json)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise SnapshotCompatibilityError(
+            "invalid snapshot JSON",
+            code="parse_error",
+            path="/",
+        ) from exc
+
+    try:
+        validate_json_value(payload)
+    except (TypeError, ValueError) as exc:
         raise SnapshotCompatibilityError(
             "invalid snapshot JSON",
             code="parse_error",

@@ -114,3 +114,82 @@ def test_diagnostics_schema_accepts_codes() -> None:
         ],
     }
     Draft202012Validator(_diagnostics_schema()).validate(payload)
+
+
+def test_diagnostics_schema_rejects_empty_errors() -> None:
+    payload = {
+        "diagnostic_schema": "governance-comparison-diagnostics",
+        "diagnostic_version": "1",
+        "ok": False,
+        "errors": [],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        Draft202012Validator(_diagnostics_schema()).validate(payload)
+
+
+def test_diagnostics_schema_rejects_empty_path() -> None:
+    payload = {
+        "diagnostic_schema": "governance-comparison-diagnostics",
+        "diagnostic_version": "1",
+        "ok": False,
+        "errors": [{"code": "read_error", "path": "", "message": "unable to read snapshot"}],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        Draft202012Validator(_diagnostics_schema()).validate(payload)
+
+
+def test_parent_kind_contract_rejects_invalid_parent() -> None:
+    schema = _comparison_schema()
+    validator = Draft202012Validator(schema)
+    base = build_comparison_result(build_snapshot(), build_snapshot())
+    base["status"] = "different"
+    base["summary"] = {
+        "added": 1,
+        "removed": 0,
+        "changed": 0,
+        "unchanged": 0,
+        "property_changes": 0,
+    }
+    invalid_cases = [
+        {
+            "change": "added",
+            "object_identity": {"kind": "data_source", "path": []},
+            "parent_identity": {"kind": "database", "path": []},
+            "property_changes": [],
+        },
+        {
+            "change": "added",
+            "object_identity": {"kind": "database", "path": []},
+            "parent_identity": {"kind": "schema", "path": ["sales"]},
+            "property_changes": [],
+        },
+        {
+            "change": "added",
+            "object_identity": {"kind": "schema", "path": ["sales"]},
+            "parent_identity": {"kind": "table", "path": ["sales", "orders"]},
+            "property_changes": [],
+        },
+        {
+            "change": "added",
+            "object_identity": {"kind": "column", "path": ["sales", "orders", "id"]},
+            "parent_identity": {"kind": "database", "path": []},
+            "property_changes": [],
+        },
+        {
+            "change": "added",
+            "object_identity": {"kind": "primary_key", "path": ["sales", "orders", "pk"]},
+            "parent_identity": {"kind": "schema", "path": ["sales"]},
+            "property_changes": [],
+        },
+        {
+            "change": "added",
+            "object_identity": {"kind": "relationship", "path": ["sales", "orders", "rel"]},
+            "parent_identity": {"kind": "column", "path": ["sales", "orders", "id"]},
+            "property_changes": [],
+        },
+    ]
+    for change in invalid_cases:
+        payload = dict(base)
+        payload["object_changes"] = [change]
+        with pytest.raises(jsonschema.ValidationError):
+            validator.validate(payload)

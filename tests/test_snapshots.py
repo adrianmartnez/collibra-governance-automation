@@ -175,6 +175,24 @@ def test_parse_error(tmp_path: Path) -> None:
     assert exc_info.value.code == "parse_error"
 
 
+@pytest.mark.parametrize(
+    ("literal",),
+    [
+        ("NaN",),
+        ("Infinity",),
+        ("-Infinity",),
+        ("1e999",),
+    ],
+)
+def test_non_finite_json_literals_rejected(tmp_path: Path, literal: str) -> None:
+    path = tmp_path / "snap.json"
+    path.write_text(f'{{"value": {literal}}}\n', encoding="utf-8")
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
+        load_snapshot(path)
+    assert exc_info.value.code == "parse_error"
+    assert exc_info.value.path == "/"
+
+
 def test_read_error_missing_file(tmp_path: Path) -> None:
     with pytest.raises(SnapshotIOError) as exc_info:
         load_snapshot(tmp_path / "missing.json")

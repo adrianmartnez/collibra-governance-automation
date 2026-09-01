@@ -11,6 +11,7 @@ from governance.comparison.errors import (
     ComparisonError,
     DiagnosticError,
     comparison_diagnostics_failure,
+    snapshot_compare_diagnostic,
 )
 from governance.comparison.projection import (
     ComparableObject,
@@ -49,6 +50,7 @@ __all__ = [
     "build_comparison_result",
     "canonical_comparison_json",
     "comparison_diagnostics_failure",
+    "snapshot_compare_diagnostic",
     "format_comparison_human",
     "project_snapshot",
     "resolve_root_alignment",

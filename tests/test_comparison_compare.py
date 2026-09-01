@@ -16,7 +16,7 @@ from governance.comparison import (
 )
 from governance.comparison.errors import CODE_ROOT_ALIGNMENT_REQUIRED
 from governance.domain import Column, make_column_id
-from governance.snapshots import write_snapshot
+from governance.snapshots import load_snapshot, write_snapshot
 
 
 def test_identical_snapshots() -> None:
@@ -85,6 +85,70 @@ def test_technical_attr_missing_vs_null() -> None:
         and p["candidate"] == {"has_value": True, "value": None}
         for p in tech
     )
+
+
+def test_rename_schema_is_removed_and_added() -> None:
+    baseline = build_snapshot(schema_name="sales")
+    candidate = build_snapshot(schema_name="sales_v2")
+    result = build_comparison_result(baseline, candidate)
+    schema_changes = [
+        c for c in result["object_changes"] if c["object_identity"]["kind"] == "schema"
+    ]
+    assert ("added", "schema") in {
+        (c["change"], c["object_identity"]["kind"]) for c in schema_changes
+    }
+    assert ("removed", "schema") in {
+        (c["change"], c["object_identity"]["kind"]) for c in schema_changes
+    }
+    assert all(
+        not any(p["property"] == "/name" for p in c.get("property_changes", []))
+        for c in schema_changes
+        if c["change"] == "changed"
+    )
+
+
+def test_rename_column_is_removed_and_added() -> None:
+    baseline = build_snapshot(column_name="id")
+    candidate = build_snapshot(column_name="id_v2")
+    result = build_comparison_result(baseline, candidate)
+    column_changes = [
+        c for c in result["object_changes"] if c["object_identity"]["kind"] == "column"
+    ]
+    assert any(c["change"] == "added" for c in column_changes)
+    assert any(c["change"] == "removed" for c in column_changes)
+
+
+def test_rename_primary_key_is_removed_and_added() -> None:
+    baseline = build_snapshot(table_name="orders")
+    candidate = build_snapshot(table_name="orders_renamed")
+    result = build_comparison_result(baseline, candidate)
+    pk_changes = [
+        c for c in result["object_changes"] if c["object_identity"]["kind"] == "primary_key"
+    ]
+    assert any(c["change"] == "added" for c in pk_changes)
+    assert any(c["change"] == "removed" for c in pk_changes)
+
+
+def test_rename_foreign_key_is_removed_and_added() -> None:
+    baseline = build_snapshot(table_name="orders", column_name="id")
+    candidate = build_snapshot(table_name="orders", column_name="order_id")
+    result = build_comparison_result(baseline, candidate)
+    fk_changes = [
+        c for c in result["object_changes"] if c["object_identity"]["kind"] == "foreign_key"
+    ]
+    assert any(c["change"] == "added" for c in fk_changes)
+    assert any(c["change"] == "removed" for c in fk_changes)
+
+
+def test_rename_relationship_is_removed_and_added() -> None:
+    baseline = build_snapshot(table_name="orders", column_name="id")
+    candidate = build_snapshot(table_name="orders", column_name="order_id")
+    result = build_comparison_result(baseline, candidate)
+    rel_changes = [
+        c for c in result["object_changes"] if c["object_identity"]["kind"] == "relationship"
+    ]
+    assert any(c["change"] == "added" for c in rel_changes)
+    assert any(c["change"] == "removed" for c in rel_changes)
 
 
 def test_rename_table_is_removed_and_added() -> None:
@@ -187,13 +251,50 @@ def test_reordered_json_keys_unchanged(tmp_path: Path) -> None:
     snapshot = build_snapshot()
     path = tmp_path / "snap.json"
     write_snapshot(snapshot, path)
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    # Re-dump with different key order but same content_identity
-    reordered = json.dumps(payload, indent=2, sort_keys=False) + "\n"
+    original_text = path.read_text(encoding="utf-8")
+    payload = json.loads(original_text)
+    reordered_payload = dict(reversed(list(payload.items())))
+    governance = reordered_payload["governance"]
+    if isinstance(governance, dict) and isinstance(governance.get("data_sources"), list):
+        data_sources = list(governance["data_sources"])
+        if data_sources and isinstance(data_sources[0], dict):
+            ds = dict(data_sources[0])
+            if isinstance(ds.get("databases"), list) and ds["databases"]:
+                db = dict(ds["databases"][0])
+                if isinstance(db.get("schemas"), list) and db["schemas"]:
+                    db["schemas"] = list(reversed(db["schemas"]))
+                    ds["databases"] = [db, *ds["databases"][1:]]
+                    data_sources[0] = ds
+                    governance = {**governance, "data_sources": data_sources}
+                    reordered_payload["governance"] = governance
+    reordered = json.dumps(reordered_payload, indent=2, sort_keys=False) + "\n"
+    assert reordered != original_text
     path2 = tmp_path / "reordered.json"
     path2.write_text(reordered, encoding="utf-8")
     from governance.snapshots import load_snapshot
 
     loaded = load_snapshot(path2)
+    assert loaded.content_identity() == snapshot.content_identity()
     result = build_comparison_result(snapshot, loaded)
     assert result["status"] == "identical"
+
+
+def test_compare_result_independent_of_host_path_and_mtime(tmp_path: Path) -> None:
+    snapshot = build_snapshot()
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    path_a = dir_a / "baseline.json"
+    path_b = dir_b / "candidate.json"
+    write_snapshot(snapshot, path_a)
+    write_snapshot(snapshot, path_b)
+    result_a = build_comparison_result(load_snapshot(path_a), load_snapshot(path_b))
+    import os
+    import time
+
+    os.utime(path_a, (time.time() + 1000, time.time() + 1000))
+    os.utime(path_b, (time.time() + 2000, time.time() + 2000))
+    result_b = build_comparison_result(load_snapshot(path_a), load_snapshot(path_b))
+    assert result_a == result_b
+    assert result_a["content_identity"] == result_b["content_identity"]

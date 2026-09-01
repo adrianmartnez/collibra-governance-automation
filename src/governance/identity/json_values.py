@@ -94,6 +94,33 @@ def canonical_json_to_plain(value: Any) -> Any:
     return value
 
 
+def validate_json_value(value: object) -> None:
+    """Validate strict finite JSON-compatible values without reordering mappings."""
+    if value is None:
+        return
+    if isinstance(value, bool):
+        return
+    if isinstance(value, int):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("float values must be finite (reject NaN/±Infinity)")
+        return
+    if isinstance(value, str):
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("JSON object keys must be strings")
+            validate_json_value(item)
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        for item in value:
+            validate_json_value(item)
+        return
+    raise TypeError(f"unsupported JSON value type: {type(value).__name__}")
+
+
 def normalize_json_value(value: object) -> Any:
     """Validate ``value`` and return plain JSON-compatible Python objects."""
     return canonical_json_to_plain(canonicalize_json_value(value))

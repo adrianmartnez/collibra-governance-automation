@@ -20,12 +20,12 @@ from governance.authority.errors import (
 from governance.authority.load import load_normalized_authority
 from governance.comparison import (
     ComparisonError,
-    DiagnosticError,
     RootAlignmentAck,
     build_comparison_result,
     canonical_comparison_json,
     comparison_diagnostics_failure,
     format_comparison_human,
+    snapshot_compare_diagnostic,
     write_comparison_artifact,
 )
 from governance.config import Settings, load_settings
@@ -1480,18 +1480,7 @@ def _load_snapshot_for_compare(path: str, *, side: str) -> GovernanceSnapshot:
     try:
         return load_snapshot(path)
     except SnapshotError as exc:
-        code = getattr(exc, "code", "invalid_snapshot_payload")
-        raw_path = getattr(exc, "path", "/")
-        mapped_path = f"/{side}" if raw_path in {"", "/"} else f"/{side}{raw_path}"
-        raise ComparisonError(
-            [
-                DiagnosticError(
-                    code=code,
-                    path=mapped_path,
-                    message=str(exc),
-                )
-            ]
-        ) from exc
+        raise ComparisonError([snapshot_compare_diagnostic(exc, side=side)]) from exc
 
 
 def _emit_comparison_error(exc: ComparisonError, fmt: OutputFormat) -> int:
