@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-drift-policy:1",
+  "title": "Governance drift policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["drift_schema", "drift_version", "rules"],
+  "properties": {
+    "drift_schema": { "type": "string", "const": "governance-drift-policy" },
+    "drift_version": { "type": "string", "const": "1" },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "propertyPointer": {
+      "type": "string",
+      "minLength": 2,
+      "pattern": "^/(?:(?:[^~/]|~0|~1)*(?:/(?:[^~/]|~0|~1)*)*)$"
+    },
+    "comparisonObjectIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "data_source" },
+            "path": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0,
+              "items": { "type": "string" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "database" },
+            "path": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0,
+              "items": { "type": "string" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "schema" },
+            "path": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "table" },
+            "path": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "column" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "primary_key" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "foreign_key" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "relationship" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "nonRootComparisonObjectIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "schema" },
+            "path": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "table" },
+            "path": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "column" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "primary_key" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "foreign_key" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "relationship" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "objectSelector": {
+      "$ref": "#/$defs/comparisonObjectIdentity"
+    },
+    "nonRootObjectSelector": {
+      "$ref": "#/$defs/nonRootComparisonObjectIdentity"
+    },
+    "comparablePropertyValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["has_value", "value"],
+          "properties": {
+            "has_value": { "type": "boolean", "const": true },
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["has_value"],
+          "properties": {
+            "has_value": { "type": "boolean", "const": false }
+          }
+        }
+      ]
+    },
+    "matchAddedRemoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "object"],
+      "properties": {
+        "change": { "type": "string", "enum": ["added", "removed"] },
+        "object": { "$ref": "#/$defs/nonRootObjectSelector" }
+      }
+    },
+    "matchChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["change", "object", "property"],
+      "properties": {
+        "change": { "type": "string", "const": "changed" },
+        "object": { "$ref": "#/$defs/objectSelector" },
+        "property": { "$ref": "#/$defs/propertyPointer" }
+      }
+    },
+    "ruleAddedRemoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*"
+        },
+        "match": { "$ref": "#/$defs/matchAddedRemoved" }
+      }
+    },
+    "ruleChangedWithoutExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*"
+        },
+        "match": { "$ref": "#/$defs/matchChanged" }
+      }
+    },
+    "ruleChangedWithExpected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "match", "expected"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*"
+        },
+        "match": { "$ref": "#/$defs/matchChanged" },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "baseline": { "$ref": "#/$defs/comparablePropertyValue" },
+            "candidate": { "$ref": "#/$defs/comparablePropertyValue" }
+          }
+        }
+      }
+    },
+    "rule": {
+      "oneOf": [
+        { "$ref": "#/$defs/ruleAddedRemoved" },
+        { "$ref": "#/$defs/ruleChangedWithoutExpected" },
+        { "$ref": "#/$defs/ruleChangedWithExpected" }
+      ]
+    }
+  }
+}

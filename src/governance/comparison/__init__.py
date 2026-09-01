@@ -13,6 +13,12 @@ from governance.comparison.errors import (
     comparison_diagnostics_failure,
     snapshot_compare_diagnostic,
 )
+from governance.comparison.load import (
+    ComparisonArtifactDiagnostic,
+    ComparisonArtifactError,
+    load_comparison_artifact,
+    validate_comparison_result_semantics,
+)
 from governance.comparison.projection import (
     ComparableObject,
     ComparablePropertyValue,
@@ -20,6 +26,11 @@ from governance.comparison.projection import (
     ProjectedSnapshot,
     project_snapshot,
     validate_snapshot_shape_and_envelope,
+)
+from governance.comparison.properties import (
+    comparable_change_value_compatible,
+    comparison_change_property_compatible_with_kind,
+    property_path_compatible_with_kind,
 )
 from governance.comparison.result import (
     COMPARISON_SCHEMA,
@@ -36,6 +47,8 @@ from governance.comparison.serialize import (
 __all__ = [
     "COMPARISON_SCHEMA",
     "COMPARISON_VERSION",
+    "ComparisonArtifactDiagnostic",
+    "ComparisonArtifactError",
     "DIAGNOSTIC_SCHEMA",
     "DIAGNOSTIC_VERSION",
     "ComparableObject",
@@ -52,8 +65,13 @@ __all__ = [
     "comparison_diagnostics_failure",
     "snapshot_compare_diagnostic",
     "format_comparison_human",
+    "load_comparison_artifact",
     "project_snapshot",
+    "property_path_compatible_with_kind",
+    "comparison_change_property_compatible_with_kind",
+    "comparable_change_value_compatible",
     "resolve_root_alignment",
+    "validate_comparison_result_semantics",
     "validate_snapshot_shape_and_envelope",
     "write_comparison_artifact",
 ]

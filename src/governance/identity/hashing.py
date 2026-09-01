@@ -27,6 +27,8 @@ _PREFIX_IMPACT_RESULT = b"gov-impact-result-v1\n"
 _PREFIX_RECONCILIATION_ASSUMPTIONS = b"gov-reconciliation-assumptions-v1\n"
 _PREFIX_EXPLAIN_RESULT = b"gov-explain-result-v1\n"
 _PREFIX_SNAPSHOT_COMPARISON = b"gov-snapshot-comparison-v1\n"
+_PREFIX_DRIFT_POLICY = b"gov-drift-policy-v1\n"
+_PREFIX_DRIFT_RESULT = b"gov-drift-result-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +160,22 @@ def snapshot_comparison_identity(
     """Identity for governance-snapshot-comparison payload excluding content_identity."""
     return _sha256_identity(
         _PREFIX_SNAPSHOT_COMPARISON,
+        canonical_json_bytes(canonical_result_without_identity),
+    )
+
+
+def drift_policy_identity(normalized_policy: dict[str, Any]) -> ContentIdentity:
+    """Identity for normalized drift policy semantics (not file path)."""
+    return _sha256_identity(
+        _PREFIX_DRIFT_POLICY,
+        canonical_json_bytes(normalized_policy),
+    )
+
+
+def drift_result_identity(canonical_result_without_identity: dict[str, Any]) -> ContentIdentity:
+    """Identity for governance-drift-result payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_DRIFT_RESULT,
         canonical_json_bytes(canonical_result_without_identity),
     )
 

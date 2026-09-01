@@ -36,6 +36,7 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 | Downstream traversal / blast-radius analysis | Deterministic |
 | `governance impact` CLI + impact changes/result v1 artifacts | Contract-tested |
 | `governance compare` CLI + snapshot-comparison v1 artifacts | Implemented (offline; difference ≠ drift) |
+| `governance drift` CLI + drift-result v1 artifacts | Implemented (offline; explicit policy required when different) |
 | GitHub Action `operation: impact` + PR/step-summary reports | Implemented (read-only) |
 | Collibra mapping + mock adapter | Implemented (local/offline) |
 | Live Collibra Core REST API v2 adapter | Contract-tested (localhost HTTP server; no commercial tenant) |
@@ -158,6 +159,7 @@ governance plan inspect FILE.gplan [--format human|json]
 governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json] [--apply] [--confirm-live] [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME]
 governance explain --config PATH --namespace NAME --object-identity PATH [--property POINTER] [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--profile NAME] [--format human|json] [--output PATH]
 governance compare --baseline PATH --candidate PATH [--align-source-roots] [--align-database-roots] [--format human|json] [--output PATH]
+governance drift --comparison PATH [--policy PATH] [--format human|json] [--output PATH]
 governance preflight --config PATH [--profile NAME] [--format human|json]
 governance impact --namespace NAME --changes FILE --output FILE [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--config PATH] [--profile NAME] [--format human|json]
 governance --help
@@ -167,6 +169,8 @@ governance --version
 Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, `apply`, `explain`, and `preflight` require explicit `--config` (except `plan inspect`).
 
 `governance compare` loads two persisted `governance-snapshot` v1 artifacts and reports material differences offline (no PostgreSQL, Collibra, or `--config`). Difference is not drift: classification of expected vs unexpected differences is out of scope. Optional `--align-source-roots` / `--align-database-roots` acknowledge differing root names for object matching only; root `/name` property differences are still reported. `writes_performed=0` means zero remote governance mutations; optional `--output` may write a local comparison JSON artifact without changing that count.
+
+`governance drift` consumes a persisted `governance-snapshot-comparison` v1 artifact and optionally a `governance-drift-policy` v1 YAML file. When the comparison reports differences, `--policy` is required; missing policy fails explicitly (exit `4`). An explicit empty policy (`rules: []`) is valid and means no differences are permitted. Unexpected drift is reported as data (exit `0`), not as a process failure. Comparison v1 does not include provenance, authority, or conflict payload; drift preserves only context present in the validated comparison input. `writes_performed=0` means zero remote governance mutations.
 
 `governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
 
@@ -224,6 +228,13 @@ Exit codes for `compare` only:
 - `2` — usage / argument error
 - `4` — snapshot / compatibility / alignment / output validation failure
 - `1` / `3` / `5` / `6` — unused by `compare`
+
+Exit codes for `drift` only:
+
+- `0` — drift analysis completed (`status=no_difference`, `expected_difference`, or `unexpected_drift`)
+- `2` — usage / argument error
+- `4` — comparison / policy / schema / integrity / ambiguity / output validation failure
+- `1` / `3` / `5` / `6` — unused by `drift`
 
 `create` / `update` / `unchanged` / `remote_only` counts are plan actions, not completed remote writes. Dry-run means zero remote mutations (`applied=0`); it does not mean zero network in live mode.
 
