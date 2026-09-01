@@ -41,6 +41,7 @@ def test_entry_point_module_help() -> None:
     assert "plan" in result.stdout
     assert "apply" in result.stdout
     assert "preflight" in result.stdout
+    assert "compare" in result.stdout
     assert "password=" not in result.stdout
 
 

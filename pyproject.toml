@@ -39,6 +39,7 @@ where = ["src"]
 "governance.github_ci.schemas" = ["*.json"]
 "governance.impact.schemas" = ["*.json"]
 "governance.reconciliation.schemas" = ["*.json"]
+"governance.comparison.schemas" = ["*.json"]
 "governance.integrations.odcs.schemas" = [
     "odcs-json-schema-v3.1.0.json",
     "LICENSE-Apache-2.0.txt",
@@ -47,7 +48,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 markers = [
     "integration: requires the local PostgreSQL demo service",
     "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",

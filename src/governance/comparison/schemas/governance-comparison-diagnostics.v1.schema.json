@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-comparison-diagnostics:1",
+  "title": "Governance comparison diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["diagnostic_schema", "diagnostic_version", "errors", "ok"],
+  "properties": {
+    "diagnostic_schema": {
+      "type": "string",
+      "const": "governance-comparison-diagnostics"
+    },
+    "diagnostic_version": { "type": "string", "const": "1" },
+    "ok": { "type": "boolean", "const": false },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "path", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "read_error",
+              "parse_error",
+              "invalid_snapshot_root",
+              "unsupported_snapshot_schema",
+              "unsupported_snapshot_version",
+              "missing_content_identity",
+              "integrity_mismatch",
+              "invalid_snapshot_payload",
+              "snapshot_envelope_mismatch",
+              "scanner_contract_mismatch",
+              "system_type_mismatch",
+              "scanner_mismatch",
+              "root_alignment_required",
+              "duplicate_snapshot_object_id",
+              "duplicate_comparison_identity",
+              "invalid_snapshot_references",
+              "write_error"
+            ]
+          },
+          "path": { "type": "string" },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
