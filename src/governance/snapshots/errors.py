@@ -4,7 +4,18 @@ from __future__ import annotations
 
 
 class SnapshotError(RuntimeError):
-    """Base snapshot error."""
+    """Base snapshot error with optional stable diagnostic code/path."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "invalid_snapshot_payload",
+        path: str = "/",
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.path = path
 
 
 class SnapshotCompatibilityError(SnapshotError):

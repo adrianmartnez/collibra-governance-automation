@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-snapshot-comparison:1",
+  "title": "Governance snapshot comparison v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "comparison_schema",
+    "comparison_version",
+    "status",
+    "direction",
+    "baseline",
+    "candidate",
+    "root_alignment",
+    "summary",
+    "object_changes",
+    "writes_performed",
+    "content_identity"
+  ],
+  "properties": {
+    "comparison_schema": {
+      "type": "string",
+      "const": "governance-snapshot-comparison"
+    },
+    "comparison_version": { "type": "string", "const": "1" },
+    "status": { "type": "string", "enum": ["identical", "different"] },
+    "direction": { "type": "string", "const": "baseline_to_candidate" },
+    "baseline": { "$ref": "#/$defs/artifactMetadata" },
+    "candidate": { "$ref": "#/$defs/artifactMetadata" },
+    "root_alignment": { "$ref": "#/$defs/rootAlignment" },
+    "summary": { "$ref": "#/$defs/summary" },
+    "object_changes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/objectChange" }
+    },
+    "writes_performed": { "type": "integer", "const": 0 },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "artifactMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content_identity",
+        "source_name",
+        "database_name",
+        "system_type",
+        "scanner",
+        "scanner_contract_version"
+      ],
+      "properties": {
+        "content_identity": { "$ref": "#/$defs/contentIdentity" },
+        "source_name": { "type": "string", "minLength": 1 },
+        "database_name": { "type": "string", "minLength": 1 },
+        "system_type": { "type": "string", "minLength": 1 },
+        "scanner": { "type": "string", "minLength": 1 },
+        "scanner_contract_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "alignmentPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline", "candidate"],
+      "properties": {
+        "baseline": { "type": "string", "minLength": 1 },
+        "candidate": { "type": "string", "minLength": 1 }
+      }
+    },
+    "rootAlignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "database"],
+      "properties": {
+        "source": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/alignmentPair" }
+          ]
+        },
+        "database": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/alignmentPair" }
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "removed", "changed", "unchanged", "property_changes"],
+      "properties": {
+        "added": { "type": "integer", "minimum": 0 },
+        "removed": { "type": "integer", "minimum": 0 },
+        "changed": { "type": "integer", "minimum": 0 },
+        "unchanged": { "type": "integer", "minimum": 0 },
+        "property_changes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "governedObjectKind": {
+      "type": "string",
+      "enum": [
+        "data_source",
+        "database",
+        "schema",
+        "table",
+        "column",
+        "primary_key",
+        "foreign_key",
+        "relationship"
+      ]
+    },
+    "comparisonObjectIdentity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "data_source" },
+            "path": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0,
+              "items": { "type": "string" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "database" },
+            "path": {
+              "type": "array",
+              "minItems": 0,
+              "maxItems": 0,
+              "items": { "type": "string" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "schema" },
+            "path": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "table" },
+            "path": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "column" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "primary_key" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "foreign_key" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "type": "string", "const": "relationship" },
+            "path": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "comparablePropertyValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["has_value", "value"],
+          "properties": {
+            "has_value": { "type": "boolean", "const": true },
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["has_value"],
+          "properties": {
+            "has_value": { "type": "boolean", "const": false }
+          }
+        }
+      ]
+    },
+    "propertyChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["property", "baseline", "candidate"],
+      "properties": {
+        "property": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/"
+        },
+        "baseline": { "$ref": "#/$defs/comparablePropertyValue" },
+        "candidate": { "$ref": "#/$defs/comparablePropertyValue" }
+      }
+    },
+    "parentDataSourceIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "type": "string", "const": "data_source" },
+        "path": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 0,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "parentDatabaseIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "type": "string", "const": "database" },
+        "path": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 0,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "parentSchemaIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "type": "string", "const": "schema" },
+        "path": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "parentTableIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "type": "string", "const": "table" },
+        "path": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "parentKindConstraint": {
+      "allOf": [
+        {
+          "if": {
+            "required": ["object_identity"],
+            "properties": {
+              "object_identity": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": { "kind": { "const": "data_source" } }
+              }
+            }
+          },
+          "then": { "properties": { "parent_identity": { "type": "null" } } }
+        },
+        {
+          "if": {
+            "required": ["object_identity"],
+            "properties": {
+              "object_identity": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": { "kind": { "const": "database" } }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parent_identity": { "$ref": "#/$defs/parentDataSourceIdentity" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["object_identity"],
+            "properties": {
+              "object_identity": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": { "kind": { "const": "schema" } }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parent_identity": { "$ref": "#/$defs/parentDatabaseIdentity" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["object_identity"],
+            "properties": {
+              "object_identity": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": { "kind": { "const": "table" } }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parent_identity": { "$ref": "#/$defs/parentSchemaIdentity" }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["object_identity"],
+            "properties": {
+              "object_identity": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {
+                  "kind": {
+                    "enum": ["column", "primary_key", "foreign_key", "relationship"]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "parent_identity": { "$ref": "#/$defs/parentTableIdentity" }
+            }
+          }
+        }
+      ]
+    },
+    "objectChange": {
+      "allOf": [
+        {
+          "oneOf": [
+            { "$ref": "#/$defs/objectChangeAdded" },
+            { "$ref": "#/$defs/objectChangeRemoved" },
+            { "$ref": "#/$defs/objectChangeChanged" }
+          ]
+        },
+        { "$ref": "#/$defs/parentKindConstraint" }
+      ]
+    },
+    "objectChangeAdded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change",
+        "object_identity",
+        "parent_identity",
+        "property_changes"
+      ],
+      "properties": {
+        "change": { "type": "string", "const": "added" },
+        "object_identity": { "$ref": "#/$defs/comparisonObjectIdentity" },
+        "parent_identity": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/comparisonObjectIdentity" }
+          ]
+        },
+        "property_changes": {
+          "type": "array",
+          "maxItems": 0,
+          "items": { "$ref": "#/$defs/propertyChange" }
+        }
+      }
+    },
+    "objectChangeRemoved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change",
+        "object_identity",
+        "parent_identity",
+        "property_changes"
+      ],
+      "properties": {
+        "change": { "type": "string", "const": "removed" },
+        "object_identity": { "$ref": "#/$defs/comparisonObjectIdentity" },
+        "parent_identity": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/comparisonObjectIdentity" }
+          ]
+        },
+        "property_changes": {
+          "type": "array",
+          "maxItems": 0,
+          "items": { "$ref": "#/$defs/propertyChange" }
+        }
+      }
+    },
+    "objectChangeChanged": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "change",
+        "object_identity",
+        "parent_identity",
+        "property_changes"
+      ],
+      "properties": {
+        "change": { "type": "string", "const": "changed" },
+        "object_identity": { "$ref": "#/$defs/comparisonObjectIdentity" },
+        "parent_identity": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/comparisonObjectIdentity" }
+          ]
+        },
+        "property_changes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/propertyChange" }
+        }
+      }
+    }
+  }
+}

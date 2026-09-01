@@ -26,6 +26,7 @@ _PREFIX_GRAPH = b"gov-graph-v1\n"
 _PREFIX_IMPACT_RESULT = b"gov-impact-result-v1\n"
 _PREFIX_RECONCILIATION_ASSUMPTIONS = b"gov-reconciliation-assumptions-v1\n"
 _PREFIX_EXPLAIN_RESULT = b"gov-explain-result-v1\n"
+_PREFIX_SNAPSHOT_COMPARISON = b"gov-snapshot-comparison-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +148,16 @@ def explain_result_identity(
     """Identity for governance-explain-result payload excluding content_identity."""
     return _sha256_identity(
         _PREFIX_EXPLAIN_RESULT,
+        canonical_json_bytes(canonical_result_without_identity),
+    )
+
+
+def snapshot_comparison_identity(
+    canonical_result_without_identity: dict[str, Any],
+) -> ContentIdentity:
+    """Identity for governance-snapshot-comparison payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_SNAPSHOT_COMPARISON,
         canonical_json_bytes(canonical_result_without_identity),
     )
 

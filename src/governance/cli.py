@@ -1,4 +1,6 @@
-"""Governance CLI: scan, export, diff, sync, check, plan, apply, explain, impact, and preflight."""
+"""Governance CLI: scan, export, diff, sync, check, plan, apply, explain, compare, impact,
+and preflight.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +18,16 @@ from governance.authority.errors import (
     map_authority_exception_to_config_diagnostics,
 )
 from governance.authority.load import load_normalized_authority
+from governance.comparison import (
+    ComparisonError,
+    RootAlignmentAck,
+    build_comparison_result,
+    canonical_comparison_json,
+    comparison_diagnostics_failure,
+    format_comparison_human,
+    snapshot_compare_diagnostic,
+    write_comparison_artifact,
+)
 from governance.config import Settings, load_settings
 from governance.config_contract import (
     CanonicalConfig,
@@ -164,7 +176,11 @@ from governance.reconciliation import (
     write_explain_artifact,
 )
 from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner
-from governance.snapshots import GovernanceSnapshot
+from governance.snapshots import (
+    GovernanceSnapshot,
+    SnapshotError,
+    load_snapshot,
+)
 
 Mode = Literal["mock", "live"]
 ArtifactKind = Literal["inventory", "snapshot"]
@@ -265,6 +281,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_apply(args)
     if command == "explain":
         return _cmd_explain(args)
+    if command == "compare":
+        return _cmd_compare(args)
     if command == "impact":
         return _cmd_impact(args)
     if command == "preflight":
@@ -531,6 +549,48 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output",
         metavar="PATH",
         help="Optional path for the canonical explain-result JSON artifact.",
+    )
+
+    compare = subparsers.add_parser(
+        "compare",
+        help=(
+            "Compare two governance snapshots offline (difference is not drift; "
+            "zero remote mutations)."
+        ),
+    )
+    compare.add_argument(
+        "--baseline",
+        metavar="PATH",
+        required=True,
+        help="Baseline governance-snapshot JSON path.",
+    )
+    compare.add_argument(
+        "--candidate",
+        metavar="PATH",
+        required=True,
+        help="Candidate governance-snapshot JSON path.",
+    )
+    compare.add_argument(
+        "--align-source-roots",
+        action="store_true",
+        help=(
+            "Acknowledge differing source names for matching only "
+            "(does not mark the name difference as allowed)."
+        ),
+    )
+    compare.add_argument(
+        "--align-database-roots",
+        action="store_true",
+        help=(
+            "Acknowledge differing database names for matching only "
+            "(does not mark the name difference as allowed)."
+        ),
+    )
+    _add_format(compare)
+    compare.add_argument(
+        "--output",
+        metavar="PATH",
+        help="Optional path for the canonical snapshot-comparison JSON artifact.",
     )
 
     config = subparsers.add_parser(
@@ -1388,6 +1448,53 @@ def _cmd_explain(args: argparse.Namespace) -> int:
         if written is not None:
             sys.stdout.write(f"artifact_written={format_human_value(str(written))}\n")
     return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    ack = RootAlignmentAck(
+        align_source_roots=bool(getattr(args, "align_source_roots", False)),
+        align_database_roots=bool(getattr(args, "align_database_roots", False)),
+    )
+    try:
+        baseline = _load_snapshot_for_compare(args.baseline, side="baseline")
+        candidate = _load_snapshot_for_compare(args.candidate, side="candidate")
+        result = build_comparison_result(baseline, candidate, ack=ack)
+        output_path = getattr(args, "output", None)
+        written = (
+            write_comparison_artifact(result, output_path) if output_path is not None else None
+        )
+    except ComparisonError as exc:
+        return _emit_comparison_error(exc, fmt)
+
+    if fmt == "json":
+        _write_canonical_json_stdout(canonical_comparison_json(result))
+    else:
+        sys.stdout.write(format_comparison_human(result))
+        if written is not None:
+            sys.stdout.write(f"artifact_written={format_human_value(str(written))}\n")
+    return 0
+
+
+def _load_snapshot_for_compare(path: str, *, side: str) -> GovernanceSnapshot:
+    try:
+        return load_snapshot(path)
+    except SnapshotError as exc:
+        raise ComparisonError([snapshot_compare_diagnostic(exc, side=side)]) from exc
+
+
+def _emit_comparison_error(exc: ComparisonError, fmt: OutputFormat) -> int:
+    payload = comparison_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        for item in payload["errors"]:
+            sys.stderr.write(
+                f"error: {format_human_value(item['path'])}: "
+                f"{format_human_value(item['message'])} "
+                f"({format_human_value(item['code'])})\n"
+            )
+    return 4
 
 
 def _cmd_preflight(args: argparse.Namespace) -> int:

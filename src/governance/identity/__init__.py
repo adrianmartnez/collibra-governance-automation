@@ -12,6 +12,7 @@ from governance.identity.hashing import (
     policy_identity,
     reconciliation_assumptions_identity,
     remote_state_identity,
+    snapshot_comparison_identity,
     snapshot_identity,
     target_context_identity,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "policy_identity",
     "reconciliation_assumptions_identity",
     "remote_state_identity",
+    "snapshot_comparison_identity",
     "snapshot_identity",
     "target_context_identity",
 ]

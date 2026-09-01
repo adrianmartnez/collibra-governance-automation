@@ -115,8 +115,10 @@ def test_snapshot_integrity_mismatch(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["content_identity"]["digest"] = "0" * 64
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(SnapshotIntegrityError):
+    with pytest.raises(SnapshotIntegrityError) as exc_info:
         load_snapshot(path)
+    assert exc_info.value.code == "integrity_mismatch"
+    assert exc_info.value.path == "/content_identity"
 
 
 def test_unsupported_snapshot_version(tmp_path: Path) -> None:
@@ -127,11 +129,78 @@ def test_unsupported_snapshot_version(tmp_path: Path) -> None:
     payload["snapshot_version"] = "99"
     # Keep a plausible identity so version check fails first.
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(SnapshotCompatibilityError):
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
         load_snapshot(path)
+    assert exc_info.value.code == "unsupported_snapshot_version"
+    assert isinstance(exc_info.value, SnapshotCompatibilityError)
+
+
+def test_unsupported_snapshot_schema(tmp_path: Path) -> None:
+    snapshot = GovernanceSnapshot.from_model(_sample_model())
+    path = tmp_path / "snap.json"
+    write_snapshot(snapshot, path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["snapshot_schema"] = "other"
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
+        load_snapshot(path)
+    assert exc_info.value.code == "unsupported_snapshot_schema"
+
+
+def test_missing_content_identity(tmp_path: Path) -> None:
+    snapshot = GovernanceSnapshot.from_model(_sample_model())
+    path = tmp_path / "snap.json"
+    write_snapshot(snapshot, path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    del payload["content_identity"]
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
+        load_snapshot(path)
+    assert exc_info.value.code == "missing_content_identity"
+
+
+def test_invalid_snapshot_root(tmp_path: Path) -> None:
+    path = tmp_path / "snap.json"
+    path.write_text("[1, 2, 3]\n", encoding="utf-8")
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
+        load_snapshot(path)
+    assert exc_info.value.code == "invalid_snapshot_root"
+
+
+def test_parse_error(tmp_path: Path) -> None:
+    path = tmp_path / "snap.json"
+    path.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
+        load_snapshot(path)
+    assert exc_info.value.code == "parse_error"
+
+
+@pytest.mark.parametrize(
+    ("literal",),
+    [
+        ("NaN",),
+        ("Infinity",),
+        ("-Infinity",),
+        ("1e999",),
+    ],
+)
+def test_non_finite_json_literals_rejected(tmp_path: Path, literal: str) -> None:
+    path = tmp_path / "snap.json"
+    path.write_text(f'{{"value": {literal}}}\n', encoding="utf-8")
+    with pytest.raises(SnapshotCompatibilityError) as exc_info:
+        load_snapshot(path)
+    assert exc_info.value.code == "parse_error"
+    assert exc_info.value.path == "/"
+
+
+def test_read_error_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(SnapshotIOError) as exc_info:
+        load_snapshot(tmp_path / "missing.json")
+    assert exc_info.value.code == "read_error"
 
 
 def test_write_snapshot_rejects_directory(tmp_path: Path) -> None:
     snapshot = GovernanceSnapshot.from_model(_sample_model())
-    with pytest.raises(SnapshotIOError):
+    with pytest.raises(SnapshotIOError) as exc_info:
         write_snapshot(snapshot, tmp_path)
+    assert exc_info.value.code == "write_error"

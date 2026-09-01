@@ -19,6 +19,7 @@ from governance.domain import (
     Table,
 )
 from governance.identity import ContentIdentity, snapshot_identity
+from governance.identity.json_values import validate_json_value
 from governance.io.atomic import atomic_write_text
 from governance.snapshots.errors import (
     SnapshotCompatibilityError,
@@ -45,7 +46,11 @@ def write_snapshot(snapshot: GovernanceSnapshot, output_path: str | Path) -> Pat
     try:
         return atomic_write_text(target, snapshot_to_json(snapshot))
     except OSError as exc:
-        raise SnapshotIOError(f"Unable to write snapshot to {target}") from exc
+        raise SnapshotIOError(
+            f"Unable to write snapshot to {target}",
+            code="write_error",
+            path="/output",
+        ) from exc
 
 
 def load_snapshot(path: str | Path) -> GovernanceSnapshot:
@@ -53,24 +58,62 @@ def load_snapshot(path: str | Path) -> GovernanceSnapshot:
     try:
         text = target.read_text(encoding="utf-8")
     except OSError as exc:
-        raise SnapshotIOError(f"Unable to read snapshot from {target}") from exc
+        raise SnapshotIOError(
+            f"Unable to read snapshot from {target}",
+            code="read_error",
+            path="/",
+        ) from exc
+
+    def _reject_non_standard_json(_value: str) -> None:
+        raise ValueError("non-standard JSON literal")
 
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise SnapshotCompatibilityError("invalid snapshot JSON") from exc
+        payload = json.loads(text, parse_constant=_reject_non_standard_json)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise SnapshotCompatibilityError(
+            "invalid snapshot JSON",
+            code="parse_error",
+            path="/",
+        ) from exc
+
+    try:
+        validate_json_value(payload)
+    except (TypeError, ValueError) as exc:
+        raise SnapshotCompatibilityError(
+            "invalid snapshot JSON",
+            code="parse_error",
+            path="/",
+        ) from exc
 
     if not isinstance(payload, dict):
-        raise SnapshotCompatibilityError("snapshot root must be a mapping")
+        raise SnapshotCompatibilityError(
+            "snapshot root must be a mapping",
+            code="invalid_snapshot_root",
+            path="/",
+        )
 
     schema = payload.get("snapshot_schema")
     version = payload.get("snapshot_version")
-    if schema != SNAPSHOT_SCHEMA or version != SNAPSHOT_VERSION:
-        raise SnapshotCompatibilityError("unsupported snapshot version")
+    if schema != SNAPSHOT_SCHEMA:
+        raise SnapshotCompatibilityError(
+            "unsupported snapshot schema",
+            code="unsupported_snapshot_schema",
+            path="/snapshot_schema",
+        )
+    if version != SNAPSHOT_VERSION:
+        raise SnapshotCompatibilityError(
+            "unsupported snapshot version",
+            code="unsupported_snapshot_version",
+            path="/snapshot_version",
+        )
 
     identity_raw = payload.get("content_identity")
     if not isinstance(identity_raw, dict):
-        raise SnapshotCompatibilityError("snapshot content_identity is required")
+        raise SnapshotCompatibilityError(
+            "snapshot content_identity is required",
+            code="missing_content_identity",
+            path="/content_identity",
+        )
 
     without_identity = {key: value for key, value in payload.items() if key != "content_identity"}
     expected = snapshot_identity(without_identity)
@@ -80,7 +123,11 @@ def load_snapshot(path: str | Path) -> GovernanceSnapshot:
         digest=str(identity_raw.get("digest", "")),
     )
     if actual != expected:
-        raise SnapshotIntegrityError("snapshot content_identity mismatch")
+        raise SnapshotIntegrityError(
+            "snapshot content_identity mismatch",
+            code="integrity_mismatch",
+            path="/content_identity",
+        )
 
     try:
         model = _governance_from_dict(payload["governance"])
@@ -95,7 +142,11 @@ def load_snapshot(path: str | Path) -> GovernanceSnapshot:
             scanner_contract_version=str(scan["scanner_contract_version"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise SnapshotCompatibilityError("invalid snapshot payload") from exc
+        raise SnapshotCompatibilityError(
+            "invalid snapshot payload",
+            code="invalid_snapshot_payload",
+            path="/governance",
+        ) from exc
 
 
 def _governance_from_dict(raw: Any) -> GovernanceModel:
