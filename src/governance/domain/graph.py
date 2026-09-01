@@ -6,13 +6,19 @@ Independent of provider parsers and operational sync flows.
 
 from __future__ import annotations
 
-import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from governance.identity.canonicalize import canonical_json_bytes
 from governance.identity.hashing import ContentIdentity, graph_identity
+from governance.identity.json_values import (
+    CanonicalArray,
+    CanonicalObject,
+    canonical_json_to_plain,
+    canonicalize_attributes_object,
+    canonicalize_json_value,
+)
 
 NODE_KIND_DATA_SOURCE = "data_source"
 NODE_KIND_DATASET = "dataset"
@@ -25,6 +31,11 @@ EDGE_KIND_CONTAINS = "contains"
 EDGE_KIND_DEPENDS_ON = "depends_on"
 EDGE_KIND_GOVERNS = "governs"
 
+# Backward-compatible private aliases used by graph internals / tests.
+_CanonicalObject = CanonicalObject
+_CanonicalArray = CanonicalArray
+_canonicalize_json_value = canonicalize_json_value
+
 _OBSERVATION_MODES = frozenset({"declared", "observed", "derived"})
 
 
@@ -34,86 +45,12 @@ def _require_non_empty_str(value: object, field_name: str) -> str:
     return value.strip()
 
 
-@dataclass(frozen=True, slots=True)
-class _CanonicalObject:
-    """Tagged immutable JSON object (distinct from array)."""
-
-    items: tuple[tuple[str, Any], ...]
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _CanonicalObject):
-            return NotImplemented
-        # Use JSON bytes so bool True and int 1 remain distinct (bool subclasses int).
-        return _canonical_fingerprint(self) == _canonical_fingerprint(other)
-
-    def __hash__(self) -> int:
-        return hash(_canonical_fingerprint(self))
-
-
-@dataclass(frozen=True, slots=True)
-class _CanonicalArray:
-    """Tagged immutable JSON array (distinct from object; order material)."""
-
-    items: tuple[Any, ...]
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _CanonicalArray):
-            return NotImplemented
-        return _canonical_fingerprint(self) == _canonical_fingerprint(other)
-
-    def __hash__(self) -> int:
-        return hash(_canonical_fingerprint(self))
-
-
-def _canonical_fingerprint(value: Any) -> bytes:
-    return canonical_json_bytes(_canonical_json_to_plain(value))
-
-
-def _canonicalize_json_value(value: object) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("float attributes must be finite (reject NaN/±Infinity)")
-        return value
-    if isinstance(value, str):
-        return value
-    if isinstance(value, Mapping):
-        items: list[tuple[str, Any]] = []
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError("JSON object keys must be strings")
-            items.append((key, _canonicalize_json_value(item)))
-        items.sort(key=lambda pair: pair[0])
-        return _CanonicalObject(tuple(items))
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return _CanonicalArray(tuple(_canonicalize_json_value(item) for item in value))
-    raise TypeError(f"unsupported JSON attribute type: {type(value).__name__}")
-
-
-def _canonicalize_attributes_object(attributes: object | None) -> _CanonicalObject:
-    if attributes is None:
-        return _CanonicalObject(())
-    if isinstance(attributes, _CanonicalObject):
-        return attributes
-    if not isinstance(attributes, Mapping):
-        raise TypeError("attributes root must be a JSON object (mapping)")
-    canonical = _canonicalize_json_value(attributes)
-    if not isinstance(canonical, _CanonicalObject):
-        raise TypeError("attributes root must be a JSON object (mapping)")
-    return canonical
+def _canonicalize_attributes_object(attributes: object | None) -> CanonicalObject:
+    return canonicalize_attributes_object(attributes)
 
 
 def _canonical_json_to_plain(value: Any) -> Any:
-    if isinstance(value, _CanonicalObject):
-        return {key: _canonical_json_to_plain(item) for key, item in value.items}
-    if isinstance(value, _CanonicalArray):
-        return [_canonical_json_to_plain(item) for item in value.items]
-    return value
+    return canonical_json_to_plain(value)
 
 
 def _merge_provenance(records: Sequence[ProvenanceRecord]) -> tuple[ProvenanceRecord, ...]:
@@ -253,11 +190,11 @@ class GraphNode:
         object.__setattr__(self, "provenance", _merge_provenance(provenance))
 
     @property
-    def attributes_canonical(self) -> _CanonicalObject:
-        assert isinstance(self.attributes, _CanonicalObject)
+    def attributes_canonical(self) -> CanonicalObject:
+        assert isinstance(self.attributes, CanonicalObject)
         return self.attributes
 
-    def material_payload(self) -> tuple[str, str | None, _CanonicalObject]:
+    def material_payload(self) -> tuple[str, str | None, CanonicalObject]:
         return (self.name, self.description, self.attributes_canonical)
 
     def to_dict(self) -> dict[str, Any]:
@@ -296,8 +233,8 @@ class GraphEdge:
         object.__setattr__(self, "provenance", _merge_provenance(provenance))
 
     @property
-    def attributes_canonical(self) -> _CanonicalObject:
-        assert isinstance(self.attributes, _CanonicalObject)
+    def attributes_canonical(self) -> CanonicalObject:
+        assert isinstance(self.attributes, CanonicalObject)
         return self.attributes
 
     def logical_identity(self) -> tuple[GraphNodeIdentity, str, GraphNodeIdentity]:

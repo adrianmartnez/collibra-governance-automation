@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-authority:1",
+  "title": "Governance authority file v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["authority_schema", "authority_version", "rules"],
+  "properties": {
+    "authority_schema": {
+      "type": "string",
+      "const": "governance-authority"
+    },
+    "authority_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "select", "authority"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "select": { "$ref": "#/$defs/select" },
+        "authority": { "$ref": "#/$defs/authorityTarget" }
+      }
+    },
+    "select": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "property"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data_source",
+            "dataset",
+            "table",
+            "column",
+            "contract",
+            "transformation"
+          ]
+        },
+        "property": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type"],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

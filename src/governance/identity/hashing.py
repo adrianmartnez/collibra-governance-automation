@@ -15,6 +15,9 @@ _PREFIX_CONFIG = b"gov-config-v1\n"
 _PREFIX_SNAPSHOT = b"gov-snapshot-v1\n"
 _PREFIX_MAPPING = b"gov-mapping-v1\n"
 _PREFIX_POLICY = b"gov-policy-v1\n"
+_PREFIX_AUTHORITY = b"gov-authority-v1\n"
+_PREFIX_PROPERTY_OBSERVATIONS = b"gov-property-observations-v1\n"
+_PREFIX_PROPERTY_CONFLICTS = b"gov-property-conflicts-v1\n"
 _PREFIX_REMOTE_STATE = b"gov-remote-state-v1\n"
 _PREFIX_TARGET_CONTEXT = b"gov-target-context-v1\n"
 _PREFIX_PLAN = b"gov-plan-v1\n"
@@ -68,6 +71,27 @@ def mapping_identity(normalized_mapping: dict[str, Any]) -> ContentIdentity:
 def policy_identity(normalized_policy_set: dict[str, Any]) -> ContentIdentity:
     """Identity for normalized policy semantics (not file paths)."""
     return _sha256_identity(_PREFIX_POLICY, canonical_json_bytes(normalized_policy_set))
+
+
+def authority_identity(normalized_authority_set: dict[str, Any]) -> ContentIdentity:
+    """Identity for normalized authority semantics (not file paths)."""
+    return _sha256_identity(_PREFIX_AUTHORITY, canonical_json_bytes(normalized_authority_set))
+
+
+def property_observation_set_identity(observation_set: dict[str, Any]) -> ContentIdentity:
+    """Identity for normalized property observation set payload."""
+    return _sha256_identity(
+        _PREFIX_PROPERTY_OBSERVATIONS,
+        canonical_json_bytes(observation_set),
+    )
+
+
+def property_conflict_report_identity(conflict_report: dict[str, Any]) -> ContentIdentity:
+    """Identity for normalized property conflict report payload."""
+    return _sha256_identity(
+        _PREFIX_PROPERTY_CONFLICTS,
+        canonical_json_bytes(conflict_report),
+    )
 
 
 def remote_state_identity(managed_remote_projection: dict[str, Any]) -> ContentIdentity:

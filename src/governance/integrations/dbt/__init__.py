@@ -15,7 +15,12 @@ from governance.integrations.dbt.errors import (
     DbtValidationError,
 )
 from governance.integrations.dbt.load import load_dbt_manifest
-from governance.integrations.dbt.mapper import load_dbt_graph, map_dbt_manifest
+from governance.integrations.dbt.mapper import (
+    load_dbt_graph,
+    load_dbt_graph_with_observations,
+    map_dbt_manifest,
+    map_dbt_manifest_with_observations,
+)
 from governance.integrations.dbt.validate import validate_dbt_manifest
 
 __all__ = [
@@ -32,7 +37,9 @@ __all__ = [
     "DbtUnsupportedManifestVersionError",
     "DbtValidationError",
     "load_dbt_graph",
+    "load_dbt_graph_with_observations",
     "load_dbt_manifest",
     "map_dbt_manifest",
+    "map_dbt_manifest_with_observations",
     "validate_dbt_manifest",
 ]

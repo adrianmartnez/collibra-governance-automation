@@ -15,7 +15,12 @@ from governance.integrations.odcs.errors import (
     OdcsUnsupportedVersionError,
 )
 from governance.integrations.odcs.load import load_odcs_document
-from governance.integrations.odcs.mapper import load_odcs_graph, map_odcs_document
+from governance.integrations.odcs.mapper import (
+    load_odcs_graph,
+    load_odcs_graph_with_observations,
+    map_odcs_document,
+    map_odcs_document_with_observations,
+)
 from governance.integrations.odcs.schema import validate_odcs_document
 
 __all__ = [
@@ -33,6 +38,8 @@ __all__ = [
     "OdcsUnsupportedVersionError",
     "load_odcs_document",
     "load_odcs_graph",
+    "load_odcs_graph_with_observations",
     "map_odcs_document",
+    "map_odcs_document_with_observations",
     "validate_odcs_document",
 ]

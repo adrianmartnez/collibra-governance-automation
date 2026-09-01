@@ -1,5 +1,21 @@
 """Vendor-neutral governance domain model."""
 
+from governance.domain.authority import (
+    AUTHORITY_NODE_KINDS,
+    AUTHORITY_SCHEMA,
+    AUTHORITY_VERSION,
+    AuthorityDeclaration,
+    AuthorityRuleKey,
+    AuthoritySelector,
+    AuthorityTarget,
+    NormalizedAuthorityPolicySet,
+    NormalizedAuthorityRule,
+)
+from governance.domain.conflicts import (
+    PropertyConflictReport,
+    PropertyConflictResult,
+    analyze_property_conflicts,
+)
 from governance.domain.graph import (
     EDGE_KIND_CONTAINS,
     EDGE_KIND_DEPENDS_ON,
@@ -46,8 +62,18 @@ from governance.domain.models import (
     make_schema_id,
     make_table_id,
 )
+from governance.domain.observations import (
+    GovernanceMappingResult,
+    PropertyObservation,
+    PropertyObservationBuilder,
+    PropertyObservationSet,
+    PropertyPath,
+)
 
 __all__ = [
+    "AUTHORITY_NODE_KINDS",
+    "AUTHORITY_SCHEMA",
+    "AUTHORITY_VERSION",
     "EDGE_KIND_CONTAINS",
     "EDGE_KIND_DEPENDS_ON",
     "EDGE_KIND_GOVERNS",
@@ -57,6 +83,10 @@ __all__ = [
     "NODE_KIND_DATASET",
     "NODE_KIND_TABLE",
     "NODE_KIND_TRANSFORMATION",
+    "AuthorityDeclaration",
+    "AuthorityRuleKey",
+    "AuthoritySelector",
+    "AuthorityTarget",
     "Column",
     "ColumnLineageAssertion",
     "Database",
@@ -64,19 +94,29 @@ __all__ = [
     "ForeignKey",
     "GovernanceGraph",
     "GovernanceImpactResult",
+    "GovernanceMappingResult",
     "GovernanceModel",
     "GraphEdge",
     "GraphNode",
     "GraphNodeIdentity",
     "ImpactPath",
     "ImpactStep",
+    "NormalizedAuthorityPolicySet",
+    "NormalizedAuthorityRule",
     "Ownership",
     "PrimaryKey",
+    "PropertyConflictReport",
+    "PropertyConflictResult",
+    "PropertyObservation",
+    "PropertyObservationBuilder",
+    "PropertyObservationSet",
+    "PropertyPath",
     "ProvenanceRecord",
     "Relationship",
     "Schema",
     "Table",
     "analyze_downstream_impact",
+    "analyze_property_conflicts",
     "make_column_id",
     "make_database_id",
     "make_datasource_id",

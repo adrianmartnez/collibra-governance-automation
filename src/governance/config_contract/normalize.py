@@ -7,6 +7,7 @@ from typing import Any
 
 from governance.config_contract.models import (
     ArtifactsConfig,
+    AuthorityConfig,
     CanonicalConfig,
     CollibraAuthRefs,
     CollibraTargetConfig,
@@ -60,6 +61,13 @@ def normalize_document(document: dict[str, Any], *, config_path: Path) -> Canoni
         for index, item in enumerate(files_raw or [])
     )
 
+    authority_raw = document.get("authority") or {}
+    authority_files_raw = authority_raw.get("files", [])
+    authority_files = tuple(
+        normalize_relative_path(item, pointer=f"/authority/files/{index}")
+        for index, item in enumerate(authority_files_raw or [])
+    )
+
     return CanonicalConfig(
         schema_version="1",
         sources=(source,),
@@ -70,6 +78,7 @@ def normalize_document(document: dict[str, Any], *, config_path: Path) -> Canoni
         ),
         policies=PoliciesConfig(files=policy_files),
         config_root=config_root,
+        authority=AuthorityConfig(files=authority_files),
     )
 
 
