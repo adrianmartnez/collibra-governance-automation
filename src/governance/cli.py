@@ -25,9 +25,11 @@ from governance.comparison import (
     canonical_comparison_json,
     comparison_diagnostics_failure,
     format_comparison_human,
+    load_comparison_artifact,
     snapshot_compare_diagnostic,
     write_comparison_artifact,
 )
+from governance.comparison.load import ComparisonArtifactError
 from governance.config import Settings, load_settings
 from governance.config_contract import (
     CanonicalConfig,
@@ -51,6 +53,16 @@ from governance.domain.authority import NormalizedAuthorityPolicySet
 from governance.domain.conflicts import PropertyPath, analyze_property_conflicts
 from governance.domain.impact import analyze_downstream_impact
 from governance.domain.observations import PropertyObservationSet
+from governance.drift import (
+    DriftError,
+    build_drift_result,
+    canonical_drift_json,
+    drift_diagnostics_failure,
+    format_drift_human,
+    load_drift_policy,
+    map_comparison_artifact_error,
+    write_drift_artifact,
+)
 from governance.exporters import (
     SCANNER_CONTRACT_VERSION,
     InventoryExportError,
@@ -283,6 +295,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_explain(args)
     if command == "compare":
         return _cmd_compare(args)
+    if command == "drift":
+        return _cmd_drift(args)
     if command == "impact":
         return _cmd_impact(args)
     if command == "preflight":
@@ -591,6 +605,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output",
         metavar="PATH",
         help="Optional path for the canonical snapshot-comparison JSON artifact.",
+    )
+
+    drift = subparsers.add_parser(
+        "drift",
+        help=(
+            "Classify snapshot comparison differences against explicit drift policy "
+            "(zero remote mutations)."
+        ),
+    )
+    drift.add_argument(
+        "--comparison",
+        metavar="PATH",
+        required=True,
+        help="Persisted governance-snapshot-comparison v1 JSON path.",
+    )
+    drift.add_argument(
+        "--policy",
+        metavar="PATH",
+        help="Optional governance-drift-policy v1 YAML path (required when comparison differs).",
+    )
+    _add_format(drift)
+    drift.add_argument(
+        "--output",
+        metavar="PATH",
+        help="Optional path for the canonical drift-result JSON artifact.",
     )
 
     config = subparsers.add_parser(
@@ -1485,6 +1524,42 @@ def _load_snapshot_for_compare(path: str, *, side: str) -> GovernanceSnapshot:
 
 def _emit_comparison_error(exc: ComparisonError, fmt: OutputFormat) -> int:
     payload = comparison_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        for item in payload["errors"]:
+            sys.stderr.write(
+                f"error: {format_human_value(item['path'])}: "
+                f"{format_human_value(item['message'])} "
+                f"({format_human_value(item['code'])})\n"
+            )
+    return 4
+
+
+def _cmd_drift(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    try:
+        comparison = load_comparison_artifact(args.comparison)
+        policy = load_drift_policy(args.policy) if getattr(args, "policy", None) else None
+        result = build_drift_result(comparison, policy)
+        output_path = getattr(args, "output", None)
+        written = write_drift_artifact(result, output_path) if output_path is not None else None
+    except ComparisonArtifactError as exc:
+        return _emit_drift_error(DriftError(map_comparison_artifact_error(exc)), fmt)
+    except DriftError as exc:
+        return _emit_drift_error(exc, fmt)
+
+    if fmt == "json":
+        _write_canonical_json_stdout(canonical_drift_json(result))
+    else:
+        sys.stdout.write(format_drift_human(result))
+        if written is not None:
+            sys.stdout.write(f"artifact_written={format_human_value(str(written))}\n")
+    return 0
+
+
+def _emit_drift_error(exc: DriftError, fmt: OutputFormat) -> int:
+    payload = drift_diagnostics_failure(exc.errors)
     if fmt == "json":
         _print_json(payload)
     else:
