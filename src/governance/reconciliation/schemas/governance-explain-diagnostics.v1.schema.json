@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-explain-diagnostics:1",
+  "title": "Governance explain diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["diagnostic_schema", "diagnostic_version", "errors", "ok"],
+  "properties": {
+    "diagnostic_schema": {
+      "type": "string",
+      "const": "governance-explain-diagnostics"
+    },
+    "diagnostic_version": { "type": "string", "const": "1" },
+    "ok": { "type": "boolean", "const": false },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "path", "message"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "read_error",
+              "parse_error",
+              "invalid_object_identity",
+              "namespace_mismatch",
+              "source_error",
+              "unknown_object",
+              "unknown_property",
+              "write_error"
+            ]
+          },
+          "path": { "type": "string" },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

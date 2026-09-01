@@ -26,7 +26,12 @@ from governance.plans.import_submission_result import (
     format_import_sync_human,
 )
 from governance.plans.load import load_saved_plan
-from governance.plans.models import PLAN_SCHEMA, PLAN_VERSION, SavedGovernancePlan
+from governance.plans.models import (
+    PLAN_SCHEMA,
+    PLAN_VERSION,
+    PLAN_VERSION_V2,
+    SavedGovernancePlan,
+)
 from governance.plans.stale import (
     build_stale_result,
     format_stale_human,
@@ -42,6 +47,7 @@ from governance.plans.sync_lifecycle_result import (
 __all__ = [
     "PLAN_SCHEMA",
     "PLAN_VERSION",
+    "PLAN_VERSION_V2",
     "PlanError",
     "PlanIntegrityError",
     "PlanParseError",

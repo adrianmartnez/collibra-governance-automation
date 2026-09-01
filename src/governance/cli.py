@@ -1,4 +1,4 @@
-"""Governance CLI: scan, export, diff, sync, check, plan, apply, impact, and preflight."""
+"""Governance CLI: scan, export, diff, sync, check, plan, apply, explain, impact, and preflight."""
 
 from __future__ import annotations
 
@@ -35,7 +35,10 @@ from governance.config_contract import (
 )
 from governance.config_contract.resolution_diagnostics import CODE_ENV_UNRESOLVED
 from governance.domain import GovernanceGraph, GovernanceModel
+from governance.domain.authority import NormalizedAuthorityPolicySet
+from governance.domain.conflicts import PropertyPath, analyze_property_conflicts
 from governance.domain.impact import analyze_downstream_impact
+from governance.domain.observations import PropertyObservationSet
 from governance.exporters import (
     SCANNER_CONTRACT_VERSION,
     InventoryExportError,
@@ -96,6 +99,8 @@ from governance.integrations.odcs import OdcsError, load_odcs_graph
 from governance.integrations.openlineage import OpenLineageError, load_openlineage_graph
 from governance.operation_diagnostics import operation_diagnostics_failure
 from governance.plans import (
+    PLAN_VERSION,
+    PLAN_VERSION_V2,
     PlanError,
     SavedGovernancePlan,
     build_apply_result,
@@ -136,6 +141,27 @@ from governance.policy import (
     format_policy_report_human,
     load_normalized_policies,
     policy_diagnostics_failure,
+)
+from governance.reconciliation import (
+    ExplainError,
+    ReconciliationError,
+    ReconciliationSourceBundle,
+    apply_reconciliation_overlay,
+    assumptions_content_identity,
+    build_explain_result,
+    build_physical_reconciliation_index,
+    build_reconciliation_assumptions,
+    canonical_explain_json,
+    compose_reconciliation_sources,
+    cross_check_known_objects,
+    explain_diagnostics_failure,
+    format_explain_human,
+    has_reconciliation_source_flags,
+    load_object_identity,
+    recompute_assumptions_on_saved_boundary,
+    reconciliation_diagnostics_failure,
+    validate_assumptions_safety,
+    write_explain_artifact,
 )
 from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner
 from governance.snapshots import GovernanceSnapshot
@@ -237,6 +263,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_plan(args)
     if command == "apply":
         return _cmd_apply(args)
+    if command == "explain":
+        return _cmd_explain(args)
     if command == "impact":
         return _cmd_impact(args)
     if command == "preflight":
@@ -412,6 +440,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Output .gplan path (required for plan generation).",
     )
+    _add_reconciliation_source_flags(plan)
     _add_format(plan)
 
     inspect = plan_sub.add_parser(
@@ -448,6 +477,7 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Named profile overlay (overrides GOVERNANCE_PROFILE).",
     )
+    _add_reconciliation_source_flags(apply)
     _add_format(apply)
     apply.add_argument(
         "--apply",
@@ -458,6 +488,49 @@ def _build_parser() -> argparse.ArgumentParser:
         "--confirm-live",
         action="store_true",
         help="Required together with --apply when effective mode is live.",
+    )
+
+    explain = subparsers.add_parser(
+        "explain",
+        help=(
+            "Explain metadata authority and reconciliation decisions for one object "
+            "(read-only; zero remote mutations)."
+        ),
+    )
+    explain.add_argument(
+        "--config",
+        metavar="PATH",
+        required=True,
+        help="Path to governance.yaml (required).",
+    )
+    explain.add_argument(
+        "--profile",
+        metavar="NAME",
+        help="Named profile overlay (overrides GOVERNANCE_PROFILE).",
+    )
+    explain.add_argument(
+        "--namespace",
+        metavar="NAME",
+        required=True,
+        help="Shared logical namespace for object identity and source graphs.",
+    )
+    explain.add_argument(
+        "--object-identity",
+        metavar="PATH",
+        required=True,
+        help="UTF-8 JSON GraphNodeIdentity file (namespace/kind/logical_id/parent).",
+    )
+    explain.add_argument(
+        "--property",
+        metavar="POINTER",
+        help="Optional RFC6901 property pointer filter.",
+    )
+    _add_reconciliation_source_flags(explain)
+    _add_format(explain)
+    explain.add_argument(
+        "--output",
+        metavar="PATH",
+        help="Optional path for the canonical explain-result JSON artifact.",
     )
 
     config = subparsers.add_parser(
@@ -614,6 +687,35 @@ def _add_format(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_reconciliation_source_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--odcs",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="ODCS data-contract path (repeatable).",
+    )
+    parser.add_argument(
+        "--dbt-manifest",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="dbt manifest.json path (repeatable).",
+    )
+    parser.add_argument(
+        "--openlineage",
+        metavar="PATH",
+        action="append",
+        default=None,
+        help="OpenLineage events JSON path (repeatable).",
+    )
+    parser.add_argument(
+        "--dbt-default-database",
+        metavar="NAME",
+        help="Optional default database fallback for every dbt manifest loader.",
+    )
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     if getattr(args, "config_command", None) != "validate":
         raise CliUsageError("usage: governance config validate [--config PATH]")
@@ -667,7 +769,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings = loaded
+    canonical, settings, _authority = loaded
 
     try:
         policy_set = load_normalized_policies(canonical)
@@ -729,7 +831,7 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings = loaded
+    canonical, settings, authority = loaded
 
     if not canonical.targets:
         return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
@@ -756,6 +858,18 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
     except PolicyError as exc:
         return _emit_policy_error(exc, fmt)
 
+    odcs_paths, dbt_paths, openlineage_paths = _reconciliation_source_paths(args)
+    try:
+        bundle = _compose_or_empty_reconciliation_bundle(
+            namespace=settings.postgres_source_name,
+            odcs_paths=odcs_paths,
+            dbt_paths=dbt_paths,
+            openlineage_paths=openlineage_paths,
+            dbt_default_database=getattr(args, "dbt_default_database", None),
+        )
+    except ReconciliationError as exc:
+        return _emit_reconciliation_error(exc, fmt)
+
     try:
         model = _scan_model(settings)
     except Exception as exc:
@@ -778,16 +892,50 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
         return 3
 
     try:
-        desired = map_to_desired_state(model, mapping_config)
+        physical_index = build_physical_reconciliation_index(
+            model,
+            namespace=settings.postgres_source_name,
+        )
+        cross_check_known_objects(
+            known_objects=bundle.known_objects,
+            physical_index=physical_index,
+        )
+    except ReconciliationError as exc:
+        return _emit_reconciliation_error(exc, fmt)
+
+    conflict_report = analyze_property_conflicts(bundle.observations, authority)
+
+    try:
+        desired0 = map_to_desired_state(model, mapping_config)
         adapter = build_collibra_adapter(settings, mapping_config)
         with execution_scope(
             execution_mode=settings.collibra_execution_mode,
             default_outcome="success",
             default_writes_performed=0,
         ):
-            remote = adapter.read_remote_state(desired)
-            sync_plan = build_sync_plan(desired, remote)
+            remote = adapter.read_remote_state(desired0)
+            overlay = apply_reconciliation_overlay(
+                desired0,
+                remote,
+                conflict_report,
+                mapping_config,
+                physical_index,
+            )
+            desired1 = overlay.desired
+            sync_plan = build_sync_plan(desired1, remote)
             remote_identity = compute_remote_state_identity_value(remote)
+            assumptions = build_reconciliation_assumptions(
+                baseline_desired=desired0,
+                reconciled_desired=desired1,
+                remote_state=remote,
+                sync_plan=sync_plan,
+                conflict_report=conflict_report,
+                mapping_config=mapping_config,
+                physical_index=physical_index,
+            )
+            validate_assumptions_safety(assumptions, conflict_report)
+    except ReconciliationError as exc:
+        return _emit_reconciliation_error(exc, fmt)
     except ConfigResolutionError as exc:
         return _emit_resolution_error(exc, fmt, canonical=canonical)
     except Exception as exc:
@@ -803,6 +951,7 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
         policy_set=policy_set,
         mapping_config=mapping_config,
         remote_state_identity_value=remote_identity,
+        reconciliation_assumptions=assumptions,
     )
     written = write_saved_plan(saved, args.output)
     if fmt == "json":
@@ -839,7 +988,86 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings = loaded
+    canonical, settings, authority = loaded
+
+    odcs_paths, dbt_paths, openlineage_paths = _reconciliation_source_paths(args)
+    source_flags_present = has_reconciliation_source_flags(
+        odcs_paths=odcs_paths,
+        dbt_paths=dbt_paths,
+        openlineage_paths=openlineage_paths,
+    )
+
+    # v1 + any source flags: refuse before provider file reads / PG / Collibra.
+    if saved.plan_version == PLAN_VERSION and source_flags_present:
+        stale = build_stale_result(
+            [
+                version_mismatch(
+                    category="reconciliation",
+                    expected=PLAN_VERSION_V2,
+                    observed=saved.plan_version,
+                    message=("legacy plan missing reconciliation assumptions; regenerate v2"),
+                )
+            ]
+        )
+        if fmt == "json":
+            _print_json(stale)
+        else:
+            sys.stdout.write(format_stale_human(stale))
+        return 5
+
+    # v2: recompute decisions on the saved boundary before other freshness checks.
+    if saved.plan_version == PLAN_VERSION_V2:
+        try:
+            bundle = _compose_or_empty_reconciliation_bundle(
+                namespace=settings.postgres_source_name,
+                odcs_paths=odcs_paths,
+                dbt_paths=dbt_paths,
+                openlineage_paths=openlineage_paths,
+                dbt_default_database=getattr(args, "dbt_default_database", None),
+            )
+        except ReconciliationError as exc:
+            return _emit_reconciliation_error(exc, fmt)
+        conflict_report = analyze_property_conflicts(bundle.observations, authority)
+        if (
+            saved.reconciliation_assumptions is None
+            or saved.reconciliation_assumptions_identity is None
+        ):
+            stale = build_stale_result(
+                [
+                    version_mismatch(
+                        category="reconciliation",
+                        expected=PLAN_VERSION_V2,
+                        observed=saved.plan_version,
+                        message=("legacy plan missing reconciliation assumptions; regenerate v2"),
+                    )
+                ]
+            )
+            if fmt == "json":
+                _print_json(stale)
+            else:
+                sys.stdout.write(format_stale_human(stale))
+            return 5
+        recomputed = recompute_assumptions_on_saved_boundary(
+            saved_assumptions=saved.reconciliation_assumptions,
+            conflict_report=conflict_report,
+        )
+        observed_assumptions = assumptions_content_identity(recomputed)
+        if observed_assumptions != saved.reconciliation_assumptions_identity:
+            stale = build_stale_result(
+                [
+                    identity_mismatch(
+                        category="reconciliation",
+                        expected=saved.reconciliation_assumptions_identity,
+                        observed=observed_assumptions,
+                        message="reconciliation assumptions identity changed",
+                    )
+                ]
+            )
+            if fmt == "json":
+                _print_json(stale)
+            else:
+                sys.stdout.write(format_stale_human(stale))
+            return 5
 
     mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
     if isinstance(mode, int):
@@ -1096,6 +1324,72 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_explain(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    namespace = str(args.namespace).strip()
+    if not namespace:
+        raise CliUsageError("--namespace must be a non-empty string")
+
+    odcs_paths, dbt_paths, openlineage_paths = _reconciliation_source_paths(args)
+    if not has_reconciliation_source_flags(
+        odcs_paths=odcs_paths,
+        dbt_paths=dbt_paths,
+        openlineage_paths=openlineage_paths,
+    ):
+        raise CliUsageError("at least one of --odcs, --dbt-manifest, or --openlineage is required")
+
+    try:
+        canonical = load_canonical_config(
+            args.config,
+            profile=getattr(args, "profile", None),
+        )
+    except ConfigContractError as exc:
+        return _emit_config_contract_error(exc, fmt)
+    authority = _validate_authority(canonical, fmt)
+    if isinstance(authority, int):
+        return authority
+
+    try:
+        bundle = compose_reconciliation_sources(
+            namespace=namespace,
+            odcs_paths=odcs_paths,
+            dbt_paths=dbt_paths,
+            openlineage_paths=openlineage_paths,
+            dbt_default_database=getattr(args, "dbt_default_database", None),
+        )
+    except ReconciliationError as exc:
+        return _emit_explain_error(ExplainError(list(exc.errors)), fmt)
+
+    try:
+        identity = load_object_identity(args.object_identity, namespace=namespace)
+        property_filter = None
+        property_arg = getattr(args, "property", None)
+        if property_arg is not None:
+            try:
+                property_filter = PropertyPath.parse(str(property_arg))
+            except (TypeError, ValueError) as exc:
+                raise CliUsageError(f"invalid --property: {exc}") from exc
+        result = build_explain_result(
+            namespace=namespace,
+            identity=identity,
+            bundle=bundle,
+            authority=authority,
+            property_filter=property_filter,
+        )
+        output_path = getattr(args, "output", None)
+        written = write_explain_artifact(result, output_path) if output_path is not None else None
+    except ExplainError as exc:
+        return _emit_explain_error(exc, fmt)
+
+    if fmt == "json":
+        _write_canonical_json_stdout(canonical_explain_json(result))
+    else:
+        sys.stdout.write(format_explain_human(result))
+        if written is not None:
+            sys.stdout.write(f"artifact_written={format_human_value(str(written))}\n")
+    return 0
+
+
 def _cmd_preflight(args: argparse.Namespace) -> int:
     fmt: OutputFormat = args.format
     loaded = _load_canonical_and_settings(
@@ -1105,7 +1399,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings = loaded
+    canonical, settings, _authority = loaded
 
     if not canonical.targets:
         return _emit_operational_message(_SAFE_TARGET_REQUIRED, fmt)
@@ -1158,9 +1452,9 @@ def _cmd_impact(args: argparse.Namespace) -> int:
             )
         except ConfigContractError as exc:
             return _emit_config_contract_error(exc, fmt)
-        authority_error = _validate_authority(canonical, fmt)
-        if authority_error is not None:
-            return authority_error
+        authority = _validate_authority(canonical, fmt)
+        if isinstance(authority, int):
+            return authority
         try:
             policy_set = load_normalized_policies(canonical)
         except PolicyError as exc:
@@ -1222,12 +1516,53 @@ def _cmd_impact(args: argparse.Namespace) -> int:
 
 def _write_impact_json_stdout(text: str) -> None:
     """Write exact UTF-8 machine JSON bytes to stdout (LF preserved on Windows)."""
+    _write_canonical_json_stdout(text)
+
+
+def _write_canonical_json_stdout(text: str) -> None:
+    """Write exact UTF-8 machine JSON bytes to stdout (LF preserved on Windows)."""
     buffer = getattr(sys.stdout, "buffer", None)
     if buffer is not None:
         buffer.write(text.encode("utf-8"))
         buffer.flush()
         return
     sys.stdout.write(text)
+
+
+def _reconciliation_source_paths(
+    args: argparse.Namespace,
+) -> tuple[list[str], list[str], list[str]]:
+    return (
+        list(getattr(args, "odcs", None) or []),
+        list(getattr(args, "dbt_manifest", None) or []),
+        list(getattr(args, "openlineage", None) or []),
+    )
+
+
+def _compose_or_empty_reconciliation_bundle(
+    *,
+    namespace: str,
+    odcs_paths: list[str],
+    dbt_paths: list[str],
+    openlineage_paths: list[str],
+    dbt_default_database: str | None,
+) -> ReconciliationSourceBundle:
+    if not has_reconciliation_source_flags(
+        odcs_paths=odcs_paths,
+        dbt_paths=dbt_paths,
+        openlineage_paths=openlineage_paths,
+    ):
+        return ReconciliationSourceBundle(
+            observations=PropertyObservationSet(),
+            known_objects=(),
+        )
+    return compose_reconciliation_sources(
+        namespace=namespace,
+        odcs_paths=odcs_paths,
+        dbt_paths=dbt_paths,
+        openlineage_paths=openlineage_paths,
+        dbt_default_database=dbt_default_database,
+    )
 
 
 def _compose_impact_graph(
@@ -1309,32 +1644,61 @@ def _emit_impact_error(exc: ImpactError, fmt: OutputFormat) -> int:
     return 4
 
 
+def _emit_reconciliation_error(exc: ReconciliationError, fmt: OutputFormat) -> int:
+    payload = reconciliation_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        print("ok=false", file=sys.stderr)
+        for item in exc.errors:
+            print(
+                f"error path={item.path or '/'} code={item.code} message={item.message}",
+                file=sys.stderr,
+            )
+    return 4
+
+
+def _emit_explain_error(exc: ExplainError, fmt: OutputFormat) -> int:
+    payload = explain_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        print("ok=false", file=sys.stderr)
+        for item in exc.errors:
+            print(
+                f"error path={item.path or '/'} code={item.code} message={item.message}",
+                file=sys.stderr,
+            )
+    return 4
+
+
 def _load_canonical_and_settings(
     *,
     config_path: str,
     profile: str | None,
     fmt: OutputFormat,
-) -> tuple[CanonicalConfig, Settings] | int:
+) -> tuple[CanonicalConfig, Settings, NormalizedAuthorityPolicySet] | int:
     try:
         canonical = load_canonical_config(config_path, profile=profile)
     except ConfigContractError as exc:
         return _emit_config_contract_error(exc, fmt)
-    authority_error = _validate_authority(canonical, fmt)
-    if authority_error is not None:
-        return authority_error
+    authority = _validate_authority(canonical, fmt)
+    if isinstance(authority, int):
+        return authority
     try:
         settings = resolve_settings(canonical)
     except ConfigResolutionError as exc:
         return _emit_resolution_error(exc, fmt, canonical=canonical)
-    return canonical, settings
+    return canonical, settings, authority
 
 
-def _validate_authority(canonical: CanonicalConfig, fmt: OutputFormat) -> int | None:
+def _validate_authority(
+    canonical: CanonicalConfig, fmt: OutputFormat
+) -> NormalizedAuthorityPolicySet | int:
     try:
-        load_normalized_authority(canonical)
+        return load_normalized_authority(canonical)
     except AuthorityError as exc:
         return _emit_authority_error(exc, fmt, canonical=canonical)
-    return None
 
 
 def _emit_authority_error(

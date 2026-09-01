@@ -10,19 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from governance.domain.graph import (
-    NODE_KIND_COLUMN,
-    NODE_KIND_DATA_SOURCE,
-    NODE_KIND_DATASET,
-    NODE_KIND_TABLE,
-    GraphNodeIdentity,
-)
-from governance.domain.models import (
-    make_column_id,
-    make_database_id,
-    make_schema_id,
-    make_table_id,
-)
+from governance.domain.graph import GraphNodeIdentity
+from governance.domain.physical_projection import project_physical_identity
 from governance.policy.models import NormalizedPolicySet, PolicySelector
 
 
@@ -75,89 +64,14 @@ def project_physical_selector_target(
     Generic ODCS datasets/columns, contracts, transformations, and incomplete
     chains return ``None`` (no coercion).
     """
-    if not isinstance(identity, GraphNodeIdentity):
-        raise TypeError("identity must be GraphNodeIdentity")
-
-    if identity.kind == NODE_KIND_DATA_SOURCE and identity.parent is None:
-        return ProjectedObject(
-            object_kind="database",
-            object_id=make_database_id(identity.namespace, identity.logical_id),
-            node=identity,
-        )
-
-    if identity.kind == NODE_KIND_DATASET:
-        parent = identity.parent
-        if parent is None or parent.kind != NODE_KIND_DATA_SOURCE or parent.parent is not None:
-            return None
-        if parent.namespace != identity.namespace:
-            return None
-        return ProjectedObject(
-            object_kind="schema",
-            object_id=make_schema_id(
-                identity.namespace,
-                parent.logical_id,
-                identity.logical_id,
-            ),
-            node=identity,
-        )
-
-    if identity.kind == NODE_KIND_TABLE:
-        dataset = identity.parent
-        if dataset is None or dataset.kind != NODE_KIND_DATASET:
-            return None
-        data_source = dataset.parent
-        if (
-            data_source is None
-            or data_source.kind != NODE_KIND_DATA_SOURCE
-            or data_source.parent is not None
-        ):
-            return None
-        if identity.namespace != dataset.namespace or dataset.namespace != data_source.namespace:
-            return None
-        return ProjectedObject(
-            object_kind="table",
-            object_id=make_table_id(
-                identity.namespace,
-                data_source.logical_id,
-                dataset.logical_id,
-                identity.logical_id,
-            ),
-            node=identity,
-        )
-
-    if identity.kind == NODE_KIND_COLUMN:
-        table = identity.parent
-        if table is None or table.kind != NODE_KIND_TABLE:
-            return None
-        dataset = table.parent
-        if dataset is None or dataset.kind != NODE_KIND_DATASET:
-            return None
-        data_source = dataset.parent
-        if (
-            data_source is None
-            or data_source.kind != NODE_KIND_DATA_SOURCE
-            or data_source.parent is not None
-        ):
-            return None
-        if (
-            identity.namespace != table.namespace
-            or table.namespace != dataset.namespace
-            or dataset.namespace != data_source.namespace
-        ):
-            return None
-        return ProjectedObject(
-            object_kind="column",
-            object_id=make_column_id(
-                identity.namespace,
-                data_source.logical_id,
-                dataset.logical_id,
-                table.logical_id,
-                identity.logical_id,
-            ),
-            node=identity,
-        )
-
-    return None
+    projected = project_physical_identity(identity)
+    if projected is None:
+        return None
+    return ProjectedObject(
+        object_kind=projected.object_kind,
+        object_id=projected.local_id,
+        node=projected.node,
+    )
 
 
 def selector_matches(selector: PolicySelector, projected: ProjectedObject) -> bool:

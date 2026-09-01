@@ -363,8 +363,11 @@ def test_unsupported_plan_version(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _config, plan_path = _generate_plan(monkeypatch, tmp_path, capsys)
+    # Generated plans are v2; v1 and v2 remain supported — unsupported is v3+.
+    loaded = load_saved_plan(plan_path)
+    assert loaded.plan_version in {"1", "2"}
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
-    payload["plan_version"] = "99"
+    payload["plan_version"] = "3"
     # identity will also fail if we keep old digest; rewrite with new version only for schema path
     plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     with pytest.raises(UnsupportedPlanVersionError) as exc:
@@ -546,3 +549,53 @@ def test_normalize_base_url_shared_for_target_context() -> None:
         build_target_context_projection(settings_for("https://other.example.com"))
     )
     assert id_a != id_c
+
+
+def test_v2_assumptions_identity_mismatch_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _config, plan_path = _generate_plan(monkeypatch, tmp_path, capsys)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    assumptions = payload["reconciliation_assumptions"]
+    if assumptions["actions"]:
+        props = assumptions["actions"][0]["properties"]
+        if props:
+            props[0]["decision"] = {
+                "state": "SINGLE_OBSERVATION",
+                "reason": "SINGLE_OBSERVATION",
+                "value_groups": [],
+                "effective_value": "tampered",
+            }
+    payload["reconciliation_assumptions"] = assumptions
+    from governance.identity.hashing import plan_identity
+
+    without = {key: value for key, value in payload.items() if key != "content_identity"}
+    payload["content_identity"] = plan_identity(without, plan_version="2").to_dict()
+    plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(PlanIntegrityError) as exc:
+        load_saved_plan(plan_path)
+    assert exc.value.errors[0].code == CODE_IDENTITY
+    assert exc.value.errors[0].path == "/reconciliation_assumptions_identity"
+
+
+def test_v1_plan_load_unaffected_by_assumptions_identity_check(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from governance.identity.hashing import plan_identity
+    from governance.plans import PLAN_VERSION
+
+    _config, plan_path = _generate_plan(monkeypatch, tmp_path, capsys)
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload.pop("reconciliation_assumptions", None)
+    payload.pop("reconciliation_assumptions_identity", None)
+    payload["plan_version"] = PLAN_VERSION
+    without = {key: value for key, value in payload.items() if key != "content_identity"}
+    payload["content_identity"] = plan_identity(without, plan_version=PLAN_VERSION).to_dict()
+    plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    loaded = load_saved_plan(plan_path)
+    assert loaded.plan_version == PLAN_VERSION
+    assert loaded.reconciliation_assumptions is None

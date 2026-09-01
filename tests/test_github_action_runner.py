@@ -501,6 +501,37 @@ def test_no_apply_or_sync_in_cli_argv(
     assert result["plan"]["status"] == "generated"
 
 
+def test_plan_operation_accepts_v2_producer_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runner must parse governance-plan v2 stdout without action_contract_invalid."""
+    github_output = _prepare_workspace(tmp_path, monkeypatch)
+    plan = _plan_document()
+    plan["plan_version"] = "2"
+    policy = _policy_report(ok=True, violations=[])
+    router = _cli_router(
+        [
+            (("config", "validate"), _completed(_config_diagnostics())),
+            (("check",), _completed(policy, returncode=0)),
+            (("plan",), _completed(plan, returncode=0)),
+        ]
+    )
+    with patch("governance.github_ci.runner.run_governance_cli", side_effect=router):
+        code = run_orchestration(
+            _run_args(operation="plan", output_format="json"),
+            stdout=io.StringIO(),
+        )
+    assert code == 0
+    result = json.loads((tmp_path / ".governance" / ACTION_RESULT_NAME).read_text(encoding="utf-8"))
+    assert result["status"] == "passed"
+    assert result["plan"]["status"] == "generated"
+    assert result["failure_code"] is None
+    outputs = _read_github_output(github_output)
+    assert outputs["plan-status"] == "generated"
+    assert outputs["writes-performed"] == "0"
+
+
 def test_output_format_json_stdout_equals_action_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

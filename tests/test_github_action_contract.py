@@ -7,9 +7,17 @@ import json
 from importlib.resources import files
 from pathlib import Path
 
+import pytest
 import yaml
 
 from governance.github_ci.finalize import _PUBLIC_COMMENT_STATUSES
+from governance.github_ci.result import (
+    CliContractError,
+    canonical_json_text,
+    parse_cli_payload,
+    parse_known_diagnostic,
+    parse_plan_document,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION_YML = REPO_ROOT / "action.yml"
@@ -278,3 +286,74 @@ def test_orchestration_uses_env_transport_not_input_interpolation_in_argv() -> N
     assert '--config "$GOV_ACTION_CONFIG"' in run_script
     assert "contract-version" in action["outputs"]
     assert "empty for impact" in action["outputs"]["contract-version"]["description"].lower()
+
+
+def _plan_payload(*, version: str) -> dict:
+    identity = {
+        "algorithm": "sha256",
+        "digest": "a" * 64,
+        "hashing_contract_version": "1",
+    }
+    return {
+        "plan_schema": "governance-plan",
+        "plan_version": version,
+        "actions": [{"action_type": "create", "local_id": "table:demo/db/public/t"}],
+        "config_identity": identity,
+        "policy_identity": identity,
+        "snapshot_identity": identity,
+    }
+
+
+def test_parse_plan_document_accepts_v1_and_v2() -> None:
+    for version in ("1", "2"):
+        parsed = parse_plan_document(canonical_json_text(_plan_payload(version=version)))
+        assert parsed["plan_version"] == version
+
+
+def test_parse_plan_document_rejects_v3() -> None:
+    with pytest.raises(CliContractError, match="unsupported plan_version"):
+        parse_plan_document(canonical_json_text(_plan_payload(version="3")))
+
+
+def test_parse_cli_payload_expect_plan_accepts_v2() -> None:
+    payload = parse_cli_payload(
+        canonical_json_text(_plan_payload(version="2")),
+        expect="plan",
+    )
+    assert payload["plan_version"] == "2"
+
+
+def test_parse_cli_payload_plan_or_policy_or_diagnostic_accepts_v2() -> None:
+    payload = parse_cli_payload(
+        canonical_json_text(_plan_payload(version="2")),
+        expect="plan-or-policy-or-diagnostic",
+    )
+    assert payload["plan_version"] == "2"
+
+
+def test_parse_known_diagnostic_accepts_reconciliation_diagnostics() -> None:
+    diagnostic = {
+        "diagnostic_schema": "governance-reconciliation-diagnostics",
+        "diagnostic_version": "1",
+        "ok": False,
+        "errors": [
+            {
+                "code": "unresolved_property_conflict",
+                "path": "/objects/x",
+                "message": "blocked",
+            }
+        ],
+    }
+    parsed = parse_known_diagnostic(canonical_json_text(diagnostic))
+    assert parsed["diagnostic_schema"] == "governance-reconciliation-diagnostics"
+
+
+def test_parse_known_diagnostic_rejects_reconciliation_version_not_1() -> None:
+    diagnostic = {
+        "diagnostic_schema": "governance-reconciliation-diagnostics",
+        "diagnostic_version": "2",
+        "ok": False,
+        "errors": [{"code": "source_error", "path": "/sources/odcs/0", "message": "bad"}],
+    }
+    with pytest.raises(CliContractError, match="unexpected diagnostic_version"):
+        parse_known_diagnostic(canonical_json_text(diagnostic))

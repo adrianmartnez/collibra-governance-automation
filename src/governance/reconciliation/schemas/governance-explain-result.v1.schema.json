@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-explain-result:1",
+  "title": "Governance explain result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "explain_schema",
+    "explain_version",
+    "namespace",
+    "object",
+    "properties",
+    "writes_performed",
+    "content_identity"
+  ],
+  "properties": {
+    "explain_schema": { "type": "string", "const": "governance-explain-result" },
+    "explain_version": { "type": "string", "const": "1" },
+    "namespace": { "type": "string", "minLength": 1 },
+    "object": { "$ref": "#/$defs/graphNodeIdentity" },
+    "properties": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/explainPropertyEntry" }
+    },
+    "writes_performed": { "type": "integer", "const": 0 },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "graphNodeKind": {
+      "type": "string",
+      "enum": [
+        "data_source",
+        "dataset",
+        "table",
+        "column",
+        "contract",
+        "transformation"
+      ]
+    },
+    "graphNodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "logical_id", "parent"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/graphNodeKind" },
+        "logical_id": { "type": "string", "minLength": 1 },
+        "parent": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/graphNodeIdentity" }
+          ]
+        }
+      }
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_type",
+        "source_ref",
+        "source_version",
+        "observation_mode"
+      ],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": ["declared", "observed", "derived"]
+        }
+      }
+    },
+    "valueGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": true,
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/provenanceRecord" }
+        }
+      }
+    },
+    "authorityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type"],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authoritySelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "property"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/graphNodeKind" },
+        "property": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorityRuleKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "select"],
+      "properties": {
+        "authority": { "$ref": "#/$defs/authorityTarget" },
+        "select": { "$ref": "#/$defs/authoritySelector" }
+      }
+    },
+    "conflictState": {
+      "type": "string",
+      "enum": [
+        "SINGLE_OBSERVATION",
+        "AGREEMENT",
+        "RESOLVED_BY_AUTHORITY",
+        "UNRESOLVED_CONFLICT",
+        "INVALID_OR_AMBIGUOUS_AUTHORITY"
+      ]
+    },
+    "conflictReason": {
+      "type": "string",
+      "enum": [
+        "SINGLE_OBSERVATION",
+        "AGREEMENT",
+        "RESOLVED_BY_AUTHORITY",
+        "NO_AUTHORITY_RULE",
+        "AUTHORITATIVE_SOURCE_NOT_OBSERVED",
+        "AUTHORITATIVE_SOURCE_CONFLICTED",
+        "INVALID_OR_AMBIGUOUS_AUTHORITY"
+      ]
+    },
+    "reconciliationReason": {
+      "type": "string",
+      "enum": [
+        "safe",
+        "unresolved_conflict",
+        "invalid_or_ambiguous_authority",
+        "unsupported_effective_value",
+        "not_reconciliation_mapped"
+      ]
+    },
+    "explainPropertyEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "property",
+        "state",
+        "reason",
+        "reconciliation_applicable",
+        "reconciliation_safe",
+        "reconciliation_reason",
+        "has_effective_value",
+        "value_groups"
+      ],
+      "properties": {
+        "property": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/$defs/conflictState" },
+        "reason": { "$ref": "#/$defs/conflictReason" },
+        "reconciliation_applicable": { "type": "boolean" },
+        "reconciliation_safe": { "type": "boolean" },
+        "reconciliation_reason": { "$ref": "#/$defs/reconciliationReason" },
+        "has_effective_value": { "type": "boolean" },
+        "value_groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/valueGroup" }
+        },
+        "effective_value": true,
+        "winning_rule_key": { "$ref": "#/$defs/authorityRuleKey" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "has_effective_value": { "const": true } },
+            "required": ["has_effective_value"]
+          },
+          "then": { "required": ["effective_value"] }
+        },
+        {
+          "if": {
+            "properties": { "has_effective_value": { "const": false } },
+            "required": ["has_effective_value"]
+          },
+          "then": {
+            "properties": {
+              "effective_value": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

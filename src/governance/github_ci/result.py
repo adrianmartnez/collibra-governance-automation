@@ -33,9 +33,12 @@ KNOWN_DIAGNOSTIC_SCHEMAS = frozenset(
         "governance-plan-diagnostics",
         "governance-operation-diagnostics",
         "governance-config-resolution-diagnostics",
+        "governance-reconciliation-diagnostics",
         IMPACT_DIAGNOSTIC_SCHEMA,
     }
 )
+
+SUPPORTED_PLAN_VERSIONS = frozenset({"1", "2"})
 
 CONFIG_RESULT_NAME = "config-result.json"
 POLICY_RESULT_NAME = "policy-result.json"
@@ -147,6 +150,13 @@ def _require_version(
         raise CliContractError(f"expected {version_key}={CONTRACT_VERSION_VALUE}")
 
 
+def _require_plan_contract(payload: dict[str, Any]) -> None:
+    if payload.get("plan_schema") != PLAN_SCHEMA:
+        raise CliContractError(f"expected plan_schema={PLAN_SCHEMA}")
+    if payload.get("plan_version") not in SUPPORTED_PLAN_VERSIONS:
+        raise CliContractError("unsupported plan_version")
+
+
 def parse_config_diagnostics(raw: str) -> dict[str, Any]:
     payload = parse_json_object(raw)
     _require_version(payload, "diagnostic_schema", "diagnostic_version", CONFIG_DIAGNOSTIC_SCHEMA)
@@ -161,7 +171,7 @@ def parse_policy_report(raw: str) -> dict[str, Any]:
 
 def parse_plan_document(raw: str) -> dict[str, Any]:
     payload = parse_json_object(raw)
-    _require_version(payload, "plan_schema", "plan_version", PLAN_SCHEMA)
+    _require_plan_contract(payload)
     return payload
 
 
@@ -195,7 +205,7 @@ def parse_cli_payload(
         _require_version(payload, "report_schema", "report_version", POLICY_REPORT_SCHEMA)
         return payload
     if expect == "plan":
-        _require_version(payload, "plan_schema", "plan_version", PLAN_SCHEMA)
+        _require_plan_contract(payload)
         return payload
     if expect == "diagnostic-or-policy":
         if payload.get("report_schema") == POLICY_REPORT_SCHEMA:
@@ -209,7 +219,7 @@ def parse_cli_payload(
         raise CliContractError("expected policy report or known diagnostic family")
     if expect == "plan-or-policy-or-diagnostic":
         if payload.get("plan_schema") == PLAN_SCHEMA:
-            _require_version(payload, "plan_schema", "plan_version", PLAN_SCHEMA)
+            _require_plan_contract(payload)
             return payload
         if payload.get("report_schema") == POLICY_REPORT_SCHEMA:
             _require_version(payload, "report_schema", "report_version", POLICY_REPORT_SCHEMA)

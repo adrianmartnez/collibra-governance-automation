@@ -21,8 +21,11 @@ _PREFIX_PROPERTY_CONFLICTS = b"gov-property-conflicts-v1\n"
 _PREFIX_REMOTE_STATE = b"gov-remote-state-v1\n"
 _PREFIX_TARGET_CONTEXT = b"gov-target-context-v1\n"
 _PREFIX_PLAN = b"gov-plan-v1\n"
+_PREFIX_PLAN_V2 = b"gov-plan-v2\n"
 _PREFIX_GRAPH = b"gov-graph-v1\n"
 _PREFIX_IMPACT_RESULT = b"gov-impact-result-v1\n"
+_PREFIX_RECONCILIATION_ASSUMPTIONS = b"gov-reconciliation-assumptions-v1\n"
+_PREFIX_EXPLAIN_RESULT = b"gov-explain-result-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,11 +113,41 @@ def target_context_identity(target_context_projection: dict[str, Any]) -> Conten
     )
 
 
-def plan_identity(canonical_plan_without_identity: dict[str, Any]) -> ContentIdentity:
+def plan_identity(
+    canonical_plan_without_identity: dict[str, Any],
+    *,
+    plan_version: str = "1",
+) -> ContentIdentity:
     """Identity for saved plan payload excluding content_identity."""
+    if plan_version == "1":
+        prefix = _PREFIX_PLAN
+    elif plan_version == "2":
+        prefix = _PREFIX_PLAN_V2
+    else:
+        raise ValueError(f"unsupported plan_version for plan_identity: {plan_version!r}")
     return _sha256_identity(
-        _PREFIX_PLAN,
+        prefix,
         canonical_json_bytes(canonical_plan_without_identity),
+    )
+
+
+def reconciliation_assumptions_identity(
+    assumptions_root: dict[str, Any],
+) -> ContentIdentity:
+    """Identity for governance-reconciliation-assumptions v1 root."""
+    return _sha256_identity(
+        _PREFIX_RECONCILIATION_ASSUMPTIONS,
+        canonical_json_bytes(assumptions_root),
+    )
+
+
+def explain_result_identity(
+    canonical_result_without_identity: dict[str, Any],
+) -> ContentIdentity:
+    """Identity for governance-explain-result payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_EXPLAIN_RESULT,
+        canonical_json_bytes(canonical_result_without_identity),
     )
 
 

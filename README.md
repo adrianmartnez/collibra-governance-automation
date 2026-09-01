@@ -152,18 +152,21 @@ governance diff [--config PATH] [--profile NAME] [--mode mock|live] [--mapping-c
 governance sync [--config PATH] [--profile NAME] [--mode mock|live] [--mapping-config PATH] [--apply] [--confirm-live] [--json]
 governance config validate [--config PATH] [--profile NAME] [--json]
 governance check --config PATH [--profile NAME] [--format human|json]
-governance plan --config PATH --output FILE.gplan [--profile NAME] [--format human|json]
+governance plan --config PATH --output FILE.gplan [--profile NAME] [--format human|json] [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME]
 governance plan inspect FILE.gplan [--format human|json]
-governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json] [--apply] [--confirm-live]
+governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json] [--apply] [--confirm-live] [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME]
+governance explain --config PATH --namespace NAME --object-identity PATH [--property POINTER] [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--profile NAME] [--format human|json] [--output PATH]
 governance preflight --config PATH [--profile NAME] [--format human|json]
 governance impact --namespace NAME --changes FILE --output FILE [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--config PATH] [--profile NAME] [--format human|json]
 governance --help
 governance --version
 ```
 
-Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, `apply`, and `preflight` require explicit `--config` (except `plan inspect`).
+Without `--config`, legacy operational commands keep the v1.0 environment-based settings path. YAML is never auto-discovered from the working directory. New GaC commands `check`, `plan`, `apply`, `explain`, and `preflight` require explicit `--config` (except `plan inspect`).
 
 `governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
+
+`governance plan` / `governance apply` may optionally take the same explicit ODCS/dbt/OpenLineage source path flags. The reconciliation namespace is the effective PostgreSQL `source_name` from config (no `--namespace` on that path). New plans are `governance-plan` v2 and embed reconciliation assumptions; v1 plans remain loadable and apply only without those source flags. `governance explain` is read-only explainability for authority/conflict decisions (explicit `--namespace`, `--object-identity` JSON GraphNodeIdentity, ≥1 source path required).
 
 ## Governance-as-Code (optional)
 
@@ -296,7 +299,9 @@ Semantics:
 - No first/last/timestamp ordering; credential-bearing fields are rejected by schema.
 - Profiles may replace `authority.files` like `policies.files`.
 - `config_identity` includes non-empty `authority.files` refs (list order material). `authority_identity` hashes only semantic rule keys; YAML rule ids, descriptions, authority file refs/filenames and formatting are excluded, while selector property paths and authority targets remain material.
-- This release validates and loads authority configuration; it does **not** block `apply` on unresolved conflicts (that is a later milestone).
+- With explicit ODCS/dbt/OpenLineage inputs on `plan` / `apply`, unresolved or invalid authority conflicts that are **relevant** to a planned Collibra mutation block plan generation (exit 4) or cause stale-plan refusal on apply (exit 5) before remote writes. Unrelated conflicts do not block unrelated actions.
+- Mapped reconciliation targets: `/name` → `display_name`, `/description`, `/attributes/data_type` (columns), `/attributes/ownership` (database/schema/table). Effective `null` omits on CREATE and preserves the current remote value on existing assets (never Attribute DELETE).
+- `governance explain` renders observations, provenance, conflict state, winning rule (when present), and reconciliation safety without remote mutations.
 
 ## Mock vs live
 

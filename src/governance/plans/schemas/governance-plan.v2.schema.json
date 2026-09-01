@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-plan:2",
+  "title": "Saved governance plan v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_schema",
+    "plan_version",
+    "planner_contract_version",
+    "scanner_contract_version",
+    "config_identity",
+    "snapshot_identity",
+    "policy_identity",
+    "mapping_identity",
+    "target_context",
+    "target_context_identity",
+    "remote_state_identity",
+    "actions",
+    "reconciliation_assumptions",
+    "reconciliation_assumptions_identity",
+    "content_identity"
+  ],
+  "properties": {
+    "plan_schema": { "type": "string", "const": "governance-plan" },
+    "plan_version": { "type": "string", "const": "2" },
+    "planner_contract_version": { "type": "string", "minLength": 1 },
+    "scanner_contract_version": { "type": "string", "minLength": 1 },
+    "config_identity": { "$ref": "#/$defs/contentIdentity" },
+    "snapshot_identity": { "$ref": "#/$defs/contentIdentity" },
+    "policy_identity": { "$ref": "#/$defs/contentIdentity" },
+    "mapping_identity": { "$ref": "#/$defs/contentIdentity" },
+    "target_context": { "$ref": "#/$defs/targetContext" },
+    "target_context_identity": { "$ref": "#/$defs/contentIdentity" },
+    "remote_state_identity": { "$ref": "#/$defs/contentIdentity" },
+    "actions": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "reconciliation_assumptions": { "$ref": "#/$defs/reconciliationAssumptions" },
+    "reconciliation_assumptions_identity": { "$ref": "#/$defs/contentIdentity" },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "targetContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "mode"],
+      "properties": {
+        "provider": { "type": "string", "const": "collibra" },
+        "mode": { "type": "string", "enum": ["mock", "live"] }
+      }
+    },
+    "graphNodeKind": {
+      "type": "string",
+      "enum": [
+        "data_source",
+        "dataset",
+        "table",
+        "column",
+        "contract",
+        "transformation"
+      ]
+    },
+    "graphNodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "logical_id", "parent"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "kind": { "$ref": "#/$defs/graphNodeKind" },
+        "logical_id": { "type": "string", "minLength": 1 },
+        "parent": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/graphNodeIdentity" }
+          ]
+        }
+      }
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_type",
+        "source_ref",
+        "source_version",
+        "observation_mode"
+      ],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": ["declared", "observed", "derived"]
+        }
+      }
+    },
+    "valueGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": true,
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/provenanceRecord" }
+        }
+      }
+    },
+    "authorityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type"],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authoritySelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "property"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/graphNodeKind" },
+        "property": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authorityRuleKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "select"],
+      "properties": {
+        "authority": { "$ref": "#/$defs/authorityTarget" },
+        "select": { "$ref": "#/$defs/authoritySelector" }
+      }
+    },
+    "conflictState": {
+      "type": "string",
+      "enum": [
+        "SINGLE_OBSERVATION",
+        "AGREEMENT",
+        "RESOLVED_BY_AUTHORITY",
+        "UNRESOLVED_CONFLICT",
+        "INVALID_OR_AMBIGUOUS_AUTHORITY"
+      ]
+    },
+    "conflictReason": {
+      "type": "string",
+      "enum": [
+        "SINGLE_OBSERVATION",
+        "AGREEMENT",
+        "RESOLVED_BY_AUTHORITY",
+        "NO_AUTHORITY_RULE",
+        "AUTHORITATIVE_SOURCE_NOT_OBSERVED",
+        "AUTHORITATIVE_SOURCE_CONFLICTED",
+        "INVALID_OR_AMBIGUOUS_AUTHORITY"
+      ]
+    },
+    "conflictDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "value_groups"],
+      "properties": {
+        "state": { "$ref": "#/$defs/conflictState" },
+        "reason": { "$ref": "#/$defs/conflictReason" },
+        "value_groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/valueGroup" }
+        },
+        "effective_value": true,
+        "winning_rule_key": { "$ref": "#/$defs/authorityRuleKey" }
+      }
+    },
+    "reconciliationAssumptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assumptions_schema", "assumptions_version", "actions"],
+      "properties": {
+        "assumptions_schema": {
+          "type": "string",
+          "const": "governance-reconciliation-assumptions"
+        },
+        "assumptions_version": { "type": "string", "const": "1" },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/assumptionAction" }
+        }
+      }
+    },
+    "assumptionAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_type", "local_id", "object_kind", "properties"],
+      "properties": {
+        "action_type": {
+          "type": "string",
+          "enum": ["create", "update", "unchanged"]
+        },
+        "local_id": { "type": "string", "minLength": 1 },
+        "object_kind": { "type": "string", "const": "asset" },
+        "properties": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/assumptionProperty" }
+        }
+      }
+    },
+    "assumptionProperty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object", "property", "roles", "decision"],
+      "properties": {
+        "object": { "$ref": "#/$defs/graphNodeIdentity" },
+        "property": { "type": "string", "minLength": 1 },
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["mutation", "overlay"] }
+        },
+        "decision": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/conflictDecision" }
+          ]
+        }
+      }
+    }
+  }
+}

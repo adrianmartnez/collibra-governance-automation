@@ -13,6 +13,7 @@ from governance.integrations.collibra.sync import PLANNER_CONTRACT_VERSION
 
 PLAN_SCHEMA = "governance-plan"
 PLAN_VERSION = "1"
+PLAN_VERSION_V2 = "2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,10 +29,32 @@ class SavedGovernancePlan:
     planner_contract_version: str = PLANNER_CONTRACT_VERSION
     scanner_contract_version: str = SCANNER_CONTRACT_VERSION
     plan_schema: str = PLAN_SCHEMA
-    plan_version: str = PLAN_VERSION
+    plan_version: str = PLAN_VERSION_V2
+    reconciliation_assumptions: dict[str, Any] | None = None
+    reconciliation_assumptions_identity: ContentIdentity | None = None
+
+    def __post_init__(self) -> None:
+        if self.plan_version != PLAN_VERSION_V2:
+            return
+        from governance.reconciliation.assumptions import (
+            assumptions_content_identity,
+            empty_assumptions,
+        )
+
+        assumptions = self.reconciliation_assumptions
+        identity = self.reconciliation_assumptions_identity
+        if assumptions is None:
+            assumptions = empty_assumptions()
+            object.__setattr__(self, "reconciliation_assumptions", assumptions)
+        if identity is None:
+            object.__setattr__(
+                self,
+                "reconciliation_assumptions_identity",
+                assumptions_content_identity(assumptions),
+            )
 
     def canonical_dict_without_identity(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "actions": [action.to_dict() for action in self.sync_plan.actions],
             "config_identity": self.config_identity.to_dict(),
             "mapping_identity": self.mapping_identity.to_dict(),
@@ -45,9 +68,22 @@ class SavedGovernancePlan:
             "target_context": dict(self.target_context),
             "target_context_identity": self.target_context_identity.to_dict(),
         }
+        if self.plan_version == PLAN_VERSION_V2:
+            if self.reconciliation_assumptions is None:
+                raise ValueError("reconciliation_assumptions required for plan_version 2")
+            if self.reconciliation_assumptions_identity is None:
+                raise ValueError("reconciliation_assumptions_identity required for plan_version 2")
+            payload["reconciliation_assumptions"] = self.reconciliation_assumptions
+            payload["reconciliation_assumptions_identity"] = (
+                self.reconciliation_assumptions_identity.to_dict()
+            )
+        return payload
 
     def content_identity(self) -> ContentIdentity:
-        return plan_identity(self.canonical_dict_without_identity())
+        return plan_identity(
+            self.canonical_dict_without_identity(),
+            plan_version=self.plan_version,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         payload = self.canonical_dict_without_identity()
