@@ -286,12 +286,16 @@ rules:
 
 Semantics:
 
-- Selectors match exactly on `kind` + `property` (+ optional `namespace`). Matching is case-preserving strip normalization (same rules as graph namespace / provenance).
+- Selector fields:
+  - `kind`: exact enum from the authority schema; case-sensitive; no inference or case folding.
+  - `property`: strict RFC6901 JSON Pointer; the full pointer is **not** `.strip()`'d; spaces inside segments are material; no URI fragment `#/...`; no percent-decoding.
+  - `namespace`: optional; when present, normalized with `.strip()`, case-preserving, exact match after normalization.
+- Authority target: `provider_type` and optional `source_ref` are normalized with `.strip()`, case-preserving, exact match; no provider whitelist.
 - Specificity: namespace+kind+property (rank 2) beats kind+property (rank 1). The authority target (`provider_type` / optional `source_ref`) does **not** change rank.
 - Missing rule ⇒ no guessed winner. Equal-authority conflicting authorized values remain unresolved.
 - No first/last/timestamp ordering; credential-bearing fields are rejected by schema.
 - Profiles may replace `authority.files` like `policies.files`.
-- `config_identity` includes non-empty `authority.files` refs (list order material). `authority_identity` hashes only semantic rule keys (ids/descriptions/paths excluded).
+- `config_identity` includes non-empty `authority.files` refs (list order material). `authority_identity` hashes only semantic rule keys; YAML rule ids, descriptions, authority file refs/filenames and formatting are excluded, while selector property paths and authority targets remain material.
 - This release validates and loads authority configuration; it does **not** block `apply` on unresolved conflicts (that is a later milestone).
 
 ## Mock vs live
