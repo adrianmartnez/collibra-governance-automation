@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from governance.config import Settings
 from governance.exporters.inventory import SCANNER_CONTRACT_VERSION
@@ -17,13 +18,17 @@ from governance.integrations.collibra.mapping import CollibraMappingConfig
 from governance.integrations.collibra.models import SyncPlan
 from governance.integrations.collibra.sync import PLANNER_CONTRACT_VERSION
 from governance.io.atomic import atomic_write_text
-from governance.plans.models import SavedGovernancePlan
+from governance.plans.models import PLAN_VERSION_V2, SavedGovernancePlan
 from governance.plans.remote_identity import remote_state_identity_projection
 from governance.plans.target_context import (
     build_target_context_projection,
     target_context_public,
 )
 from governance.policy.models import NormalizedPolicySet
+from governance.reconciliation.assumptions import (
+    assumptions_content_identity,
+    empty_assumptions,
+)
 from governance.snapshots.models import GovernanceSnapshot
 
 
@@ -36,8 +41,15 @@ def build_saved_plan(
     policy_set: NormalizedPolicySet,
     mapping_config: CollibraMappingConfig,
     remote_state_identity_value: ContentIdentity,
+    reconciliation_assumptions: dict[str, Any] | None = None,
 ) -> SavedGovernancePlan:
     projection = build_target_context_projection(settings)
+    assumptions = (
+        empty_assumptions()
+        if reconciliation_assumptions is None
+        else reconciliation_assumptions
+    )
+    assumptions_identity = assumptions_content_identity(assumptions)
     return SavedGovernancePlan(
         sync_plan=sync_plan,
         config_identity=config_identity,
@@ -49,6 +61,9 @@ def build_saved_plan(
         remote_state_identity=remote_state_identity_value,
         planner_contract_version=PLANNER_CONTRACT_VERSION,
         scanner_contract_version=SCANNER_CONTRACT_VERSION,
+        plan_version=PLAN_VERSION_V2,
+        reconciliation_assumptions=assumptions,
+        reconciliation_assumptions_identity=assumptions_identity,
     )
 
 

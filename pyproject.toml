@@ -38,6 +38,7 @@ where = ["src"]
 "governance.plans.schemas" = ["*.json"]
 "governance.github_ci.schemas" = ["*.json"]
 "governance.impact.schemas" = ["*.json"]
+"governance.reconciliation.schemas" = ["*.json"]
 "governance.integrations.odcs.schemas" = [
     "odcs-json-schema-v3.1.0.json",
     "LICENSE-Apache-2.0.txt",

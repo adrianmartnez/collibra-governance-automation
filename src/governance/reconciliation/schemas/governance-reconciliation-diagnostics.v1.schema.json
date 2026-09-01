@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-reconciliation-diagnostics:1",
+  "title": "Governance reconciliation diagnostics v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["diagnostic_schema", "diagnostic_version", "errors", "ok"],
+  "properties": {
+    "diagnostic_schema": {
+      "type": "string",
+      "const": "governance-reconciliation-diagnostics"
+    },
+    "diagnostic_version": { "type": "string", "const": "1" },
+    "ok": { "type": "boolean", "const": false },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "path", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "path": { "type": "string" },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

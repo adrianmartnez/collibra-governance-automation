@@ -54,9 +54,10 @@ def load_saved_plan(path: str | Path) -> SavedGovernancePlan:
 
 
 def _from_validated_document(document: dict[str, Any]) -> SavedGovernancePlan:
+    plan_version = str(document["plan_version"])
     stored_identity = document.get("content_identity")
     without = {key: value for key, value in document.items() if key != "content_identity"}
-    recomputed = plan_identity(without)
+    recomputed = plan_identity(without, plan_version=plan_version)
     if not isinstance(stored_identity, dict) or recomputed.to_dict() != {
         "algorithm": stored_identity.get("algorithm"),
         "digest": stored_identity.get("digest"),
@@ -91,6 +92,14 @@ def _from_validated_document(document: dict[str, Any]) -> SavedGovernancePlan:
             ]
         ) from exc
 
+    reconciliation_assumptions = None
+    reconciliation_assumptions_identity = None
+    if plan_version == "2":
+        reconciliation_assumptions = document["reconciliation_assumptions"]
+        reconciliation_assumptions_identity = _identity(
+            document["reconciliation_assumptions_identity"]
+        )
+
     return SavedGovernancePlan(
         sync_plan=sync_plan,
         config_identity=_identity(document["config_identity"]),
@@ -106,7 +115,9 @@ def _from_validated_document(document: dict[str, Any]) -> SavedGovernancePlan:
         planner_contract_version=str(document["planner_contract_version"]),
         scanner_contract_version=str(document["scanner_contract_version"]),
         plan_schema=str(document["plan_schema"]),
-        plan_version=str(document["plan_version"]),
+        plan_version=plan_version,
+        reconciliation_assumptions=reconciliation_assumptions,
+        reconciliation_assumptions_identity=reconciliation_assumptions_identity,
     )
 
 

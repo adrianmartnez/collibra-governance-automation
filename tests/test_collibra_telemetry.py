@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from governance.config import Settings
+from governance.domain.authority import NormalizedAuthorityPolicySet
 from governance.identity import plan_identity
 from governance.identity.hashing import ContentIdentity
 from governance.integrations.collibra import (
@@ -837,7 +838,7 @@ def test_cli_apply_stale_emits_failure(
     monkeypatch.setattr("governance.cli.load_saved_plan", lambda path: saved)
     monkeypatch.setattr(
         "governance.cli._load_canonical_and_settings",
-        lambda **kwargs: (canonical, settings),
+        lambda **kwargs: (canonical, settings, NormalizedAuthorityPolicySet()),
     )
     monkeypatch.setattr("governance.cli.load_normalized_policies", lambda canonical: _Policies())
     monkeypatch.setattr("governance.cli.validate_collibra_runtime", lambda *args, **kwargs: None)
@@ -888,7 +889,7 @@ def test_cli_preflight_incompatible_emits_failure(
     )
     monkeypatch.setattr(
         "governance.cli._load_canonical_and_settings",
-        lambda **kwargs: (canonical, settings),
+        lambda **kwargs: (canonical, settings, NormalizedAuthorityPolicySet()),
     )
     monkeypatch.setattr("governance.cli.run_preflight", lambda settings, mapping: report)
     args = Namespace(format="json", config="governance.yaml", profile=None)

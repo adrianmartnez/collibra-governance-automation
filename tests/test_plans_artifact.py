@@ -363,8 +363,11 @@ def test_unsupported_plan_version(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _config, plan_path = _generate_plan(monkeypatch, tmp_path, capsys)
+    # Generated plans are v2; v1 and v2 remain supported — unsupported is v3+.
+    loaded = load_saved_plan(plan_path)
+    assert loaded.plan_version in {"1", "2"}
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
-    payload["plan_version"] = "99"
+    payload["plan_version"] = "3"
     # identity will also fail if we keep old digest; rewrite with new version only for schema path
     plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     with pytest.raises(UnsupportedPlanVersionError) as exc:
