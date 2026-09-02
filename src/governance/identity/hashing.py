@@ -32,6 +32,7 @@ _PREFIX_DRIFT_RESULT = b"gov-drift-result-v1\n"
 _PREFIX_HISTORY = b"gov-history-v1\n"
 _PREFIX_HISTORY_ENTRY_STATE = b"gov-history-entry-state-v1\n"
 _PREFIX_HISTORY_EVOLUTION = b"gov-history-evolution-v1\n"
+_PREFIX_CI_REVIEW = b"gov-ci-review-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,4 +227,14 @@ def history_evolution_identity(
     return _sha256_identity(
         _PREFIX_HISTORY_EVOLUTION,
         canonical_json_bytes(canonical_evolution_without_identity),
+    )
+
+
+def ci_review_result_identity(
+    canonical_review_without_identity: dict[str, Any],
+) -> ContentIdentity:
+    """Identity for governance-ci-review-result payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_CI_REVIEW,
+        canonical_json_bytes(canonical_review_without_identity),
     )

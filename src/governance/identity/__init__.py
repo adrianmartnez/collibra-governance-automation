@@ -3,6 +3,7 @@
 from governance.identity.hashing import (
     HASHING_CONTRACT_VERSION,
     ContentIdentity,
+    ci_review_result_identity,
     config_identity,
     explain_result_identity,
     graph_identity,
@@ -23,6 +24,7 @@ from governance.identity.hashing import (
 __all__ = [
     "HASHING_CONTRACT_VERSION",
     "ContentIdentity",
+    "ci_review_result_identity",
     "config_identity",
     "explain_result_identity",
     "graph_identity",

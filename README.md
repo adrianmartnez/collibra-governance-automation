@@ -481,25 +481,35 @@ The Action installs this package into a fresh Action-owned virtualenv under `RUN
 
 | Input | Default | Notes |
 | --- | --- | --- |
-| `config` | `""` | Required for `validate`/`check`/`plan` (Phase A). Optional for `impact` (validates config/authority and enables policy matching) |
-| `profile` | `""` | Forwarded as `--profile` when non-empty; for impact requires `config` |
-| `operation` | `plan` | `validate` \| `check` \| `plan` \| `impact` (Action mode, not Collibra `--mode`) |
+| `config` | `""` | Required for `validate`/`check`/`plan` (Phase A). Optional for `impact`. Optional for `review` conflict lane (authority); requires `review-observations` when set |
+| `profile` | `""` | Forwarded as `--profile` when non-empty; for impact/review requires `config` |
+| `operation` | `plan` | `validate` \| `check` \| `plan` \| `impact` \| `review` (Action mode, not Collibra `--mode`) |
 | `output-format` | `human` | Console only (`human` \| `json`); does not change artifacts or step summary |
-| `fail-on-policy-error` | `"true"` | Final gate exits `3` when status is blocked |
+| `fail-on-policy-error` | `"true"` | Final gate exits `3` when status is blocked (check/plan only) |
+| `fail-on-review-blocked` | `"true"` | Final gate exits `3` when `operation: review` status is blocked |
 | `output-directory` | `.governance` | Artifact root; must stay inside the workspace |
 | `plan-path` | `.governance/governance.gplan` | Must be under `output-directory` |
 | `pr-comment` | `"false"` | Opt-in sticky PR comment |
-| `github-token` | `""` | Comment step only; never passed to governance CLI |
+| `github-token` | `""` | Comment step only; never passed to governance CLI / review orchestration |
 | `impact-namespace` | `""` | Required for `operation: impact` |
 | `impact-changes` | `""` | Workspace-relative `governance-impact-changes` v1 path |
 | `impact-odcs` | `""` | JSON array of ODCS paths, e.g. `["contracts/a.yaml"]` |
 | `impact-dbt-manifest` | `""` | JSON array of dbt manifest paths |
 | `impact-openlineage` | `""` | JSON array of OpenLineage event paths |
 | `dbt-default-database` | `""` | Optional default database for dbt loading |
+| `review-observations` | `""` | Property observations v1 path (enables conflict/authority lane) |
+| `review-comparison` | `""` | Precomputed snapshot comparison v1 (drift lane; XOR with baseline/candidate) |
+| `review-baseline-snapshot` | `""` | Baseline snapshot v1 (with candidate) |
+| `review-candidate-snapshot` | `""` | Candidate snapshot v1 (with baseline) |
+| `review-drift-policy` | `""` | Drift policy YAML (optional; required when comparison differs) |
+| `review-align-source-roots` | `"false"` | Root alignment ack for baseline/candidate only |
+| `review-align-database-roots` | `"false"` | Root alignment ack for baseline/candidate only |
 
 Provider credentials are **not** Action inputs. They remain environment variables referenced by governance.yaml `*_env` keys.
 
 For `operation: impact`, `contract-version` and `result-path` are empty. Use `impact-status`, `impact-result-path`, and `impact-result-version` instead. The machine blast-radius artifact is `governance-impact-result` v1 (`impact-result.json`). Impact is read-only (`writes-performed=0`). CLI exit `6` (`impacted`) is domain success and does not fail the Action by default.
+
+For `operation: review`, `contract-version` and `result-path` are empty. Use `review-status`, `review-result-path`, and `review-result-version` (plus conflict/drift scalars). The machine artifact is `governance-ci-review-result` v1 (`review-result.json`). Review never mutates Collibra; `writes-performed=0`. Semantic `blocked` exits `3` when `fail-on-review-blocked=true`, else `0`.
 
 ### A. Fork-safe validation
 
@@ -543,6 +553,56 @@ Do not use `pull_request_target` with an untrusted PR checkout and secrets.
 ```
 
 At least one of `impact-odcs`, `impact-dbt-manifest`, or `impact-openlineage` is required. Source lists are JSON arrays (not comma-separated). Optional `config`/`profile` validate governance configuration (including authority side-files) and enable policy matching (not policy blocking). Upload `${{ steps.gac-impact.outputs.artifacts-path }}` to retain `impact-result.json` and `report.md`.
+
+### B3. Governance review (authority / conflicts / drift)
+
+Read-only PR/CI review of property conflicts (with optional authority) and/or snapshot drift. Requires at least one lane: `review-observations` and/or (`review-comparison` XOR `review-baseline-snapshot`+`review-candidate-snapshot`). Does not run validate/check/plan/impact and does not apply or sync.
+
+**Conflict-only:**
+
+```yaml
+- id: gac-review
+  uses: adrianmartnez/collibra-governance-automation@<commit-sha>
+  with:
+    operation: review
+    review-observations: artifacts/observations.json
+    # config: governance.yaml   # optional authority; omit => empty authority set
+    fail-on-review-blocked: "true"
+    pr-comment: "false"
+```
+
+**Drift-only (precomputed comparison):**
+
+```yaml
+- uses: adrianmartnez/collibra-governance-automation@<commit-sha>
+  with:
+    operation: review
+    review-comparison: artifacts/comparison.json
+    review-drift-policy: policies/drift.yaml
+    pr-comment: "false"
+```
+
+**Combined (baseline/candidate + observations):**
+
+```yaml
+- uses: adrianmartnez/collibra-governance-automation@<commit-sha>
+  with:
+    operation: review
+    review-observations: artifacts/observations.json
+    review-baseline-snapshot: artifacts/baseline.snapshot.json
+    review-candidate-snapshot: artifacts/candidate.snapshot.json
+    review-drift-policy: policies/drift.yaml
+    fail-on-review-blocked: "true"
+    pr-comment: "true"
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Sticky PR comments remain opt-in and same-repository only (`skipped_untrusted_fork` for forks). Machine detail stays in `review-result.json` / `comparison-result.json` / `drift-result.json`; human report/annotations omit governed values and `source_ref`.
+
+For `operation: review` console surfaces:
+- `output-format: human` → safe human console summary (no governed values)
+- `output-format: json` → safe scalar JSON console summary equivalent to Action outputs (no `conflict_report` / values / `source_ref`)
+- full deterministic detail → only the on-disk machine artifacts above
 
 ### C. Trusted deterministic planning
 

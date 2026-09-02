@@ -1,0 +1,29 @@
+{
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "cf446ed3e4bb3f883592c68c3443acc53fb87ff9848929222b3c9604f61cf953",
+    "hashing_contract_version": "1"
+  },
+  "observation_schema": "governance-property-observations",
+  "observation_version": "1",
+  "observations": [
+    {
+      "object": {
+        "kind": "table",
+        "logical_id": "orders",
+        "namespace": "acme.commerce",
+        "parent": null
+      },
+      "property": "/description",
+      "provenance": [
+        {
+          "observation_mode": "observed",
+          "provider_type": "odcs",
+          "source_ref": "customer-contract",
+          "source_version": "1.0"
+        }
+      ],
+      "value": "orders table"
+    }
+  ]
+}

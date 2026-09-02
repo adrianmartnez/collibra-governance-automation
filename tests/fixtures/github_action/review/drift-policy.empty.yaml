@@ -1,0 +1,3 @@
+drift_schema: governance-drift-policy
+drift_version: "1"
+rules: []

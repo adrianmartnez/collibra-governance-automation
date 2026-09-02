@@ -1,0 +1,17 @@
+drift_schema: governance-drift-policy
+drift_version: "1"
+rules:
+  - id: allow-source-description
+    match:
+      change: changed
+      object:
+        kind: data_source
+        path: []
+      property: /description
+  - id: allow-table-description
+    match:
+      change: changed
+      object:
+        kind: table
+        path: ["sales", "orders"]
+      property: /description

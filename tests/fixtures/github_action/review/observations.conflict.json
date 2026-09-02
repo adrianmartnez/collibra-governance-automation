@@ -1,0 +1,47 @@
+{
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "a497ccd6bf6ba2f86528055a2363c6fa452af186f4fcf3d2c8b2b1784e5570f8",
+    "hashing_contract_version": "1"
+  },
+  "observation_schema": "governance-property-observations",
+  "observation_version": "1",
+  "observations": [
+    {
+      "object": {
+        "kind": "table",
+        "logical_id": "orders",
+        "namespace": "acme.commerce",
+        "parent": null
+      },
+      "property": "/description",
+      "provenance": [
+        {
+          "observation_mode": "observed",
+          "provider_type": "dbt",
+          "source_ref": "manifest-b",
+          "source_version": "1.0"
+        }
+      ],
+      "value": "right"
+    },
+    {
+      "object": {
+        "kind": "table",
+        "logical_id": "orders",
+        "namespace": "acme.commerce",
+        "parent": null
+      },
+      "property": "/description",
+      "provenance": [
+        {
+          "observation_mode": "observed",
+          "provider_type": "odcs",
+          "source_ref": "contract-a",
+          "source_version": "1.0"
+        }
+      ],
+      "value": "left"
+    }
+  ]
+}

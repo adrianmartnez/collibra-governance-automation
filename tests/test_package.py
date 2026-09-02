@@ -43,6 +43,19 @@ def test_history_observation_snapshot_schemas_packaged() -> None:
         assert "urn:collibra-governance-automation:schema:" in text
 
 
+def test_review_schema_packaged_and_module_imports() -> None:
+    resource = files("governance.github_ci.schemas").joinpath(
+        "governance-ci-review-result.v1.schema.json"
+    )
+    assert resource.is_file()
+    text = resource.read_text(encoding="utf-8")
+    assert "urn:collibra-governance-automation:schema:governance-ci-review-result:1" in text
+    import governance.github_ci.review as review
+
+    assert review.REVIEW_SCHEMA == "governance-ci-review-result"
+    assert review.REVIEW_VERSION == "1"
+
+
 def test_entry_point_module_help() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "governance", "--help"],

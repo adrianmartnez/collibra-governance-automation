@@ -321,6 +321,20 @@ def action_result_outputs(action_result: dict[str, Any]) -> dict[str, str]:
         "impact-status": "not_run",
         "impact-result-path": "",
         "impact-result-version": "",
+        "review-status": "not_run",
+        "review-result-path": "",
+        "review-result-version": "",
+        "conflict-status": "not_run",
+        "conflict-property-count": "0",
+        "unresolved-conflict-count": "0",
+        "resolved-authority-count": "0",
+        "reconciliation-blocked-count": "0",
+        "drift-status": "not_run",
+        "expected-difference-count": "0",
+        "unexpected-drift-count": "0",
+        "drift-affected-object-count": "0",
+        "comparison-result-path": "",
+        "drift-result-path": "",
     }
 
 

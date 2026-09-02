@@ -1,8 +1,8 @@
 name: Governance as Code
 description: >
   Run read-only Governance-as-Code validation, policy checks, change planning,
-  and impact analysis with deterministic Action outputs, Markdown summaries,
-  and optional sticky PR comments.
+  impact analysis, and authority/conflict/drift review with deterministic Action
+  outputs, Markdown summaries, and optional sticky PR comments.
 author: adrianmartnez
 
 branding:
@@ -15,6 +15,7 @@ inputs:
       Workspace-relative path to governance.yaml.
       Required for validate/check/plan (enforced in Phase A).
       Optional for impact (validates config/authority and enables policy matching).
+      Optional for review (authority for the conflict lane; requires review-observations).
     required: false
     default: ""
   profile:
@@ -22,7 +23,7 @@ inputs:
     required: false
     default: ""
   operation:
-    description: Action operation (validate, check, plan, or impact)
+    description: Action operation (validate, check, plan, impact, or review)
     required: false
     default: plan
   output-format:
@@ -31,6 +32,10 @@ inputs:
     default: human
   fail-on-policy-error:
     description: When true, final gate exits 3 on policy blocked
+    required: false
+    default: "true"
+  fail-on-review-blocked:
+    description: When true, final gate exits 3 on review blocked
     required: false
     default: "true"
   output-directory:
@@ -73,10 +78,42 @@ inputs:
     description: Optional default database forwarded to dbt manifest loading
     required: false
     default: ""
+  review-observations:
+    description: >
+      Workspace-relative governance-property-observations path.
+      Enables the conflict lane for operation=review.
+    required: false
+    default: ""
+  review-comparison:
+    description: >
+      Workspace-relative governance-comparison-result path for review drift lane mode A.
+      Mutually exclusive with review baseline/candidate snapshots.
+    required: false
+    default: ""
+  review-baseline-snapshot:
+    description: Workspace-relative baseline snapshot for review drift lane mode B
+    required: false
+    default: ""
+  review-candidate-snapshot:
+    description: Workspace-relative candidate snapshot for review drift lane mode B
+    required: false
+    default: ""
+  review-drift-policy:
+    description: Optional workspace-relative drift policy (only when drift lane is enabled)
+    required: false
+    default: ""
+  review-align-source-roots:
+    description: Align source roots when building comparison from baseline/candidate snapshots
+    required: false
+    default: "false"
+  review-align-database-roots:
+    description: Align database roots when building comparison from baseline/candidate snapshots
+    required: false
+    default: "false"
 
 outputs:
   contract-version:
-    description: governance-action-result contract version; empty for impact
+    description: governance-action-result contract version; empty for impact and review
     value: ${{ steps.final.outputs.contract-version }}
   status:
     description: Overall governance status
@@ -118,7 +155,7 @@ outputs:
     description: Relative path to generated plan, or empty
     value: ${{ steps.final.outputs.plan-path }}
   result-path:
-    description: Relative path to action-result.json, or empty on Phase A failure / impact
+    description: Relative path to action-result.json, or empty on Phase A failure / impact / review
     value: ${{ steps.final.outputs.result-path }}
   report-path:
     description: Relative path to report.md, or empty on Phase A failure
@@ -138,6 +175,48 @@ outputs:
   impact-result-version:
     description: governance-impact-result contract version; empty when not recognized / not run
     value: ${{ steps.final.outputs.impact-result-version }}
+  review-status:
+    description: Review status (not_run, passed, blocked, or failed)
+    value: ${{ steps.final.outputs.review-status }}
+  review-result-path:
+    description: Relative path to review-result.json, or empty
+    value: ${{ steps.final.outputs.review-result-path }}
+  review-result-version:
+    description: governance-ci-review-result contract version; empty when not recognized / not run
+    value: ${{ steps.final.outputs.review-result-version }}
+  conflict-status:
+    description: Conflict lane status (not_run, clear, findings, or blocked)
+    value: ${{ steps.final.outputs.conflict-status }}
+  conflict-property-count:
+    description: Properties analyzed in the conflict lane
+    value: ${{ steps.final.outputs.conflict-property-count }}
+  unresolved-conflict-count:
+    description: Unresolved conflict count
+    value: ${{ steps.final.outputs.unresolved-conflict-count }}
+  resolved-authority-count:
+    description: Conflicts resolved by authority
+    value: ${{ steps.final.outputs.resolved-authority-count }}
+  reconciliation-blocked-count:
+    description: Reconciliation-blocked assessment count
+    value: ${{ steps.final.outputs.reconciliation-blocked-count }}
+  drift-status:
+    description: Drift lane status (not_run, no_difference, expected_difference, or unexpected_drift)
+    value: ${{ steps.final.outputs.drift-status }}
+  expected-difference-count:
+    description: Expected difference count from drift analysis
+    value: ${{ steps.final.outputs.expected-difference-count }}
+  unexpected-drift-count:
+    description: Unexpected drift count
+    value: ${{ steps.final.outputs.unexpected-drift-count }}
+  drift-affected-object-count:
+    description: Objects affected by drift
+    value: ${{ steps.final.outputs.drift-affected-object-count }}
+  comparison-result-path:
+    description: Relative path to comparison-result.json, or empty
+    value: ${{ steps.final.outputs.comparison-result-path }}
+  drift-result-path:
+    description: Relative path to drift-result.json, or empty
+    value: ${{ steps.final.outputs.drift-result-path }}
 
 runs:
   using: composite
@@ -169,6 +248,7 @@ runs:
         GOV_ACTION_OPERATION: ${{ inputs.operation }}
         GOV_ACTION_OUTPUT_FORMAT: ${{ inputs.output-format }}
         GOV_ACTION_FAIL_ON_POLICY_ERROR: ${{ inputs.fail-on-policy-error }}
+        GOV_ACTION_FAIL_ON_REVIEW_BLOCKED: ${{ inputs.fail-on-review-blocked }}
         GOV_ACTION_OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         GOV_ACTION_PLAN_PATH: ${{ inputs.plan-path }}
         GOV_ACTION_PR_COMMENT: ${{ inputs.pr-comment }}
@@ -178,6 +258,13 @@ runs:
         GOV_ACTION_IMPACT_DBT_MANIFEST: ${{ inputs.impact-dbt-manifest }}
         GOV_ACTION_IMPACT_OPENLINEAGE: ${{ inputs.impact-openlineage }}
         GOV_ACTION_DBT_DEFAULT_DATABASE: ${{ inputs.dbt-default-database }}
+        GOV_ACTION_REVIEW_OBSERVATIONS: ${{ inputs.review-observations }}
+        GOV_ACTION_REVIEW_COMPARISON: ${{ inputs.review-comparison }}
+        GOV_ACTION_REVIEW_BASELINE_SNAPSHOT: ${{ inputs.review-baseline-snapshot }}
+        GOV_ACTION_REVIEW_CANDIDATE_SNAPSHOT: ${{ inputs.review-candidate-snapshot }}
+        GOV_ACTION_REVIEW_DRIFT_POLICY: ${{ inputs.review-drift-policy }}
+        GOV_ACTION_REVIEW_ALIGN_SOURCE_ROOTS: ${{ inputs.review-align-source-roots }}
+        GOV_ACTION_REVIEW_ALIGN_DATABASE_ROOTS: ${{ inputs.review-align-database-roots }}
       run: |
         set -euo pipefail
         "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci run \
@@ -186,6 +273,7 @@ runs:
           --operation "$GOV_ACTION_OPERATION" \
           --output-format "$GOV_ACTION_OUTPUT_FORMAT" \
           --fail-on-policy-error "$GOV_ACTION_FAIL_ON_POLICY_ERROR" \
+          --fail-on-review-blocked "$GOV_ACTION_FAIL_ON_REVIEW_BLOCKED" \
           --output-directory "$GOV_ACTION_OUTPUT_DIRECTORY" \
           --plan-path "$GOV_ACTION_PLAN_PATH" \
           --pr-comment "$GOV_ACTION_PR_COMMENT" \
@@ -194,7 +282,14 @@ runs:
           --impact-odcs "$GOV_ACTION_IMPACT_ODCS" \
           --impact-dbt-manifest "$GOV_ACTION_IMPACT_DBT_MANIFEST" \
           --impact-openlineage "$GOV_ACTION_IMPACT_OPENLINEAGE" \
-          --dbt-default-database "$GOV_ACTION_DBT_DEFAULT_DATABASE"
+          --dbt-default-database "$GOV_ACTION_DBT_DEFAULT_DATABASE" \
+          --review-observations "$GOV_ACTION_REVIEW_OBSERVATIONS" \
+          --review-comparison "$GOV_ACTION_REVIEW_COMPARISON" \
+          --review-baseline-snapshot "$GOV_ACTION_REVIEW_BASELINE_SNAPSHOT" \
+          --review-candidate-snapshot "$GOV_ACTION_REVIEW_CANDIDATE_SNAPSHOT" \
+          --review-drift-policy "$GOV_ACTION_REVIEW_DRIFT_POLICY" \
+          --review-align-source-roots "$GOV_ACTION_REVIEW_ALIGN_SOURCE_ROOTS" \
+          --review-align-database-roots "$GOV_ACTION_REVIEW_ALIGN_DATABASE_ROOTS"
 
     - name: Emit annotations and comment state
       id: comment-state
@@ -261,6 +356,20 @@ runs:
         GOV_IMPACT_STATUS: ${{ steps.governance-run.outputs.impact-status }}
         GOV_IMPACT_RESULT_PATH: ${{ steps.governance-run.outputs.impact-result-path }}
         GOV_IMPACT_RESULT_VERSION: ${{ steps.governance-run.outputs.impact-result-version }}
+        GOV_REVIEW_STATUS: ${{ steps.governance-run.outputs.review-status }}
+        GOV_REVIEW_RESULT_PATH: ${{ steps.governance-run.outputs.review-result-path }}
+        GOV_REVIEW_RESULT_VERSION: ${{ steps.governance-run.outputs.review-result-version }}
+        GOV_CONFLICT_STATUS: ${{ steps.governance-run.outputs.conflict-status }}
+        GOV_CONFLICT_PROPERTY_COUNT: ${{ steps.governance-run.outputs.conflict-property-count }}
+        GOV_UNRESOLVED_CONFLICT_COUNT: ${{ steps.governance-run.outputs.unresolved-conflict-count }}
+        GOV_RESOLVED_AUTHORITY_COUNT: ${{ steps.governance-run.outputs.resolved-authority-count }}
+        GOV_RECONCILIATION_BLOCKED_COUNT: ${{ steps.governance-run.outputs.reconciliation-blocked-count }}
+        GOV_DRIFT_STATUS: ${{ steps.governance-run.outputs.drift-status }}
+        GOV_EXPECTED_DIFFERENCE_COUNT: ${{ steps.governance-run.outputs.expected-difference-count }}
+        GOV_UNEXPECTED_DRIFT_COUNT: ${{ steps.governance-run.outputs.unexpected-drift-count }}
+        GOV_DRIFT_AFFECTED_OBJECT_COUNT: ${{ steps.governance-run.outputs.drift-affected-object-count }}
+        GOV_COMPARISON_RESULT_PATH: ${{ steps.governance-run.outputs.comparison-result-path }}
+        GOV_DRIFT_RESULT_PATH: ${{ steps.governance-run.outputs.drift-result-path }}
       run: |
         set -euo pipefail
         "${{ steps.bootstrap.outputs.action-python }}" -I -m governance.github_ci finalize
