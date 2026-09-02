@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-ci-review-result:1",
+  "title": "Governance CI review result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "review_schema",
+    "review_version",
+    "status",
+    "conflicts",
+    "drift",
+    "writes_performed",
+    "content_identity"
+  ],
+  "properties": {
+    "review_schema": {
+      "type": "string",
+      "const": "governance-ci-review-result"
+    },
+    "review_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["passed", "blocked"]
+    },
+    "conflicts": { "$ref": "#/$defs/conflictsBlock" },
+    "drift": { "$ref": "#/$defs/driftBlock" },
+    "writes_performed": {
+      "type": "integer",
+      "const": 0
+    },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "nullableContentIdentity": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/contentIdentity" }
+      ]
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "graphNodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "logical_id", "parent"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data_source",
+            "dataset",
+            "table",
+            "column",
+            "contract",
+            "transformation"
+          ]
+        },
+        "logical_id": { "type": "string", "minLength": 1 },
+        "parent": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/graphNodeIdentity" }
+          ]
+        }
+      }
+    },
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_type",
+        "source_ref",
+        "source_version",
+        "observation_mode"
+      ],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }]
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": ["declared", "observed", "derived"]
+        }
+      }
+    },
+    "valueGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": { "$ref": "#/$defs/jsonValue" },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/provenanceRecord" }
+        }
+      }
+    },
+    "authorityTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_type"],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "authoritySelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "property"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data_source",
+            "dataset",
+            "table",
+            "column",
+            "contract",
+            "transformation"
+          ]
+        },
+        "property": { "type": "string", "minLength": 1 },
+        "namespace": { "type": "string", "minLength": 1 }
+      }
+    },
+    "winningRuleKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "select"],
+      "properties": {
+        "authority": { "$ref": "#/$defs/authorityTarget" },
+        "select": { "$ref": "#/$defs/authoritySelector" }
+      }
+    },
+    "conflictResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object", "property", "reason", "state", "value_groups"],
+      "properties": {
+        "object": { "$ref": "#/$defs/graphNodeIdentity" },
+        "property": { "type": "string", "minLength": 1 },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "SINGLE_OBSERVATION",
+            "AGREEMENT",
+            "RESOLVED_BY_AUTHORITY",
+            "NO_AUTHORITY_RULE",
+            "AUTHORITATIVE_SOURCE_NOT_OBSERVED",
+            "AUTHORITATIVE_SOURCE_CONFLICTED",
+            "INVALID_OR_AMBIGUOUS_AUTHORITY"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "SINGLE_OBSERVATION",
+            "AGREEMENT",
+            "RESOLVED_BY_AUTHORITY",
+            "UNRESOLVED_CONFLICT",
+            "INVALID_OR_AMBIGUOUS_AUTHORITY"
+          ]
+        },
+        "value_groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/valueGroup" }
+        },
+        "effective_value": { "$ref": "#/$defs/jsonValue" },
+        "winning_rule_key": { "$ref": "#/$defs/winningRuleKey" }
+      }
+    },
+    "conflictReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conflict_schema", "conflict_version", "results"],
+      "properties": {
+        "conflict_schema": {
+          "type": "string",
+          "const": "governance-property-conflicts"
+        },
+        "conflict_version": {
+          "type": "string",
+          "const": "1"
+        },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/conflictResult" }
+        }
+      }
+    },
+    "conflictSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "properties_analyzed",
+        "single_observation",
+        "agreement",
+        "resolved_by_authority",
+        "unresolved_conflict",
+        "invalid_or_ambiguous_authority",
+        "reconciliation_safe",
+        "reconciliation_blocked",
+        "reconciliation_not_applicable"
+      ],
+      "properties": {
+        "properties_analyzed": { "$ref": "#/$defs/nonNegativeInteger" },
+        "single_observation": { "$ref": "#/$defs/nonNegativeInteger" },
+        "agreement": { "$ref": "#/$defs/nonNegativeInteger" },
+        "resolved_by_authority": { "$ref": "#/$defs/nonNegativeInteger" },
+        "unresolved_conflict": { "$ref": "#/$defs/nonNegativeInteger" },
+        "invalid_or_ambiguous_authority": { "$ref": "#/$defs/nonNegativeInteger" },
+        "reconciliation_safe": { "$ref": "#/$defs/nonNegativeInteger" },
+        "reconciliation_blocked": { "$ref": "#/$defs/nonNegativeInteger" },
+        "reconciliation_not_applicable": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    },
+    "reconciliationAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object", "property", "applicable", "safe", "reason"],
+      "properties": {
+        "object": { "$ref": "#/$defs/graphNodeIdentity" },
+        "property": { "type": "string", "minLength": 1 },
+        "applicable": { "type": "boolean" },
+        "safe": { "type": "boolean" },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "safe",
+            "unresolved_conflict",
+            "invalid_or_ambiguous_authority",
+            "unsupported_effective_value",
+            "not_reconciliation_mapped"
+          ]
+        }
+      }
+    },
+    "conflictsBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "observations_content_identity",
+        "authority_content_identity",
+        "conflict_report_content_identity",
+        "summary",
+        "conflict_report",
+        "reconciliation_assessments"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_run", "clear", "findings", "blocked"]
+        },
+        "observations_content_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "authority_content_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "conflict_report_content_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "summary": { "$ref": "#/$defs/conflictSummary" },
+        "conflict_report": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/conflictReport" }
+          ]
+        },
+        "reconciliation_assessments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reconciliationAssessment" }
+        }
+      }
+    },
+    "driftSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "affected_objects",
+        "expected_differences",
+        "property_drift",
+        "unexpected_drift"
+      ],
+      "properties": {
+        "affected_objects": { "$ref": "#/$defs/nonNegativeInteger" },
+        "expected_differences": { "$ref": "#/$defs/nonNegativeInteger" },
+        "property_drift": { "$ref": "#/$defs/nonNegativeInteger" },
+        "unexpected_drift": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    },
+    "driftBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "baseline_snapshot_identity",
+        "candidate_snapshot_identity",
+        "comparison_content_identity",
+        "drift_policy_identity",
+        "drift_result_content_identity",
+        "summary"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_run",
+            "no_difference",
+            "expected_difference",
+            "unexpected_drift"
+          ]
+        },
+        "baseline_snapshot_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "candidate_snapshot_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "comparison_content_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "drift_policy_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "drift_result_content_identity": {
+          "$ref": "#/$defs/nullableContentIdentity"
+        },
+        "summary": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/driftSummary" }
+          ]
+        }
+      }
+    }
+  }
+}

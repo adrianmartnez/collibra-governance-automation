@@ -44,6 +44,7 @@ EXPECTED_INPUTS = {
     "operation": {"required": False, "default": "plan"},
     "output-format": {"required": False, "default": "human"},
     "fail-on-policy-error": {"required": False, "default": "true"},
+    "fail-on-review-blocked": {"required": False, "default": "true"},
     "output-directory": {"required": False, "default": ".governance"},
     "plan-path": {"required": False, "default": ".governance/governance.gplan"},
     "pr-comment": {"required": False, "default": "false"},
@@ -54,6 +55,13 @@ EXPECTED_INPUTS = {
     "impact-dbt-manifest": {"required": False, "default": ""},
     "impact-openlineage": {"required": False, "default": ""},
     "dbt-default-database": {"required": False, "default": ""},
+    "review-observations": {"required": False, "default": ""},
+    "review-comparison": {"required": False, "default": ""},
+    "review-baseline-snapshot": {"required": False, "default": ""},
+    "review-candidate-snapshot": {"required": False, "default": ""},
+    "review-drift-policy": {"required": False, "default": ""},
+    "review-align-source-roots": {"required": False, "default": "false"},
+    "review-align-database-roots": {"required": False, "default": "false"},
 }
 
 EXPECTED_OUTPUTS = (
@@ -78,6 +86,20 @@ EXPECTED_OUTPUTS = (
     "impact-status",
     "impact-result-path",
     "impact-result-version",
+    "review-status",
+    "review-result-path",
+    "review-result-version",
+    "conflict-status",
+    "conflict-property-count",
+    "unresolved-conflict-count",
+    "resolved-authority-count",
+    "reconciliation-blocked-count",
+    "drift-status",
+    "expected-difference-count",
+    "unexpected-drift-count",
+    "drift-affected-object-count",
+    "comparison-result-path",
+    "drift-result-path",
 )
 
 ORCHESTRATION_ENV_KEYS = (
@@ -86,6 +108,7 @@ ORCHESTRATION_ENV_KEYS = (
     "GOV_ACTION_OPERATION",
     "GOV_ACTION_OUTPUT_FORMAT",
     "GOV_ACTION_FAIL_ON_POLICY_ERROR",
+    "GOV_ACTION_FAIL_ON_REVIEW_BLOCKED",
     "GOV_ACTION_OUTPUT_DIRECTORY",
     "GOV_ACTION_PLAN_PATH",
     "GOV_ACTION_PR_COMMENT",
@@ -95,6 +118,13 @@ ORCHESTRATION_ENV_KEYS = (
     "GOV_ACTION_IMPACT_DBT_MANIFEST",
     "GOV_ACTION_IMPACT_OPENLINEAGE",
     "GOV_ACTION_DBT_DEFAULT_DATABASE",
+    "GOV_ACTION_REVIEW_OBSERVATIONS",
+    "GOV_ACTION_REVIEW_COMPARISON",
+    "GOV_ACTION_REVIEW_BASELINE_SNAPSHOT",
+    "GOV_ACTION_REVIEW_CANDIDATE_SNAPSHOT",
+    "GOV_ACTION_REVIEW_DRIFT_POLICY",
+    "GOV_ACTION_REVIEW_ALIGN_SOURCE_ROOTS",
+    "GOV_ACTION_REVIEW_ALIGN_DATABASE_ROOTS",
 )
 
 
@@ -206,6 +236,7 @@ def test_action_result_schema_bytes_and_sha_preserved() -> None:
     assert schema["$id"] == ("urn:collibra-governance-automation:schema:governance-action-result:1")
     assert schema["properties"]["operation"]["enum"] == ["validate", "check", "plan"]
     assert "impact" not in schema["properties"]["operation"]["enum"]
+    assert "review" not in schema["properties"]["operation"]["enum"]
 
 
 def test_action_result_schema_canonical_sha_ignores_crlf_checkout() -> None:

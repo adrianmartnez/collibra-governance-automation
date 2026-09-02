@@ -111,7 +111,8 @@ jobs:
           python -c "from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner"
           python -c "from governance.exporters import INVENTORY_SCHEMA, INVENTORY_VERSION, SCANNER_CONTRACT_VERSION, InventoryExportError, MetadataInventory, write_inventory"
           python -c "from governance.integrations.collibra import CollibraAdapterError, CollibraDesiredState, CollibraRemoteState, LiveCollibraAdapter, MockCollibraAdapter, SyncPlan, SyncResult, build_collibra_adapter, build_sync_plan, execute_sync_plan, load_mapping_config_file, map_to_desired_state, mapping_contains_example_placeholders, mock_mapping_config"
-          python -c "from importlib.resources import files; c=files('governance.config_contract.schemas').joinpath('governance-config.v1.schema.json'); p=files('governance.policy.schemas').joinpath('governance-policy.v1.schema.json'); g=files('governance.plans.schemas').joinpath('governance-plan.v1.schema.json'); a=files('governance.github_ci.schemas').joinpath('governance-action-result.v1.schema.json'); cmp=files('governance.comparison.schemas').joinpath('governance-snapshot-comparison.v1.schema.json'); cdiag=files('governance.comparison.schemas').joinpath('governance-comparison-diagnostics.v1.schema.json'); dr=files('governance.drift.schemas').joinpath('governance-drift-result.v1.schema.json'); ddiag=files('governance.drift.schemas').joinpath('governance-drift-diagnostics.v1.schema.json'); dp=files('governance.drift.schemas').joinpath('governance-drift-policy.v1.schema.json'); hist=files('governance.history.schemas').joinpath('governance-history.v1.schema.json'); hdiag=files('governance.history.schemas').joinpath('governance-history-diagnostics.v1.schema.json'); hevo=files('governance.history.schemas').joinpath('governance-history-evolution.v1.schema.json'); obs=files('governance.observations.schemas').joinpath('governance-property-observations.v1.schema.json'); snap=files('governance.snapshots.schemas').joinpath('governance-snapshot.v1.schema.json'); ct=c.read_text(encoding='utf-8'); pt=p.read_text(encoding='utf-8'); gt=g.read_text(encoding='utf-8'); at=a.read_text(encoding='utf-8'); cmpt=cmp.read_text(encoding='utf-8'); cdiagt=cdiag.read_text(encoding='utf-8'); drt=dr.read_text(encoding='utf-8'); ddiagt=ddiag.read_text(encoding='utf-8'); dpt=dp.read_text(encoding='utf-8'); histt=hist.read_text(encoding='utf-8'); hdiagt=hdiag.read_text(encoding='utf-8'); hevot=hevo.read_text(encoding='utf-8'); obst=obs.read_text(encoding='utf-8'); snapt=snap.read_text(encoding='utf-8'); assert c.is_file() and p.is_file() and g.is_file() and a.is_file() and cmp.is_file() and cdiag.is_file() and dr.is_file() and ddiag.is_file() and dp.is_file() and hist.is_file() and hdiag.is_file() and hevo.is_file() and obs.is_file() and snap.is_file(); assert 'urn:collibra-governance-automation:schema:governance-config:1' in ct; assert 'urn:collibra-governance-automation:schema:governance-policy:1' in pt; assert 'urn:collibra-governance-automation:schema:governance-plan:1' in gt; assert 'urn:collibra-governance-automation:schema:governance-action-result:1' in at; assert 'urn:collibra-governance-automation:schema:governance-snapshot-comparison:1' in cmpt; assert 'urn:collibra-governance-automation:schema:governance-comparison-diagnostics:1' in cdiagt; assert 'urn:collibra-governance-automation:schema:governance-drift-result:1' in drt; assert 'urn:collibra-governance-automation:schema:governance-drift-diagnostics:1' in ddiagt; assert 'urn:collibra-governance-automation:schema:governance-drift-policy:1' in dpt; assert 'urn:collibra-governance-automation:schema:governance-history:1' in histt; assert 'urn:collibra-governance-automation:schema:governance-history-diagnostics:1' in hdiagt; assert 'urn:collibra-governance-automation:schema:governance-history-evolution:1' in hevot; assert 'urn:collibra-governance-automation:schema:governance-property-observations:1' in obst; assert 'urn:collibra-governance-automation:schema:governance-snapshot:1' in snapt; assert 'schema_version' in ct; assert 'policy_version' in pt; assert 'plan_version' in gt; assert 'result_version' in at; assert 'comparison_version' in cmpt; assert 'diagnostic_version' in cdiagt; assert 'drift_version' in drt; assert 'diagnostic_version' in ddiagt; assert 'drift_version' in dpt; assert 'history_version' in histt; assert 'diagnostic_version' in hdiagt; assert 'evolution_version' in hevot; assert 'observation_version' in obst; assert 'snapshot_version' in snapt"
+          python -c "from importlib.resources import files; c=files('governance.config_contract.schemas').joinpath('governance-config.v1.schema.json'); p=files('governance.policy.schemas').joinpath('governance-policy.v1.schema.json'); g=files('governance.plans.schemas').joinpath('governance-plan.v1.schema.json'); a=files('governance.github_ci.schemas').joinpath('governance-action-result.v1.schema.json'); rev=files('governance.github_ci.schemas').joinpath('governance-ci-review-result.v1.schema.json'); cmp=files('governance.comparison.schemas').joinpath('governance-snapshot-comparison.v1.schema.json'); cdiag=files('governance.comparison.schemas').joinpath('governance-comparison-diagnostics.v1.schema.json'); dr=files('governance.drift.schemas').joinpath('governance-drift-result.v1.schema.json'); ddiag=files('governance.drift.schemas').joinpath('governance-drift-diagnostics.v1.schema.json'); dp=files('governance.drift.schemas').joinpath('governance-drift-policy.v1.schema.json'); hist=files('governance.history.schemas').joinpath('governance-history.v1.schema.json'); hdiag=files('governance.history.schemas').joinpath('governance-history-diagnostics.v1.schema.json'); hevo=files('governance.history.schemas').joinpath('governance-history-evolution.v1.schema.json'); obs=files('governance.observations.schemas').joinpath('governance-property-observations.v1.schema.json'); snap=files('governance.snapshots.schemas').joinpath('governance-snapshot.v1.schema.json'); ct=c.read_text(encoding='utf-8'); pt=p.read_text(encoding='utf-8'); gt=g.read_text(encoding='utf-8'); at=a.read_text(encoding='utf-8'); revt=rev.read_text(encoding='utf-8'); cmpt=cmp.read_text(encoding='utf-8'); cdiagt=cdiag.read_text(encoding='utf-8'); drt=dr.read_text(encoding='utf-8'); ddiagt=ddiag.read_text(encoding='utf-8'); dpt=dp.read_text(encoding='utf-8'); histt=hist.read_text(encoding='utf-8'); hdiagt=hdiag.read_text(encoding='utf-8'); hevot=hevo.read_text(encoding='utf-8'); obst=obs.read_text(encoding='utf-8'); snapt=snap.read_text(encoding='utf-8'); assert c.is_file() and p.is_file() and g.is_file() and a.is_file() and rev.is_file() and cmp.is_file() and cdiag.is_file() and dr.is_file() and ddiag.is_file() and dp.is_file() and hist.is_file() and hdiag.is_file() and hevo.is_file() and obs.is_file() and snap.is_file(); assert 'urn:collibra-governance-automation:schema:governance-config:1' in ct; assert 'urn:collibra-governance-automation:schema:governance-policy:1' in pt; assert 'urn:collibra-governance-automation:schema:governance-plan:1' in gt; assert 'urn:collibra-governance-automation:schema:governance-action-result:1' in at; assert 'urn:collibra-governance-automation:schema:governance-ci-review-result:1' in revt; assert 'urn:collibra-governance-automation:schema:governance-snapshot-comparison:1' in cmpt; assert 'urn:collibra-governance-automation:schema:governance-comparison-diagnostics:1' in cdiagt; assert 'urn:collibra-governance-automation:schema:governance-drift-result:1' in drt; assert 'urn:collibra-governance-automation:schema:governance-drift-diagnostics:1' in ddiagt; assert 'urn:collibra-governance-automation:schema:governance-drift-policy:1' in dpt; assert 'urn:collibra-governance-automation:schema:governance-history:1' in histt; assert 'urn:collibra-governance-automation:schema:governance-history-diagnostics:1' in hdiagt; assert 'urn:collibra-governance-automation:schema:governance-history-evolution:1' in hevot; assert 'urn:collibra-governance-automation:schema:governance-property-observations:1' in obst; assert 'urn:collibra-governance-automation:schema:governance-snapshot:1' in snapt; assert 'schema_version' in ct; assert 'policy_version' in pt; assert 'plan_version' in gt; assert 'result_version' in at; assert 'review_version' in revt; assert 'comparison_version' in cmpt; assert 'diagnostic_version' in cdiagt; assert 'drift_version' in drt; assert 'diagnostic_version' in ddiagt; assert 'drift_version' in dpt; assert 'history_version' in histt; assert 'diagnostic_version' in hdiagt; assert 'evolution_version' in hevot; assert 'observation_version' in obst; assert 'snapshot_version' in snapt"
+          python -c "from governance.github_ci import review; assert review.REVIEW_SCHEMA == 'governance-ci-review-result'"
           python -c "import json, re; from importlib.resources import files; histt=files('governance.history.schemas').joinpath('governance-history.v1.schema.json').read_text(encoding='utf-8'); assert '(?i)' not in histt; schema=json.loads(histt); pattern=schema['$'+'defs']['labels']['propertyNames']['pattern']; rx=re.compile(pattern); assert rx.fullmatch('token') is None; assert rx.fullmatch('TOKEN') is None; assert rx.fullmatch('CLIENT_SECRET') is None; assert rx.fullmatch('environment') is not None"
           python -c "from governance.policy import load_normalized_policies, evaluate_policies; from governance.plans import load_saved_plan, SavedGovernancePlan; from governance.integrations.collibra import PLANNER_CONTRACT_VERSION, normalize_base_url"
           governance --help | grep -q history
@@ -385,9 +386,86 @@ jobs:
           ! grep -q "changed_nodes" "${ann}"
           ! grep -q "manifest.clear.json" "${ann}"
 
+      - name: Official Action review PASS smoke
+        id: gac-action-review-pass
+        uses: ./
+        with:
+          operation: review
+          pr-comment: "false"
+          output-directory: .governance-ci-review-pass
+          review-observations: tests/fixtures/github_action/review/observations.clear.json
+          review-comparison: tests/fixtures/github_action/review/comparison.identical.json
+
+      - name: Assert review PASS Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-review-pass.outcome }}" = "success"
+          test "${{ steps.gac-action-review-pass.outputs.status }}" = "passed"
+          test "${{ steps.gac-action-review-pass.outputs.review-status }}" = "passed"
+          test "${{ steps.gac-action-review-pass.outputs.contract-version }}" = ""
+          test "${{ steps.gac-action-review-pass.outputs.result-path }}" = ""
+          test "${{ steps.gac-action-review-pass.outputs.review-result-version }}" = "1"
+          test "${{ steps.gac-action-review-pass.outputs.writes-performed }}" = "0"
+          test "${{ steps.gac-action-review-pass.outputs.conflict-status }}" = "clear"
+          test "${{ steps.gac-action-review-pass.outputs.drift-status }}" = "no_difference"
+          test -f "${{ steps.gac-action-review-pass.outputs.review-result-path }}"
+          test -f "${{ steps.gac-action-review-pass.outputs.comparison-result-path }}"
+          test -f "${{ steps.gac-action-review-pass.outputs.drift-result-path }}"
+          test -f "${{ steps.gac-action-review-pass.outputs.report-path }}"
+          test ! -f "${{ steps.gac-action-review-pass.outputs.artifacts-path }}/action-result.json"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-review-pass.outputs.review-result-path }}',encoding='utf-8')); assert p['review_schema']=='governance-ci-review-result'; assert p['review_version']=='1'; assert p['status']=='passed'; assert p['writes_performed']==0; assert p['conflicts']['authority_content_identity'] is not None"
+
+      - name: Official Action review BLOCKED smoke
+        id: gac-action-review-blocked
+        continue-on-error: true
+        uses: ./
+        with:
+          operation: review
+          fail-on-review-blocked: "true"
+          pr-comment: "false"
+          output-directory: .governance-ci-review-blocked
+          review-observations: tests/fixtures/github_action/review/observations.conflict.json
+          review-comparison: tests/fixtures/github_action/review/comparison.different.json
+          review-drift-policy: tests/fixtures/github_action/review/drift-policy.empty.yaml
+
+      - name: Assert review BLOCKED Action finalization
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-review-blocked.outcome }}" = "failure"
+          test "${{ steps.gac-action-review-blocked.outputs.status }}" = "blocked"
+          test "${{ steps.gac-action-review-blocked.outputs.review-status }}" = "blocked"
+          test "${{ steps.gac-action-review-blocked.outputs.review-result-version }}" = "1"
+          test "${{ steps.gac-action-review-blocked.outputs.writes-performed }}" = "0"
+          test -f "${{ steps.gac-action-review-blocked.outputs.review-result-path }}"
+          test -f "${{ steps.gac-action-review-blocked.outputs.report-path }}"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-review-blocked.outputs.review-result-path }}',encoding='utf-8')); assert p['status']=='blocked'; assert p['writes_performed']==0; assert p['conflicts']['status']=='blocked' or p['drift']['status']=='unexpected_drift'"
+
+      - name: Official Action review BLOCKED non-failing smoke
+        id: gac-action-review-blocked-ok
+        uses: ./
+        with:
+          operation: review
+          fail-on-review-blocked: "false"
+          pr-comment: "false"
+          output-directory: .governance-ci-review-blocked-ok
+          review-observations: tests/fixtures/github_action/review/observations.conflict.json
+
+      - name: Assert review BLOCKED non-failing Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-review-blocked-ok.outcome }}" = "success"
+          test "${{ steps.gac-action-review-blocked-ok.outputs.status }}" = "blocked"
+          test "${{ steps.gac-action-review-blocked-ok.outputs.review-status }}" = "blocked"
+          test "${{ steps.gac-action-review-blocked-ok.outputs.review-result-version }}" = "1"
+          test "${{ steps.gac-action-review-blocked-ok.outputs.writes-performed }}" = "0"
+          test -f "${{ steps.gac-action-review-blocked-ok.outputs.review-result-path }}"
+
       - name: Cleanup Action smoke artifacts
         if: ${{ always() }}
-        run: rm -rf .governance-ci-action .governance-ci-blocked .governance-ci-impact-clear .governance-ci-impact-impacted .governance-ci-impact-error
+        run: rm -rf .governance-ci-action .governance-ci-blocked .governance-ci-impact-clear .governance-ci-impact-impacted .governance-ci-impact-error .governance-ci-review-pass .governance-ci-review-blocked .governance-ci-review-blocked-ok
 
       - name: Teardown
         if: always()

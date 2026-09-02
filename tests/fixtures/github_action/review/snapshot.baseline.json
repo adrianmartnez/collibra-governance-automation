@@ -1,0 +1,129 @@
+{
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "42b75b85914ee6dc1cc08a147cc4ed5e550eff0d63b0e8392aaca1764127325a",
+    "hashing_contract_version": "1"
+  },
+  "governance": {
+    "data_sources": [
+      {
+        "databases": [
+          {
+            "datasource_id": "ds:governance-demo",
+            "description": null,
+            "id": "db:governance-demo/governance_demo",
+            "name": "governance_demo",
+            "ownership": null,
+            "schemas": [
+              {
+                "database_id": "db:governance-demo/governance_demo",
+                "description": null,
+                "id": "sch:governance-demo/governance_demo/sales",
+                "name": "sales",
+                "ownership": null,
+                "tables": [
+                  {
+                    "columns": [
+                      {
+                        "data_type": "integer",
+                        "description": null,
+                        "id": "col:governance-demo/governance_demo/sales/customers/id",
+                        "name": "id",
+                        "nullable": false,
+                        "ordinal_position": 1,
+                        "technical_attributes": {}
+                      }
+                    ],
+                    "description": null,
+                    "foreign_keys": [],
+                    "id": "tbl:governance-demo/governance_demo/sales/customers",
+                    "name": "customers",
+                    "ownership": null,
+                    "primary_key": {
+                      "column_ids": [
+                        "col:governance-demo/governance_demo/sales/customers/id"
+                      ],
+                      "id": "pk:tbl:governance-demo/governance_demo/sales/customers/customers_pkey",
+                      "name": "customers_pkey",
+                      "table_id": "tbl:governance-demo/governance_demo/sales/customers"
+                    },
+                    "schema_id": "sch:governance-demo/governance_demo/sales",
+                    "technical_attributes": {}
+                  },
+                  {
+                    "columns": [
+                      {
+                        "data_type": "integer",
+                        "description": null,
+                        "id": "col:governance-demo/governance_demo/sales/orders/id",
+                        "name": "id",
+                        "nullable": false,
+                        "ordinal_position": 1,
+                        "technical_attributes": {}
+                      }
+                    ],
+                    "description": null,
+                    "foreign_keys": [
+                      {
+                        "column_ids": [
+                          "col:governance-demo/governance_demo/sales/orders/id"
+                        ],
+                        "id": "fk:tbl:governance-demo/governance_demo/sales/orders/orders_id_fkey",
+                        "name": "orders_id_fkey",
+                        "referenced_column_ids": [
+                          "col:governance-demo/governance_demo/sales/customers/id"
+                        ],
+                        "referenced_table_id": "tbl:governance-demo/governance_demo/sales/customers",
+                        "table_id": "tbl:governance-demo/governance_demo/sales/orders"
+                      }
+                    ],
+                    "id": "tbl:governance-demo/governance_demo/sales/orders",
+                    "name": "orders",
+                    "ownership": null,
+                    "primary_key": {
+                      "column_ids": [
+                        "col:governance-demo/governance_demo/sales/orders/id"
+                      ],
+                      "id": "pk:tbl:governance-demo/governance_demo/sales/orders/orders_pkey",
+                      "name": "orders_pkey",
+                      "table_id": "tbl:governance-demo/governance_demo/sales/orders"
+                    },
+                    "schema_id": "sch:governance-demo/governance_demo/sales",
+                    "technical_attributes": {}
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "description": null,
+        "id": "ds:governance-demo",
+        "name": "governance-demo",
+        "ownership": null,
+        "system_type": "postgresql",
+        "technical_attributes": {}
+      }
+    ],
+    "relationships": [
+      {
+        "description": null,
+        "foreign_key_id": "fk:tbl:governance-demo/governance_demo/sales/orders/orders_id_fkey",
+        "from_table_id": "tbl:governance-demo/governance_demo/sales/orders",
+        "id": "rel:fk:tbl:governance-demo/governance_demo/sales/orders/orders_id_fkey",
+        "name": "orders_id_fkey",
+        "to_table_id": "tbl:governance-demo/governance_demo/sales/customers"
+      }
+    ]
+  },
+  "scan": {
+    "scanner": "postgresql",
+    "scanner_contract_version": "1"
+  },
+  "snapshot_schema": "governance-snapshot",
+  "snapshot_version": "1",
+  "source": {
+    "database": "governance_demo",
+    "name": "governance-demo",
+    "system_type": "postgresql"
+  }
+}

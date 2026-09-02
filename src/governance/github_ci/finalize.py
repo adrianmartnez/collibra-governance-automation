@@ -44,6 +44,20 @@ _GOVERNANCE_OUTPUT_KEYS = (
     "impact-status",
     "impact-result-path",
     "impact-result-version",
+    "review-status",
+    "review-result-path",
+    "review-result-version",
+    "conflict-status",
+    "conflict-property-count",
+    "unresolved-conflict-count",
+    "resolved-authority-count",
+    "reconciliation-blocked-count",
+    "drift-status",
+    "expected-difference-count",
+    "unexpected-drift-count",
+    "drift-affected-object-count",
+    "comparison-result-path",
+    "drift-result-path",
 )
 
 
@@ -229,9 +243,26 @@ def finalize_outputs() -> int:
         outputs["impact-status"] = outputs.get("impact-status") or "not_run"
         outputs["impact-result-path"] = ""
         outputs["impact-result-version"] = ""
+        outputs["review-status"] = outputs.get("review-status") or "not_run"
+        outputs["review-result-path"] = ""
+        outputs["review-result-version"] = ""
+        outputs["conflict-status"] = outputs.get("conflict-status") or "not_run"
+        for review_count_key in (
+            "conflict-property-count",
+            "unresolved-conflict-count",
+            "resolved-authority-count",
+            "reconciliation-blocked-count",
+            "expected-difference-count",
+            "unexpected-drift-count",
+            "drift-affected-object-count",
+        ):
+            outputs[review_count_key] = outputs.get(review_count_key) or "0"
+        outputs["drift-status"] = outputs.get("drift-status") or "not_run"
+        outputs["comparison-result-path"] = ""
+        outputs["drift-result-path"] = ""
         desired = "1"
     else:
-        # Impact runs intentionally leave result-path empty while status is set.
+        # Impact/review runs intentionally leave result-path empty while status is set.
         if not outputs.get("status"):
             outputs.update(
                 {
@@ -255,11 +286,27 @@ def finalize_outputs() -> int:
                     "impact-status": "not_run",
                     "impact-result-path": "",
                     "impact-result-version": "",
+                    "review-status": "not_run",
+                    "review-result-path": "",
+                    "review-result-version": "",
+                    "conflict-status": "not_run",
+                    "conflict-property-count": "0",
+                    "unresolved-conflict-count": "0",
+                    "resolved-authority-count": "0",
+                    "reconciliation-blocked-count": "0",
+                    "drift-status": "not_run",
+                    "expected-difference-count": "0",
+                    "unexpected-drift-count": "0",
+                    "drift-affected-object-count": "0",
+                    "comparison-result-path": "",
+                    "drift-result-path": "",
                 }
             )
             desired = "1"
-        # Do not force contract-version=1 over intentional empty impact value.
-        if outputs.get("impact-status") in {"clear", "impacted", "failed"}:
+        # Do not force contract-version=1 over intentional empty impact/review value.
+        if outputs.get("impact-status") in {"clear", "impacted", "failed"} or outputs.get(
+            "review-status"
+        ) in {"passed", "blocked", "failed"}:
             if "contract-version" not in outputs:
                 outputs["contract-version"] = ""
         else:
@@ -268,6 +315,20 @@ def finalize_outputs() -> int:
         outputs.setdefault("impact-status", "not_run")
         outputs.setdefault("impact-result-path", "")
         outputs.setdefault("impact-result-version", "")
+        outputs.setdefault("review-status", "not_run")
+        outputs.setdefault("review-result-path", "")
+        outputs.setdefault("review-result-version", "")
+        outputs.setdefault("conflict-status", "not_run")
+        outputs.setdefault("conflict-property-count", "0")
+        outputs.setdefault("unresolved-conflict-count", "0")
+        outputs.setdefault("resolved-authority-count", "0")
+        outputs.setdefault("reconciliation-blocked-count", "0")
+        outputs.setdefault("drift-status", "not_run")
+        outputs.setdefault("expected-difference-count", "0")
+        outputs.setdefault("unexpected-drift-count", "0")
+        outputs.setdefault("drift-affected-object-count", "0")
+        outputs.setdefault("comparison-result-path", "")
+        outputs.setdefault("drift-result-path", "")
 
     final_exit = desired
     if comment_status == "failed":

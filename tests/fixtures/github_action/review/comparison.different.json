@@ -1,0 +1,99 @@
+{
+  "baseline": {
+    "content_identity": {
+      "algorithm": "sha256",
+      "digest": "42b75b85914ee6dc1cc08a147cc4ed5e550eff0d63b0e8392aaca1764127325a",
+      "hashing_contract_version": "1"
+    },
+    "database_name": "governance_demo",
+    "scanner": "postgresql",
+    "scanner_contract_version": "1",
+    "source_name": "governance-demo",
+    "system_type": "postgresql"
+  },
+  "candidate": {
+    "content_identity": {
+      "algorithm": "sha256",
+      "digest": "676c12c6b618a2f4f854c7dcfa0e0d125754e42fc97a380631cec82a438a97b0",
+      "hashing_contract_version": "1"
+    },
+    "database_name": "governance_demo",
+    "scanner": "postgresql",
+    "scanner_contract_version": "1",
+    "source_name": "governance-demo",
+    "system_type": "postgresql"
+  },
+  "comparison_schema": "governance-snapshot-comparison",
+  "comparison_version": "1",
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "5354ecbfda782327a428f6433caa545b6fbd85043431487a2824acf38cfc8699",
+    "hashing_contract_version": "1"
+  },
+  "direction": "baseline_to_candidate",
+  "object_changes": [
+    {
+      "change": "changed",
+      "object_identity": {
+        "kind": "data_source",
+        "path": []
+      },
+      "parent_identity": null,
+      "property_changes": [
+        {
+          "baseline": {
+            "has_value": true,
+            "value": null
+          },
+          "candidate": {
+            "has_value": true,
+            "value": "updated"
+          },
+          "property": "/description"
+        }
+      ]
+    },
+    {
+      "change": "changed",
+      "object_identity": {
+        "kind": "table",
+        "path": [
+          "sales",
+          "orders"
+        ]
+      },
+      "parent_identity": {
+        "kind": "schema",
+        "path": [
+          "sales"
+        ]
+      },
+      "property_changes": [
+        {
+          "baseline": {
+            "has_value": true,
+            "value": null
+          },
+          "candidate": {
+            "has_value": true,
+            "value": "updated"
+          },
+          "property": "/description"
+        }
+      ]
+    }
+  ],
+  "root_alignment": {
+    "database": null,
+    "source": null
+  },
+  "status": "different",
+  "summary": {
+    "added": 0,
+    "changed": 2,
+    "property_changes": 2,
+    "removed": 0,
+    "unchanged": 9
+  },
+  "writes_performed": 0
+}

@@ -16,10 +16,13 @@ from governance.github_ci.paths import PathValidationError, WorkspacePaths
 from governance.github_ci.report import (
     build_annotations,
     build_impact_annotations,
+    build_review_annotations,
     render_human_summary,
     render_impact_human_summary,
     render_impact_report,
     render_report,
+    render_review_human_summary,
+    render_review_report,
     write_annotations_file,
     write_report_file,
 )
@@ -83,8 +86,79 @@ class ImpactRunState:
     diagnostic_errors: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class ReviewRunState:
+    """Private in-memory orchestration state for operation=review (not a public contract)."""
+
+    status: str
+    review_status: str
+    conflict_status: str
+    drift_status: str
+    failure_code: str | None
+    review_result_path: str
+    review_result_version: str
+    comparison_result_path: str
+    drift_result_path: str
+    conflict_property_count: str
+    unresolved_conflict_count: str
+    resolved_authority_count: str
+    reconciliation_blocked_count: str
+    expected_difference_count: str
+    unexpected_drift_count: str
+    drift_affected_object_count: str
+    desired_exit_code: int
+    review_result: dict[str, Any] | None = None
+    drift_result: dict[str, Any] | None = None
+
+
 class ActionInputContractError(ValueError):
     """Invalid Action input contract (Phase A)."""
+
+
+def _review_output_defaults(*, operation: str = "") -> dict[str, str]:
+    return {
+        "review-status": "failed" if operation == "review" else "not_run",
+        "review-result-path": "",
+        "review-result-version": "",
+        "conflict-status": "not_run",
+        "conflict-property-count": "0",
+        "unresolved-conflict-count": "0",
+        "resolved-authority-count": "0",
+        "reconciliation-blocked-count": "0",
+        "drift-status": "not_run",
+        "expected-difference-count": "0",
+        "unexpected-drift-count": "0",
+        "drift-affected-object-count": "0",
+        "comparison-result-path": "",
+        "drift-result-path": "",
+    }
+
+
+def _failed_review_state(failure_code: str) -> ReviewRunState:
+    return ReviewRunState(
+        status="failed",
+        review_status="failed",
+        conflict_status="not_run",
+        drift_status="not_run",
+        failure_code=failure_code,
+        review_result_path="",
+        review_result_version="",
+        comparison_result_path="",
+        drift_result_path="",
+        conflict_property_count="0",
+        unresolved_conflict_count="0",
+        resolved_authority_count="0",
+        reconciliation_blocked_count="0",
+        expected_difference_count="0",
+        unexpected_drift_count="0",
+        drift_affected_object_count="0",
+        desired_exit_code=1,
+    )
+
+
+def _reject_path_controls(raw: str, *, field: str) -> None:
+    if "\x00" in raw or "\r" in raw or "\n" in raw:
+        raise ActionInputContractError(f"{field} must not contain NUL, CR, or LF characters")
 
 
 def parse_source_path_array(raw: str, *, field: str) -> list[str]:
@@ -185,8 +259,8 @@ def desired_exit_code(*, status: str, fail_on_policy_error: bool) -> int:
 
 
 def _phase_a_outputs(*, operation: str = "") -> dict[str, str]:
-    contract_version = "" if operation == "impact" else RESULT_VERSION
-    return {
+    contract_version = "" if operation in {"impact", "review"} else RESULT_VERSION
+    outputs = {
         "contract-version": contract_version,
         "status": "failed",
         "validation-status": "not_run",
@@ -211,6 +285,8 @@ def _phase_a_outputs(*, operation: str = "") -> dict[str, str]:
         "phase-a-failed": "true",
         "annotations-path": "",
     }
+    outputs.update(_review_output_defaults(operation=operation))
+    return outputs
 
 
 def _append_profile(argv: list[str], profile: str) -> None:
@@ -335,6 +411,7 @@ def _materialize_impact_phase_b(
         "phase-a-failed": "false",
         "annotations-path": annotations_rel,
     }
+    outputs.update(_review_output_defaults(operation="impact"))
     write_github_output(outputs)
 
     if output_format == "json":
@@ -578,6 +655,340 @@ def _run_impact_operation(
     )
 
 
+def _materialize_review_phase_b(
+    *,
+    output_rel: str,
+    output_abs: Path,
+    state: ReviewRunState,
+    output_format: str,
+    stdout: TextIO,
+) -> int:
+    from governance.github_ci.review import build_review_console_json
+
+    output_abs.mkdir(parents=True, exist_ok=True)
+    report_text = render_review_report(
+        review_status=state.review_status,
+        review_result=state.review_result,
+        drift_result=state.drift_result,
+        failure_code=state.failure_code,
+        review_result_path=state.review_result_path or None,
+        comparison_result_path=state.comparison_result_path or None,
+        drift_result_path=state.drift_result_path or None,
+        conflict_status=state.conflict_status,
+        drift_status=state.drift_status,
+        artifacts_relative=output_rel,
+    )
+    write_report_file(output_abs, report_text)
+    annotations = build_review_annotations(
+        review_status=state.review_status,
+        review_result=state.review_result,
+        drift_result=state.drift_result,
+        failure_code=state.failure_code,
+    )
+    write_annotations_file(output_abs, annotations)
+    _write_step_summary(report_text, os.environ)
+
+    report_rel = f"{output_rel}/report.md"
+    annotations_rel = f"{output_rel}/annotations.txt"
+    outputs = {
+        "contract-version": "",
+        "status": state.status,
+        "validation-status": "not_run",
+        "policy-status": "not_run",
+        "policy-violation-count": "0",
+        "policy-error-count": "0",
+        "policy-warning-count": "0",
+        "plan-status": "not_run",
+        "create-count": "0",
+        "update-count": "0",
+        "unchanged-count": "0",
+        "remote-only-count": "0",
+        "writes-performed": "0",
+        "plan-path": "",
+        "result-path": "",
+        "report-path": report_rel,
+        "artifacts-path": output_rel,
+        "impact-status": "not_run",
+        "impact-result-path": "",
+        "impact-result-version": "",
+        "review-status": state.review_status,
+        "review-result-path": state.review_result_path,
+        "review-result-version": state.review_result_version,
+        "conflict-status": state.conflict_status,
+        "conflict-property-count": state.conflict_property_count,
+        "unresolved-conflict-count": state.unresolved_conflict_count,
+        "resolved-authority-count": state.resolved_authority_count,
+        "reconciliation-blocked-count": state.reconciliation_blocked_count,
+        "drift-status": state.drift_status,
+        "expected-difference-count": state.expected_difference_count,
+        "unexpected-drift-count": state.unexpected_drift_count,
+        "drift-affected-object-count": state.drift_affected_object_count,
+        "comparison-result-path": state.comparison_result_path,
+        "drift-result-path": state.drift_result_path,
+        "desired-exit-code": str(state.desired_exit_code),
+        "phase-a-failed": "false",
+        "annotations-path": annotations_rel,
+    }
+    write_github_output(outputs)
+
+    if output_format == "json":
+        stdout.write(
+            build_review_console_json(
+                status=state.status,
+                review_status=state.review_status,
+                conflict_status=state.conflict_status,
+                drift_status=state.drift_status,
+                conflict_property_count=state.conflict_property_count,
+                unresolved_conflict_count=state.unresolved_conflict_count,
+                resolved_authority_count=state.resolved_authority_count,
+                reconciliation_blocked_count=state.reconciliation_blocked_count,
+                expected_difference_count=state.expected_difference_count,
+                unexpected_drift_count=state.unexpected_drift_count,
+                drift_affected_object_count=state.drift_affected_object_count,
+                review_result_path=state.review_result_path,
+                review_result_version=state.review_result_version,
+                comparison_result_path=state.comparison_result_path,
+                drift_result_path=state.drift_result_path,
+                failure_code=state.failure_code,
+            )
+        )
+    else:
+        stdout.write(
+            render_review_human_summary(
+                review_status=state.review_status,
+                review_result=state.review_result,
+                failure_code=state.failure_code,
+                review_result_path=state.review_result_path or None,
+            )
+        )
+    return 0
+
+
+def _validate_review_input_path(
+    paths: WorkspacePaths,
+    raw: str,
+    *,
+    field: str,
+) -> tuple[str, Path]:
+    _reject_path_controls(raw, field=field)
+    relative = paths.normalize_relative(raw, field=field)
+    absolute = paths.resolve_under_workspace(relative, field=field)
+    return relative, absolute
+
+
+def _run_review_operation(
+    *,
+    paths: WorkspacePaths,
+    args: argparse.Namespace,
+    output_rel: str,
+    output_abs: Path,
+    conflict_lane: bool,
+    drift_lane: bool,
+    observations_rel: str,
+    comparison_rel: str,
+    baseline_rel: str,
+    candidate_rel: str,
+    drift_policy_rel: str,
+    config_rel: str | None,
+    align_source_roots: bool,
+    align_database_roots: bool,
+    fail_on_review_blocked: bool,
+    output_format: str,
+    stdout: TextIO,
+) -> int:
+    from governance.authority.errors import AuthorityError
+    from governance.authority.load import load_normalized_authority
+    from governance.comparison import (
+        ComparisonArtifactError,
+        ComparisonError,
+        RootAlignmentAck,
+        build_comparison_result,
+        load_comparison_artifact,
+        write_comparison_artifact,
+    )
+    from governance.config_contract import ConfigContractError, load_canonical_config
+    from governance.config_contract.resolve import ConfigResolutionError
+    from governance.domain.authority import NormalizedAuthorityPolicySet
+    from governance.domain.conflicts import analyze_property_conflicts
+    from governance.drift import (
+        DriftError,
+        build_drift_result,
+        load_drift_policy,
+        write_drift_artifact,
+    )
+    from governance.github_ci.review import (
+        COMPARISON_RESULT_NAME,
+        DRIFT_RESULT_NAME,
+        REVIEW_RESULT_NAME,
+        REVIEW_VERSION,
+        ReviewResultError,
+        build_conflicts_block,
+        build_drift_block,
+        build_review_result,
+        desired_review_exit_code,
+        validate_review_result,
+        write_review_result,
+    )
+    from governance.observations import (
+        ObservationsArtifactError,
+        load_property_observation_set_artifact,
+    )
+    from governance.reconciliation.safety import assess_reconciliation
+    from governance.snapshots import SnapshotError, load_snapshot
+
+    def _materialize_failure(failure_code: str) -> int:
+        return _materialize_review_phase_b(
+            output_rel=output_rel,
+            output_abs=output_abs,
+            state=_failed_review_state(failure_code),
+            output_format=output_format,
+            stdout=stdout,
+        )
+
+    conflicts_block: dict[str, Any] | None = None
+    drift_block: dict[str, Any] | None = None
+    drift_result_payload: dict[str, Any] | None = None
+    comparison_out_rel = ""
+    drift_out_rel = ""
+
+    try:
+        if conflict_lane:
+            observations = load_property_observation_set_artifact(
+                paths.resolve_under_workspace(observations_rel, field="review-observations")
+            )
+            if config_rel is not None:
+                canonical = load_canonical_config(
+                    paths.resolve_under_workspace(config_rel, field="config"),
+                    profile=(args.profile or "").strip() or None,
+                )
+                authority = load_normalized_authority(canonical)
+            else:
+                authority = NormalizedAuthorityPolicySet()
+            authority_content_identity = authority.content_identity().to_dict()
+            report = analyze_property_conflicts(observations, authority)
+            assessments = [assess_reconciliation(result) for result in report.results]
+            conflicts_block = build_conflicts_block(
+                report=report,
+                assessments=assessments,
+                observations_content_identity=observations.content_identity().to_dict(),
+                authority_content_identity=authority_content_identity,
+            )
+
+        if drift_lane:
+            comparison_abs = output_abs / COMPARISON_RESULT_NAME
+            comparison_out_rel = f"{output_rel}/{COMPARISON_RESULT_NAME}"
+            if comparison_rel:
+                comparison = load_comparison_artifact(
+                    paths.resolve_under_workspace(comparison_rel, field="review-comparison")
+                )
+                write_comparison_artifact(comparison, comparison_abs)
+            else:
+                baseline = load_snapshot(
+                    paths.resolve_under_workspace(baseline_rel, field="review-baseline-snapshot")
+                )
+                candidate = load_snapshot(
+                    paths.resolve_under_workspace(candidate_rel, field="review-candidate-snapshot")
+                )
+                comparison = build_comparison_result(
+                    baseline,
+                    candidate,
+                    ack=RootAlignmentAck(
+                        align_source_roots=align_source_roots,
+                        align_database_roots=align_database_roots,
+                    ),
+                )
+                write_comparison_artifact(comparison, comparison_abs)
+
+            policy = None
+            if drift_policy_rel:
+                policy = load_drift_policy(
+                    paths.resolve_under_workspace(drift_policy_rel, field="review-drift-policy")
+                )
+            drift_result_payload = build_drift_result(comparison, policy)
+            drift_abs = output_abs / DRIFT_RESULT_NAME
+            write_drift_artifact(drift_result_payload, drift_abs)
+            drift_out_rel = f"{output_rel}/{DRIFT_RESULT_NAME}"
+            drift_block = build_drift_block(
+                comparison=comparison,
+                drift_result=drift_result_payload,
+            )
+
+        review_result = build_review_result(conflicts=conflicts_block, drift=drift_block)
+        try:
+            validate_review_result(review_result)
+        except ReviewResultError:
+            return _materialize_failure("action_contract_invalid")
+
+        review_abs = output_abs / REVIEW_RESULT_NAME
+        write_review_result(review_result, review_abs)
+        review_out_rel = f"{output_rel}/{REVIEW_RESULT_NAME}"
+
+        conflicts = review_result["conflicts"]
+        drift = review_result["drift"]
+        conflict_summary = conflicts["summary"]
+        drift_summary = drift.get("summary") if isinstance(drift.get("summary"), dict) else {}
+        semantic_status = str(review_result["status"])
+        state = ReviewRunState(
+            status=semantic_status,
+            review_status=semantic_status,
+            conflict_status=str(conflicts["status"]),
+            drift_status=str(drift["status"]),
+            failure_code=None,
+            review_result_path=review_out_rel,
+            review_result_version=REVIEW_VERSION,
+            comparison_result_path=comparison_out_rel,
+            drift_result_path=drift_out_rel,
+            conflict_property_count=str(int(conflict_summary.get("properties_analyzed", 0))),
+            unresolved_conflict_count=str(int(conflict_summary.get("unresolved_conflict", 0))),
+            resolved_authority_count=str(int(conflict_summary.get("resolved_by_authority", 0))),
+            reconciliation_blocked_count=str(
+                int(conflict_summary.get("reconciliation_blocked", 0))
+            ),
+            expected_difference_count=str(int(drift_summary.get("expected_differences", 0))),
+            unexpected_drift_count=str(int(drift_summary.get("unexpected_drift", 0))),
+            drift_affected_object_count=str(int(drift_summary.get("affected_objects", 0))),
+            desired_exit_code=desired_review_exit_code(
+                status=semantic_status,
+                fail_on_review_blocked=fail_on_review_blocked,
+            ),
+            review_result=review_result,
+            drift_result=drift_result_payload,
+        )
+        return _materialize_review_phase_b(
+            output_rel=output_rel,
+            output_abs=output_abs,
+            state=state,
+            output_format=output_format,
+            stdout=stdout,
+        )
+    except ReviewResultError as exc:
+        codes = {item.code for item in exc.errors}
+        if "write_error" in codes:
+            return _materialize_failure("operational_failure")
+        return _materialize_failure("action_contract_invalid")
+    except ComparisonError as exc:
+        if any(getattr(item, "code", "") == "write_error" for item in exc.errors):
+            return _materialize_failure("operational_failure")
+        return _materialize_failure("configuration_failed")
+    except DriftError as exc:
+        if any(getattr(item, "code", "") == "write_error" for item in exc.errors):
+            return _materialize_failure("operational_failure")
+        return _materialize_failure("configuration_failed")
+    except (
+        ObservationsArtifactError,
+        ConfigContractError,
+        ConfigResolutionError,
+        AuthorityError,
+        ComparisonArtifactError,
+        SnapshotError,
+    ):
+        return _materialize_failure("configuration_failed")
+    except OSError:
+        return _materialize_failure("operational_failure")
+    except ValueError:
+        return _materialize_failure("action_contract_invalid")
+
+
 def _config_result_path(output_rel: str) -> str:
     return f"{output_rel}/{CONFIG_RESULT_NAME}"
 
@@ -774,10 +1185,21 @@ def run_orchestration(args: argparse.Namespace, *, stdout: TextIO | None = None)
     impact_sources: list[tuple[str, str]] = []
     impact_changes_rel = ""
     impact_config_rel: str | None = None
+    review_conflict_lane = False
+    review_drift_lane = False
+    review_observations_rel = ""
+    review_comparison_rel = ""
+    review_baseline_rel = ""
+    review_candidate_rel = ""
+    review_drift_policy_rel = ""
+    review_config_rel: str | None = None
+    review_align_source_roots = False
+    review_align_database_roots = False
+    fail_on_review_blocked = True
     try:
         operation = args.operation.strip()
-        if operation not in {"validate", "check", "plan", "impact"}:
-            raise ValueError("operation must be validate, check, plan, or impact")
+        if operation not in {"validate", "check", "plan", "impact", "review"}:
+            raise ValueError("operation must be validate, check, plan, impact, or review")
         output_format = args.output_format.strip()
         if output_format not in {"human", "json"}:
             raise ValueError("output-format must be human or json")
@@ -812,6 +1234,117 @@ def run_orchestration(args: argparse.Namespace, *, stdout: TextIO | None = None)
                 raise ActionInputContractError("profile requires config for impact")
             if config.strip():
                 impact_config_rel = _validate_contained_path(paths, config, field="config")
+
+        if operation == "review":
+            fail_on_review_blocked = _parse_bool(
+                getattr(args, "fail_on_review_blocked", "true"),
+                field="fail-on-review-blocked",
+            )
+            review_align_source_roots = _parse_bool(
+                getattr(args, "review_align_source_roots", "false"),
+                field="review-align-source-roots",
+            )
+            review_align_database_roots = _parse_bool(
+                getattr(args, "review_align_database_roots", "false"),
+                field="review-align-database-roots",
+            )
+
+            observations_raw = (getattr(args, "review_observations", None) or "").strip()
+            comparison_raw = (getattr(args, "review_comparison", None) or "").strip()
+            baseline_raw = (getattr(args, "review_baseline_snapshot", None) or "").strip()
+            candidate_raw = (getattr(args, "review_candidate_snapshot", None) or "").strip()
+            drift_policy_raw = (getattr(args, "review_drift_policy", None) or "").strip()
+
+            review_conflict_lane = bool(observations_raw)
+            has_comparison = bool(comparison_raw)
+            has_baseline = bool(baseline_raw)
+            has_candidate = bool(candidate_raw)
+
+            if has_baseline ^ has_candidate:
+                raise ActionInputContractError(
+                    "review-baseline-snapshot and review-candidate-snapshot "
+                    "must be supplied together"
+                )
+            if has_comparison and (has_baseline or has_candidate):
+                raise ActionInputContractError(
+                    "review-comparison is mutually exclusive with baseline/candidate snapshots"
+                )
+            if (review_align_source_roots or review_align_database_roots) and has_comparison:
+                raise ActionInputContractError(
+                    "review align flags require baseline/candidate snapshots, not review-comparison"
+                )
+
+            review_drift_lane = has_comparison ^ (has_baseline and has_candidate)
+            if not review_conflict_lane and not review_drift_lane:
+                raise ActionInputContractError(
+                    "review requires review-observations and/or a drift lane "
+                    "(review-comparison XOR review-baseline-snapshot+review-candidate-snapshot)"
+                )
+            if drift_policy_raw and not review_drift_lane:
+                raise ActionInputContractError("review-drift-policy requires an enabled drift lane")
+            if config.strip() and not review_conflict_lane:
+                raise ActionInputContractError(
+                    "config requires review-observations for operation=review"
+                )
+            if profile.strip() and not config.strip():
+                raise ActionInputContractError("profile requires config for review")
+
+            from governance.github_ci.review import (
+                COMPARISON_RESULT_NAME,
+                DRIFT_RESULT_NAME,
+                REVIEW_RESULT_NAME,
+            )
+
+            forbidden_outputs = {
+                (output_abs / name).resolve()
+                for name in (
+                    REVIEW_RESULT_NAME,
+                    COMPARISON_RESULT_NAME,
+                    DRIFT_RESULT_NAME,
+                    "report.md",
+                    "annotations.txt",
+                )
+            }
+            input_abs_paths: list[Path] = []
+
+            if review_conflict_lane:
+                review_observations_rel, obs_abs = _validate_review_input_path(
+                    paths, observations_raw, field="review-observations"
+                )
+                input_abs_paths.append(obs_abs)
+
+            if has_comparison:
+                review_comparison_rel, cmp_abs = _validate_review_input_path(
+                    paths, comparison_raw, field="review-comparison"
+                )
+                input_abs_paths.append(cmp_abs)
+            if has_baseline:
+                review_baseline_rel, base_abs = _validate_review_input_path(
+                    paths, baseline_raw, field="review-baseline-snapshot"
+                )
+                input_abs_paths.append(base_abs)
+            if has_candidate:
+                review_candidate_rel, cand_abs = _validate_review_input_path(
+                    paths, candidate_raw, field="review-candidate-snapshot"
+                )
+                input_abs_paths.append(cand_abs)
+            if drift_policy_raw:
+                review_drift_policy_rel, pol_abs = _validate_review_input_path(
+                    paths, drift_policy_raw, field="review-drift-policy"
+                )
+                input_abs_paths.append(pol_abs)
+            if config.strip():
+                _reject_path_controls(config, field="config")
+                review_config_rel, cfg_abs = _validate_review_input_path(
+                    paths, config, field="config"
+                )
+                input_abs_paths.append(cfg_abs)
+
+            for input_abs in input_abs_paths:
+                if input_abs.resolve() in forbidden_outputs:
+                    raise ActionInputContractError(
+                        "review input path collides with a fixed Action output artifact path"
+                    )
     except (ValueError, PathValidationError, ActionInputContractError) as exc:
         message = _PHASE_A_STDERR
         if isinstance(exc, PathValidationError) and exc.code == "missing_workspace":
@@ -834,6 +1367,27 @@ def run_orchestration(args: argparse.Namespace, *, stdout: TextIO | None = None)
             sources=impact_sources,
             changes_rel=impact_changes_rel,
             config_rel=impact_config_rel,
+            output_format=output_format,
+            stdout=out,
+        )
+
+    if operation == "review":
+        return _run_review_operation(
+            paths=paths,
+            args=args,
+            output_rel=output_rel,
+            output_abs=output_abs,
+            conflict_lane=review_conflict_lane,
+            drift_lane=review_drift_lane,
+            observations_rel=review_observations_rel,
+            comparison_rel=review_comparison_rel,
+            baseline_rel=review_baseline_rel,
+            candidate_rel=review_candidate_rel,
+            drift_policy_rel=review_drift_policy_rel,
+            config_rel=review_config_rel,
+            align_source_roots=review_align_source_roots,
+            align_database_roots=review_align_database_roots,
+            fail_on_review_blocked=fail_on_review_blocked,
             output_format=output_format,
             stdout=out,
         )
@@ -1225,6 +1779,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--operation", required=True)
     run.add_argument("--output-format", required=True)
     run.add_argument("--fail-on-policy-error", required=True)
+    run.add_argument("--fail-on-review-blocked", default="true")
     run.add_argument("--output-directory", required=True)
     run.add_argument("--plan-path", required=True)
     run.add_argument("--pr-comment", required=True)
@@ -1234,6 +1789,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--impact-dbt-manifest", default="")
     run.add_argument("--impact-openlineage", default="")
     run.add_argument("--dbt-default-database", default="")
+    run.add_argument("--review-observations", default="")
+    run.add_argument("--review-comparison", default="")
+    run.add_argument("--review-baseline-snapshot", default="")
+    run.add_argument("--review-candidate-snapshot", default="")
+    run.add_argument("--review-drift-policy", default="")
+    run.add_argument("--review-align-source-roots", default="false")
+    run.add_argument("--review-align-database-roots", default="false")
 
     sub.add_parser(
         "emit-annotations-and-comment-state",

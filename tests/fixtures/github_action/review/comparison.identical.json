@@ -1,0 +1,48 @@
+{
+  "baseline": {
+    "content_identity": {
+      "algorithm": "sha256",
+      "digest": "42b75b85914ee6dc1cc08a147cc4ed5e550eff0d63b0e8392aaca1764127325a",
+      "hashing_contract_version": "1"
+    },
+    "database_name": "governance_demo",
+    "scanner": "postgresql",
+    "scanner_contract_version": "1",
+    "source_name": "governance-demo",
+    "system_type": "postgresql"
+  },
+  "candidate": {
+    "content_identity": {
+      "algorithm": "sha256",
+      "digest": "42b75b85914ee6dc1cc08a147cc4ed5e550eff0d63b0e8392aaca1764127325a",
+      "hashing_contract_version": "1"
+    },
+    "database_name": "governance_demo",
+    "scanner": "postgresql",
+    "scanner_contract_version": "1",
+    "source_name": "governance-demo",
+    "system_type": "postgresql"
+  },
+  "comparison_schema": "governance-snapshot-comparison",
+  "comparison_version": "1",
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "fea46729070bc68d0cc2b5ab663e14c4a6b0ae40a4ad67abe282efc66814bf57",
+    "hashing_contract_version": "1"
+  },
+  "direction": "baseline_to_candidate",
+  "object_changes": [],
+  "root_alignment": {
+    "database": null,
+    "source": null
+  },
+  "status": "identical",
+  "summary": {
+    "added": 0,
+    "changed": 0,
+    "property_changes": 0,
+    "removed": 0,
+    "unchanged": 11
+  },
+  "writes_performed": 0
+}
