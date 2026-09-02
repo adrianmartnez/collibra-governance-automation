@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-property-observations:1",
+  "title": "Governance property observations artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "observation_schema",
+    "observation_version",
+    "observations",
+    "content_identity"
+  ],
+  "properties": {
+    "observation_schema": {
+      "type": "string",
+      "const": "governance-property-observations"
+    },
+    "observation_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "observations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/propertyObservation" }
+    },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "graphNodeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace", "kind", "logical_id", "parent"],
+      "properties": {
+        "namespace": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "data_source",
+            "dataset",
+            "table",
+            "column",
+            "contract",
+            "transformation"
+          ]
+        },
+        "logical_id": { "type": "string", "minLength": 1 },
+        "parent": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/graphNodeIdentity" }
+          ]
+        }
+      }
+    },
+    "provenanceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_type",
+        "source_ref",
+        "source_version",
+        "observation_mode"
+      ],
+      "properties": {
+        "provider_type": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_version": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "observation_mode": {
+          "type": "string",
+          "enum": ["declared", "observed", "derived"]
+        }
+      }
+    },
+    "propertyObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object", "property", "provenance", "value"],
+      "properties": {
+        "object": { "$ref": "#/$defs/graphNodeIdentity" },
+        "property": { "type": "string", "minLength": 1 },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/provenanceRecord" }
+        },
+        "value": true
+      }
+    }
+  }
+}

@@ -1,0 +1,317 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-snapshot:1",
+  "title": "Governance snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "snapshot_schema",
+    "snapshot_version",
+    "source",
+    "scan",
+    "governance",
+    "content_identity"
+  ],
+  "properties": {
+    "snapshot_schema": {
+      "type": "string",
+      "const": "governance-snapshot"
+    },
+    "snapshot_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "source": { "$ref": "#/$defs/sourceEnvelope" },
+    "scan": { "$ref": "#/$defs/scanEnvelope" },
+    "governance": { "$ref": "#/$defs/governanceModel" },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "hashing_contract_version": { "type": "string", "const": "1" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "sourceEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "database", "system_type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "database": { "type": "string", "minLength": 1 },
+        "system_type": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scanEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scanner", "scanner_contract_version"],
+      "properties": {
+        "scanner": { "type": "string", "minLength": 1 },
+        "scanner_contract_version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "governanceModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data_sources", "relationships"],
+      "properties": {
+        "data_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/dataSource" }
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relationship" }
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner_name", "owner_type"],
+      "properties": {
+        "owner_name": { "type": "string", "minLength": 1 },
+        "owner_type": { "type": "string", "minLength": 1 }
+      }
+    },
+    "nullableOwnership": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/ownership" }
+      ]
+    },
+    "technicalAttributes": {
+      "type": "object",
+      "propertyNames": { "type": "string" },
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "string" },
+        { "type": "number" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonValue" }
+        },
+        {
+          "type": "object",
+          "propertyNames": { "type": "string" },
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "dataSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "system_type",
+        "databases",
+        "description",
+        "ownership",
+        "technical_attributes"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "system_type": { "type": "string", "minLength": 1 },
+        "databases": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/database" }
+        },
+        "description": { "$ref": "#/$defs/jsonValue" },
+        "ownership": { "$ref": "#/$defs/nullableOwnership" },
+        "technical_attributes": { "$ref": "#/$defs/technicalAttributes" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "datasource_id",
+        "schemas",
+        "description",
+        "ownership"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "datasource_id": { "type": "string", "minLength": 1 },
+        "schemas": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/schema" }
+        },
+        "description": { "$ref": "#/$defs/jsonValue" },
+        "ownership": { "$ref": "#/$defs/nullableOwnership" }
+      }
+    },
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "database_id",
+        "tables",
+        "description",
+        "ownership"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "database_id": { "type": "string", "minLength": 1 },
+        "tables": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/table" }
+        },
+        "description": { "$ref": "#/$defs/jsonValue" },
+        "ownership": { "$ref": "#/$defs/nullableOwnership" }
+      }
+    },
+    "table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "schema_id",
+        "columns",
+        "primary_key",
+        "foreign_keys",
+        "description",
+        "ownership",
+        "technical_attributes"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "schema_id": { "type": "string", "minLength": 1 },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/column" }
+        },
+        "primary_key": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/primaryKey" }
+          ]
+        },
+        "foreign_keys": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/foreignKey" }
+        },
+        "description": { "$ref": "#/$defs/jsonValue" },
+        "ownership": { "$ref": "#/$defs/nullableOwnership" },
+        "technical_attributes": { "$ref": "#/$defs/technicalAttributes" }
+      }
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "data_type",
+        "ordinal_position",
+        "nullable",
+        "description",
+        "technical_attributes"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "data_type": { "type": "string", "minLength": 1 },
+        "ordinal_position": { "type": "integer", "minimum": 1 },
+        "nullable": { "type": "boolean" },
+        "description": { "$ref": "#/$defs/jsonValue" },
+        "technical_attributes": { "$ref": "#/$defs/technicalAttributes" }
+      }
+    },
+    "primaryKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "table_id", "column_ids"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "table_id": { "type": "string", "minLength": 1 },
+        "column_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "foreignKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "table_id",
+        "column_ids",
+        "referenced_table_id",
+        "referenced_column_ids"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "table_id": { "type": "string", "minLength": 1 },
+        "column_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "referenced_table_id": { "type": "string", "minLength": 1 },
+        "referenced_column_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "from_table_id",
+        "to_table_id",
+        "foreign_key_id",
+        "description"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "from_table_id": { "type": "string", "minLength": 1 },
+        "to_table_id": { "type": "string", "minLength": 1 },
+        "foreign_key_id": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "minLength": 1 }
+          ]
+        },
+        "description": { "$ref": "#/$defs/jsonValue" }
+      }
+    }
+  }
+}

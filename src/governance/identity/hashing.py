@@ -29,6 +29,9 @@ _PREFIX_EXPLAIN_RESULT = b"gov-explain-result-v1\n"
 _PREFIX_SNAPSHOT_COMPARISON = b"gov-snapshot-comparison-v1\n"
 _PREFIX_DRIFT_POLICY = b"gov-drift-policy-v1\n"
 _PREFIX_DRIFT_RESULT = b"gov-drift-result-v1\n"
+_PREFIX_HISTORY = b"gov-history-v1\n"
+_PREFIX_HISTORY_ENTRY_STATE = b"gov-history-entry-state-v1\n"
+_PREFIX_HISTORY_EVOLUTION = b"gov-history-evolution-v1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,4 +200,30 @@ def impact_result_identity(canonical_result_without_identity: dict[str, Any]) ->
     return _sha256_identity(
         _PREFIX_IMPACT_RESULT,
         canonical_json_bytes(canonical_result_without_identity),
+    )
+
+
+def history_identity(canonical_history_without_identity: dict[str, Any]) -> ContentIdentity:
+    """Identity for governance-history payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_HISTORY,
+        canonical_json_bytes(canonical_history_without_identity),
+    )
+
+
+def history_entry_state_identity(entry_state: dict[str, Any]) -> ContentIdentity:
+    """Identity for one historical entry state (snapshot + labels + context)."""
+    return _sha256_identity(
+        _PREFIX_HISTORY_ENTRY_STATE,
+        canonical_json_bytes(entry_state),
+    )
+
+
+def history_evolution_identity(
+    canonical_evolution_without_identity: dict[str, Any],
+) -> ContentIdentity:
+    """Identity for governance-history-evolution payload excluding content_identity."""
+    return _sha256_identity(
+        _PREFIX_HISTORY_EVOLUTION,
+        canonical_json_bytes(canonical_evolution_without_identity),
     )

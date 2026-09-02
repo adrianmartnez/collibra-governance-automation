@@ -37,6 +37,7 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 | `governance impact` CLI + impact changes/result v1 artifacts | Contract-tested |
 | `governance compare` CLI + snapshot-comparison v1 artifacts | Implemented (offline; difference ≠ drift) |
 | `governance drift` CLI + drift-result v1 artifacts | Implemented (offline; explicit policy required when different) |
+| `governance history` CLI + history/evolution v1 artifacts | Implemented (offline local index; optional observations/authority context) |
 | GitHub Action `operation: impact` + PR/step-summary reports | Implemented (read-only) |
 | Collibra mapping + mock adapter | Implemented (local/offline) |
 | Live Collibra Core REST API v2 adapter | Contract-tested (localhost HTTP server; no commercial tenant) |
@@ -160,6 +161,9 @@ governance apply FILE.gplan --config PATH [--profile NAME] [--format human|json]
 governance explain --config PATH --namespace NAME --object-identity PATH [--property POINTER] [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--profile NAME] [--format human|json] [--output PATH]
 governance compare --baseline PATH --candidate PATH [--align-source-roots] [--align-database-roots] [--format human|json] [--output PATH]
 governance drift --comparison PATH [--policy PATH] [--format human|json] [--output PATH]
+governance history add --history FILE --snapshot FILE [--label KEY=VALUE ...] [--observations FILE] [--authority FILE ...] [--captured-at RFC3339Z] [--align-source-roots] [--align-database-roots] [--format human|json]
+governance history show --history FILE [--object JSON] [--governance-object JSON] [--property POINTER] [--format human|json] [--output FILE]
+governance history inspect --history FILE [--format human|json]
 governance preflight --config PATH [--profile NAME] [--format human|json]
 governance impact --namespace NAME --changes FILE --output FILE [--odcs PATH ...] [--dbt-manifest PATH ...] [--openlineage PATH ...] [--dbt-default-database NAME] [--config PATH] [--profile NAME] [--format human|json]
 governance --help
@@ -171,6 +175,8 @@ Without `--config`, legacy operational commands keep the v1.0 environment-based 
 `governance compare` loads two persisted `governance-snapshot` v1 artifacts and reports material differences offline (no PostgreSQL, Collibra, or `--config`). Difference is not drift: classification of expected vs unexpected differences is out of scope. Optional `--align-source-roots` / `--align-database-roots` acknowledge differing root names for object matching only; root `/name` property differences are still reported. `writes_performed=0` means zero remote governance mutations; optional `--output` may write a local comparison JSON artifact without changing that count.
 
 `governance drift` consumes a persisted `governance-snapshot-comparison` v1 artifact and optionally a `governance-drift-policy` v1 YAML file. When the comparison reports differences, `--policy` is required; missing policy fails explicitly (exit `4`). An explicit empty policy (`rules: []`) is valid and means no differences are permitted. Unexpected drift is reported as data (exit `0`), not as a process failure. Comparison v1 does not include provenance, authority, or conflict payload; drift preserves only context present in the validated comparison input. `writes_performed=0` means zero remote governance mutations.
+
+`governance history` maintains a local offline `governance-history` v1 index of ordered snapshot references (and optional observations/authority context). Four machine contracts: `governance-history`, `governance-history-diagnostics`, `governance-history-evolution`, and `governance-property-observations`. There is no default history path — point `--history` at an explicit external runtime location, e.g. `../governance-runtime/history.json` (not `.governance/history` as a VCS default). Snapshot-only history works without context; provenance / authority / conflict evolution requires observations (and authority for full context). Public Python APIs persist observations independently. `history add` mutates only the local history file; `show` / `inspect` perform zero remote mutations (`writes_performed=0` on evolution). Exit codes: `0` success, `2` usage, `4` validation/integrity. Package remains `1.3.0`.
 
 `governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
 
@@ -235,6 +241,13 @@ Exit codes for `drift` only:
 - `2` — usage / argument error
 - `4` — comparison / policy / schema / integrity / ambiguity / output validation failure
 - `1` / `3` / `5` / `6` — unused by `drift`
+
+Exit codes for `history` only:
+
+- `0` — add / show / inspect completed
+- `2` — usage / argument error (missing selector, bad `KEY=VALUE`, etc.)
+- `4` — history / snapshot / context / timeline / integrity / duplicate / write validation failure
+- `1` / `3` / `5` / `6` — unused by `history`
 
 `create` / `update` / `unchanged` / `remote_only` counts are plan actions, not completed remote writes. Dry-run means zero remote mutations (`applied=0`); it does not mean zero network in live mode.
 
