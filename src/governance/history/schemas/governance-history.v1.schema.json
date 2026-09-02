@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:collibra-governance-automation:schema:governance-history:1",
+  "title": "Governance history v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "history_schema",
+    "history_version",
+    "comparison_policy",
+    "entries",
+    "content_identity"
+  ],
+  "properties": {
+    "history_schema": { "type": "string", "const": "governance-history" },
+    "history_version": { "type": "string", "const": "1" },
+    "comparison_policy": { "$ref": "#/$defs/comparisonPolicy" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/historyEntry" }
+    },
+    "content_identity": { "$ref": "#/$defs/contentIdentity" }
+  },
+  "allOf": [
+    { "$ref": "#/$defs/noCredentialControlFields" }
+  ],
+  "$defs": {
+    "contentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "hashing_contract_version", "digest"],
+      "properties": {
+        "algorithm": { "type": "string", "minLength": 1 },
+        "hashing_contract_version": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "minLength": 1 }
+      }
+    },
+    "comparisonPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["align_source_roots", "align_database_roots"],
+      "properties": {
+        "align_source_roots": { "type": "boolean" },
+        "align_database_roots": { "type": "boolean" }
+      }
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!\\\\\\\\)(?!.*/[Nn][Uu][Ll](/|$))(?![Nn][Uu][Ll](/|$)).+$"
+    },
+    "capturedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^(?!(?:[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Tt][Oo][Kk][Ee][Nn]|[Cc][Ll][Ii][Ee][Nn][Tt]_[Ss][Ee][Cc][Rr][Ee][Tt]|[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll][Ss]|[Aa][Pp][Ii]_[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt])$).+$"
+      },
+      "maxProperties": 32
+    },
+    "contextNoneAbsent": {
+      "not": { "required": ["context"] }
+    },
+    "contextProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observations"],
+      "properties": {
+        "observations": { "$ref": "#/$defs/contentIdentity" }
+      }
+    },
+    "contextFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observations", "authority", "conflicts"],
+      "properties": {
+        "observations": { "$ref": "#/$defs/contentIdentity" },
+        "authority": { "$ref": "#/$defs/contentIdentity" },
+        "conflicts": { "$ref": "#/$defs/contentIdentity" }
+      }
+    },
+    "operatorNone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_path"],
+      "properties": {
+        "snapshot_path": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "operatorProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_path", "observations_path"],
+      "properties": {
+        "snapshot_path": { "$ref": "#/$defs/relativePath" },
+        "observations_path": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "operatorFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_path", "observations_path", "authority_paths"],
+      "properties": {
+        "snapshot_path": { "$ref": "#/$defs/relativePath" },
+        "observations_path": { "$ref": "#/$defs/relativePath" },
+        "authority_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/relativePath" }
+        }
+      }
+    },
+    "entryStateBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot"],
+      "properties": {
+        "snapshot": { "$ref": "#/$defs/contentIdentity" },
+        "labels": { "$ref": "#/$defs/labels" },
+        "context": true
+      }
+    },
+    "historyEntry": {
+      "oneOf": [
+        { "$ref": "#/$defs/entryNoContext" },
+        { "$ref": "#/$defs/entryProvenance" },
+        { "$ref": "#/$defs/entryFull" }
+      ]
+    },
+    "entryNoContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "operator"],
+      "properties": {
+        "state": {
+          "allOf": [
+            { "$ref": "#/$defs/entryStateBase" },
+            {
+              "properties": {
+                "context": false
+              }
+            }
+          ]
+        },
+        "operator": { "$ref": "#/$defs/operatorNone" },
+        "captured_at": { "$ref": "#/$defs/capturedAt" }
+      }
+    },
+    "entryProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "operator"],
+      "properties": {
+        "state": {
+          "allOf": [
+            { "$ref": "#/$defs/entryStateBase" },
+            {
+              "required": ["context"],
+              "properties": {
+                "context": { "$ref": "#/$defs/contextProvenance" }
+              }
+            }
+          ]
+        },
+        "operator": { "$ref": "#/$defs/operatorProvenance" },
+        "captured_at": { "$ref": "#/$defs/capturedAt" }
+      }
+    },
+    "entryFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "operator"],
+      "properties": {
+        "state": {
+          "allOf": [
+            { "$ref": "#/$defs/entryStateBase" },
+            {
+              "required": ["context"],
+              "properties": {
+                "context": { "$ref": "#/$defs/contextFull" }
+              }
+            }
+          ]
+        },
+        "operator": { "$ref": "#/$defs/operatorFull" },
+        "captured_at": { "$ref": "#/$defs/capturedAt" }
+      }
+    },
+    "noCredentialControlFields": {
+      "not": {
+        "anyOf": [
+          { "required": ["password"] },
+          { "required": ["token"] },
+          { "required": ["client_secret"] },
+          { "required": ["authorization"] },
+          { "required": ["credentials"] },
+          { "required": ["api_key"] },
+          { "required": ["secret"] }
+        ]
+      }
+    }
+  }
+}

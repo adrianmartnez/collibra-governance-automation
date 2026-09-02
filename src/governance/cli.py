@@ -1,11 +1,12 @@
-"""Governance CLI: scan, export, diff, sync, check, plan, apply, explain, compare, impact,
-and preflight.
+"""Governance CLI: scan, export, diff, sync, check, plan, apply, explain, compare, drift,
+impact, history, and preflight.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
@@ -30,6 +31,7 @@ from governance.comparison import (
     write_comparison_artifact,
 )
 from governance.comparison.load import ComparisonArtifactError
+from governance.comparison.projection import ComparisonObjectIdentity
 from governance.config import Settings, load_settings
 from governance.config_contract import (
     CanonicalConfig,
@@ -51,6 +53,7 @@ from governance.config_contract.resolution_diagnostics import CODE_ENV_UNRESOLVE
 from governance.domain import GovernanceGraph, GovernanceModel
 from governance.domain.authority import NormalizedAuthorityPolicySet
 from governance.domain.conflicts import PropertyPath, analyze_property_conflicts
+from governance.domain.graph import GraphNodeIdentity
 from governance.domain.impact import analyze_downstream_impact
 from governance.domain.observations import PropertyObservationSet
 from governance.drift import (
@@ -69,6 +72,22 @@ from governance.exporters import (
     MetadataInventory,
     write_inventory,
 )
+from governance.history import (
+    DiagnosticError,
+    GovernanceHistory,
+    HistoryError,
+    append_history_entry,
+    build_history_evolution,
+    canonical_evolution_json,
+    canonical_history_json,
+    history_diagnostics_failure,
+    load_history_artifact,
+    normalize_history_relative_path,
+    normalize_labels,
+    resolve_history_artifacts,
+    write_evolution_artifact,
+)
+from governance.history.errors import CODE_WRITE_ERROR
 from governance.identity import (
     config_identity,
     mapping_identity,
@@ -297,6 +316,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_compare(args)
     if command == "drift":
         return _cmd_drift(args)
+    if command == "history":
+        return _cmd_history(args)
     if command == "impact":
         return _cmd_impact(args)
     if command == "preflight":
@@ -631,6 +652,117 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Optional path for the canonical drift-result JSON artifact.",
     )
+
+    history = subparsers.add_parser(
+        "history",
+        help=(
+            "Append and inspect local offline governance-history artifacts (zero remote mutations)."
+        ),
+    )
+    history_sub = history.add_subparsers(dest="history_command")
+    history_sub.required = False
+
+    history_add = history_sub.add_parser(
+        "add",
+        help="Append one history entry (writes only the history file).",
+    )
+    history_add.add_argument(
+        "--history",
+        metavar="FILE",
+        required=True,
+        help="Local governance-history JSON path (created on first add).",
+    )
+    history_add.add_argument(
+        "--snapshot",
+        metavar="FILE",
+        required=True,
+        help="Governance-snapshot JSON path (stored relative to history parent).",
+    )
+    history_add.add_argument(
+        "--label",
+        metavar="KEY=VALUE",
+        action="append",
+        default=None,
+        help="Optional entry label (repeatable; split on first '=').",
+    )
+    history_add.add_argument(
+        "--observations",
+        metavar="FILE",
+        help="Optional governance-property-observations JSON path.",
+    )
+    history_add.add_argument(
+        "--authority",
+        metavar="FILE",
+        action="append",
+        default=None,
+        help="Optional authority YAML path (repeatable; requires --observations).",
+    )
+    history_add.add_argument(
+        "--captured-at",
+        metavar="RFC3339Z",
+        help="Optional explicit capture timestamp (UTC Z / fractional Z only).",
+    )
+    history_add.add_argument(
+        "--align-source-roots",
+        action="store_true",
+        help=(
+            "Acknowledge differing source names for matching only "
+            "(first add seeds comparison_policy; later must match stored)."
+        ),
+    )
+    history_add.add_argument(
+        "--align-database-roots",
+        action="store_true",
+        help=(
+            "Acknowledge differing database names for matching only "
+            "(first add seeds comparison_policy; later must match stored)."
+        ),
+    )
+    _add_format(history_add)
+
+    history_show = history_sub.add_parser(
+        "show",
+        help="Compute governance-history-evolution for a queried object/property.",
+    )
+    history_show.add_argument(
+        "--history",
+        metavar="FILE",
+        required=True,
+        help="Local governance-history JSON path.",
+    )
+    history_show.add_argument(
+        "--object",
+        metavar="JSON",
+        help='ComparisonObjectIdentity JSON, e.g. {"kind":"table","path":["sales","orders"]}.',
+    )
+    history_show.add_argument(
+        "--governance-object",
+        metavar="JSON",
+        help="GraphNodeIdentity JSON for context evolution (namespace/kind/logical_id/parent).",
+    )
+    history_show.add_argument(
+        "--property",
+        metavar="POINTER",
+        help="Optional RFC6901 property pointer filter.",
+    )
+    _add_format(history_show)
+    history_show.add_argument(
+        "--output",
+        metavar="FILE",
+        help="Optional path for the canonical history-evolution JSON artifact.",
+    )
+
+    history_inspect = history_sub.add_parser(
+        "inspect",
+        help="Load and fully resolve a history artifact (no writes).",
+    )
+    history_inspect.add_argument(
+        "--history",
+        metavar="FILE",
+        required=True,
+        help="Local governance-history JSON path.",
+    )
+    _add_format(history_inspect)
 
     config = subparsers.add_parser(
         "config",
@@ -1570,6 +1702,301 @@ def _emit_drift_error(exc: DriftError, fmt: OutputFormat) -> int:
                 f"({format_human_value(item['code'])})\n"
             )
     return 4
+
+
+def _cmd_history(args: argparse.Namespace) -> int:
+    command = getattr(args, "history_command", None)
+    if command == "add":
+        return _cmd_history_add(args)
+    if command == "show":
+        return _cmd_history_show(args)
+    if command == "inspect":
+        return _cmd_history_inspect(args)
+    raise CliUsageError("usage: governance history {add,show,inspect} ...")
+
+
+def _history_relative_cli_path(history_path: Path, raw: str) -> str:
+    """Convert an absolute CLI path to a path relative to the history parent."""
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        return raw.replace("\\", "/")
+    try:
+        rel = os.path.relpath(str(candidate), start=str(history_path.parent))
+    except ValueError as exc:
+        # different drives on Windows
+        raise CliUsageError(
+            "referenced path cannot be expressed relative to history parent"
+        ) from exc
+    normalized = rel.replace("\\", "/")
+    try:
+        return normalize_history_relative_path(normalized, path="/operator/path")
+    except HistoryError as exc:
+        raise CliUsageError(
+            exc.errors[0].message if exc.errors else "invalid relative path"
+        ) from exc
+
+
+def _parse_history_labels(raw_labels: Sequence[str] | None) -> dict[str, str] | None:
+    if not raw_labels:
+        return None
+    parsed: dict[str, str] = {}
+    for item in raw_labels:
+        if "=" not in item:
+            raise CliUsageError(f"invalid --label {item!r}; expected KEY=VALUE")
+        key, value = item.split("=", 1)
+        key_n, value_n = key.strip(), value.strip()
+        if not key_n or not value_n:
+            raise CliUsageError(f"invalid --label {item!r}; expected KEY=VALUE")
+        if key_n in parsed:
+            raise CliUsageError("duplicate label key after trim")
+        parsed[key_n] = value_n
+    try:
+        return normalize_labels(parsed)
+    except HistoryError as exc:
+        raise CliUsageError(exc.errors[0].message if exc.errors else "invalid labels") from exc
+
+
+def _strict_json_loads(raw: str, *, what: str) -> Any:
+    def reject_const(_: Any) -> Any:
+        raise ValueError("non-standard JSON")
+
+    def reject_dup(pairs: list[tuple[Any, Any]]) -> dict[Any, Any]:
+        out: dict[Any, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError("duplicate JSON object key")
+            out[key] = value
+        return out
+
+    try:
+        return json.loads(raw, parse_constant=reject_const, object_pairs_hook=reject_dup)
+    except RecursionError as exc:
+        raise CliUsageError(f"invalid {what}: input too deep") from exc
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise CliUsageError(f"invalid {what}") from exc
+
+
+def _parse_comparison_object_json(raw: str) -> ComparisonObjectIdentity:
+    payload = _strict_json_loads(raw, what="--object JSON")
+    if not isinstance(payload, dict):
+        raise CliUsageError("--object must be a JSON object with kind and path")
+    if frozenset(payload) != frozenset({"kind", "path"}):
+        raise CliUsageError("invalid --object: exact keys kind and path required")
+    kind = payload["kind"]
+    path = payload["path"]
+    if not isinstance(kind, str):
+        raise CliUsageError("invalid --object: kind must be a string")
+    if not isinstance(path, list) or not all(isinstance(item, str) for item in path):
+        raise CliUsageError("invalid --object: path must be a JSON array of strings")
+    try:
+        return ComparisonObjectIdentity(kind=kind, path=tuple(path))
+    except (TypeError, ValueError) as exc:
+        raise CliUsageError(f"invalid --object: {exc}") from exc
+
+
+def _parse_graph_node_identity(payload: Any, *, what: str) -> GraphNodeIdentity:
+    if not isinstance(payload, dict):
+        raise CliUsageError(f"{what} must be a JSON object")
+    if frozenset(payload) != frozenset({"namespace", "kind", "logical_id", "parent"}):
+        raise CliUsageError(
+            f"invalid {what}: exact keys namespace, kind, logical_id, parent required"
+        )
+    namespace = payload["namespace"]
+    kind = payload["kind"]
+    logical_id = payload["logical_id"]
+    parent_raw = payload["parent"]
+    if (
+        not isinstance(namespace, str)
+        or not isinstance(kind, str)
+        or not isinstance(logical_id, str)
+    ):
+        raise CliUsageError(f"invalid {what}: namespace, kind, and logical_id must be strings")
+    parent: GraphNodeIdentity | None
+    if parent_raw is None:
+        parent = None
+    elif isinstance(parent_raw, dict):
+        try:
+            parent = _parse_graph_node_identity(parent_raw, what=what)
+        except RecursionError as exc:
+            raise CliUsageError(f"invalid {what}: input too deep") from exc
+    else:
+        raise CliUsageError(f"invalid {what}: parent must be null or an object")
+    try:
+        return GraphNodeIdentity(namespace, kind, logical_id, parent=parent)
+    except (TypeError, ValueError) as exc:
+        raise CliUsageError(f"invalid {what}: {exc}") from exc
+
+
+def _parse_governance_object_json(raw: str) -> GraphNodeIdentity:
+    payload = _strict_json_loads(raw, what="--governance-object JSON")
+    try:
+        return _parse_graph_node_identity(payload, what="--governance-object")
+    except RecursionError as exc:
+        raise CliUsageError("invalid --governance-object: input too deep") from exc
+
+
+def _history_show_output_collides(
+    history_path: Path,
+    history: GovernanceHistory,
+    output_path: str | Path,
+) -> bool:
+    try:
+        out = Path(output_path).resolve()
+        inputs = {history_path.resolve()}
+        for entry in history.entries:
+            op = entry.operator
+            inputs.add((history_path.parent / op.snapshot_path).resolve())
+            if op.observations_path:
+                inputs.add((history_path.parent / op.observations_path).resolve())
+            if op.authority_paths:
+                for item in op.authority_paths:
+                    inputs.add((history_path.parent / item).resolve())
+        return out in inputs
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HistoryError(
+            [
+                DiagnosticError(
+                    code=CODE_WRITE_ERROR,
+                    path="/output",
+                    message="unable to resolve path for output collision check",
+                )
+            ]
+        ) from exc
+
+
+def _emit_history_error(exc: HistoryError, fmt: OutputFormat) -> int:
+    payload = history_diagnostics_failure(exc.errors)
+    if fmt == "json":
+        _print_json(payload)
+    else:
+        for item in payload["errors"]:
+            sys.stderr.write(
+                f"error: {format_human_value(item['path'])}: "
+                f"{format_human_value(item['message'])} "
+                f"({format_human_value(item['code'])})\n"
+            )
+    return 4
+
+
+def _cmd_history_add(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    history_path = Path(args.history)
+    snapshot_rel = _history_relative_cli_path(history_path, args.snapshot)
+    observations_rel = None
+    if getattr(args, "observations", None) is not None:
+        observations_rel = _history_relative_cli_path(history_path, args.observations)
+    authority_rels = None
+    authority_args = getattr(args, "authority", None)
+    if authority_args:
+        authority_rels = [_history_relative_cli_path(history_path, item) for item in authority_args]
+    labels = _parse_history_labels(getattr(args, "label", None))
+    align_source = True if getattr(args, "align_source_roots", False) else None
+    align_database = True if getattr(args, "align_database_roots", False) else None
+    try:
+        updated = append_history_entry(
+            history_path,
+            snapshot_path=snapshot_rel,
+            observations_path=observations_rel,
+            authority_paths=authority_rels,
+            labels=labels,
+            captured_at=getattr(args, "captured_at", None),
+            align_source_roots=align_source,
+            align_database_roots=align_database,
+        )
+    except HistoryError as exc:
+        return _emit_history_error(exc, fmt)
+
+    if fmt == "json":
+        _write_canonical_json_stdout(canonical_history_json(updated))
+    else:
+        last_digest = updated.entries[-1].state.snapshot.digest
+        sys.stdout.write(f"entries={len(updated.entries)}\n")
+        sys.stdout.write(f"last_snapshot_digest={format_human_value(last_digest[:12])}\n")
+        sys.stdout.write(f"history_written={format_human_value(str(history_path))}\n")
+        sys.stdout.write("writes=1\n")
+    return 0
+
+
+def _cmd_history_show(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    object_raw = getattr(args, "object", None)
+    governance_raw = getattr(args, "governance_object", None)
+    if object_raw is None and governance_raw is None:
+        raise CliUsageError("at least one of --object or --governance-object is required")
+
+    queried_object = _parse_comparison_object_json(object_raw) if object_raw is not None else None
+    queried_governance = (
+        _parse_governance_object_json(governance_raw) if governance_raw is not None else None
+    )
+    queried_property = getattr(args, "property", None)
+    if queried_property is not None:
+        try:
+            PropertyPath.parse(str(queried_property))
+        except (TypeError, ValueError) as exc:
+            raise CliUsageError(f"invalid --property: {exc}") from exc
+
+    history_path = Path(args.history)
+    try:
+        history = load_history_artifact(history_path)
+        resolved = resolve_history_artifacts(history, history_path)
+        result = build_history_evolution(
+            resolved,
+            queried_object=queried_object,
+            queried_governance_object=queried_governance,
+            queried_property=queried_property,
+        )
+        output_path = getattr(args, "output", None)
+        written = None
+        if output_path is not None:
+            if _history_show_output_collides(history_path, history, output_path):
+                raise HistoryError(
+                    [
+                        DiagnosticError(
+                            code=CODE_WRITE_ERROR,
+                            path="/output",
+                            message="output path collides with history input artifact",
+                        )
+                    ]
+                )
+            written = write_evolution_artifact(result, output_path)
+    except HistoryError as exc:
+        return _emit_history_error(exc, fmt)
+
+    if fmt == "json":
+        _write_canonical_json_stdout(canonical_evolution_json(result))
+    else:
+        sys.stdout.write(f"transitions={len(result['transitions'])}\n")
+        sys.stdout.write(f"writes_performed={result['writes_performed']}\n")
+        if written is not None:
+            sys.stdout.write(f"artifact_written={format_human_value(str(written))}\n")
+    return 0
+
+
+def _cmd_history_inspect(args: argparse.Namespace) -> int:
+    fmt: OutputFormat = args.format
+    history_path = Path(args.history)
+    try:
+        history = load_history_artifact(history_path)
+        resolve_history_artifacts(history, history_path)
+    except HistoryError as exc:
+        return _emit_history_error(exc, fmt)
+
+    if fmt == "json":
+        _write_canonical_json_stdout(canonical_history_json(history))
+    else:
+        digest = history.content_identity().digest
+        sys.stdout.write(f"entries={len(history.entries)}\n")
+        sys.stdout.write(f"history_digest={format_human_value(digest[:12])}\n")
+        sys.stdout.write(
+            "align_source_roots="
+            f"{format_human_value(history.comparison_policy.align_source_roots)}\n"
+        )
+        sys.stdout.write(
+            "align_database_roots="
+            f"{format_human_value(history.comparison_policy.align_database_roots)}\n"
+        )
+        sys.stdout.write("writes=0\n")
+    return 0
 
 
 def _cmd_preflight(args: argparse.Namespace) -> int:

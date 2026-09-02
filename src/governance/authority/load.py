@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -33,32 +34,41 @@ from governance.identity.canonicalize import canonical_json_bytes
 _AUTHORITY_KIND_SET = frozenset(AUTHORITY_NODE_KINDS)
 
 
-def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthorityPolicySet:
-    """Load authority referenced by CanonicalConfig. Empty files => empty set."""
-    if not canonical.authority.files:
+def _default_source(path: Path) -> str:
+    """Display source when callers do not supply explicit source labels."""
+    if path.is_absolute():
+        return path.name
+    return path.as_posix()
+
+
+def load_normalized_authority_files(
+    paths: Sequence[Path],
+    *,
+    sources: Sequence[str] | None = None,
+) -> NormalizedAuthorityPolicySet:
+    """Load and normalize authority YAML from filesystem paths.
+
+    Shares the same semantics as :func:`load_normalized_authority` for parse,
+    structural validation, normalization, duplicate id detection, and
+    same-selector / different-target ambiguity.
+    """
+    path_list = [Path(path) for path in paths]
+    if sources is None:
+        source_list = [_default_source(path) for path in path_list]
+    else:
+        source_list = list(sources)
+        if len(source_list) != len(path_list):
+            raise ValueError("sources length must match paths length")
+
+    if not path_list:
         return NormalizedAuthorityPolicySet()
 
     collected: list[tuple[AuthorityRuleKey, AuthorityDeclaration, int, str, str]] = []
     seen_ids: dict[str, str] = {}
     errors: list[AuthorityDiagnosticError] = []
 
-    for index, relative in enumerate(canonical.authority.files):
-        source = relative.replace("\\", "/")
-        try:
-            normalize_relative_path(relative, pointer=f"/authority/files/{index}")
-        except Exception:
-            errors.append(
-                AuthorityDiagnosticError(
-                    code=CODE_SEMANTIC,
-                    path="",
-                    message="authority path is not safe",
-                    source=source,
-                    file_index=index,
-                )
-            )
-            continue
-
-        absolute = Path(canonical.config_root) / relative
+    for index, absolute in enumerate(path_list):
+        source = source_list[index]
         if not absolute.is_file():
             errors.append(
                 AuthorityDiagnosticError(
@@ -160,6 +170,63 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
         for key, declarations in by_key.items()
     )
     return NormalizedAuthorityPolicySet(rules=rules)
+
+
+def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthorityPolicySet:
+    """Load authority referenced by CanonicalConfig. Empty files => empty set."""
+    if not canonical.authority.files:
+        return NormalizedAuthorityPolicySet()
+
+    paths: list[Path] = []
+    sources: list[str] = []
+    index_map: list[int] = []
+    gate_errors: list[AuthorityDiagnosticError] = []
+
+    for index, relative in enumerate(canonical.authority.files):
+        source = relative.replace("\\", "/")
+        try:
+            normalize_relative_path(relative, pointer=f"/authority/files/{index}")
+        except Exception:
+            gate_errors.append(
+                AuthorityDiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path="",
+                    message="authority path is not safe",
+                    source=source,
+                    file_index=index,
+                )
+            )
+            continue
+
+        paths.append(Path(canonical.config_root) / relative)
+        sources.append(source)
+        index_map.append(index)
+
+    try:
+        result = load_normalized_authority_files(paths, sources=sources)
+        file_errors: list[AuthorityDiagnosticError] = []
+    except AuthoritySemanticError as exc:
+        file_errors = []
+        for item in exc.errors:
+            mapped_index = item.file_index
+            if mapped_index is not None and 0 <= mapped_index < len(index_map):
+                mapped_index = index_map[mapped_index]
+            file_errors.append(
+                AuthorityDiagnosticError(
+                    code=item.code,
+                    path=item.path,
+                    message=item.message,
+                    source=item.source,
+                    file_index=mapped_index,
+                )
+            )
+        result = None
+
+    combined = [*gate_errors, *file_errors]
+    if combined:
+        raise AuthoritySemanticError(combined)
+    assert result is not None
+    return result
 
 
 def _normalize_document(

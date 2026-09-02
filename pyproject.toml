@@ -40,7 +40,10 @@ where = ["src"]
 "governance.impact.schemas" = ["*.json"]
 "governance.reconciliation.schemas" = ["*.json"]
 "governance.comparison.schemas" = ["*.json"]
+"governance.snapshots.schemas" = ["*.json"]
 "governance.drift.schemas" = ["*.json"]
+"governance.observations.schemas" = ["*.json"]
+"governance.history.schemas" = ["*.json"]
 "governance.integrations.odcs.schemas" = [
     "odcs-json-schema-v3.1.0.json",
     "LICENSE-Apache-2.0.txt",

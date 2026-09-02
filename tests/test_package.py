@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from importlib import metadata
+from importlib.resources import files
 from pathlib import Path
 
 import governance
@@ -22,6 +23,24 @@ def test_pyproject_version_matches_runtime() -> None:
     text = pyproject.read_text(encoding="utf-8")
     assert 'version = "1.3.0"' in text
     assert metadata.version("collibra-governance-automation") == "1.3.0"
+
+
+def test_history_observation_snapshot_schemas_packaged() -> None:
+    hist = files("governance.history.schemas").joinpath("governance-history.v1.schema.json")
+    hdiag = files("governance.history.schemas").joinpath(
+        "governance-history-diagnostics.v1.schema.json"
+    )
+    hevo = files("governance.history.schemas").joinpath(
+        "governance-history-evolution.v1.schema.json"
+    )
+    obs = files("governance.observations.schemas").joinpath(
+        "governance-property-observations.v1.schema.json"
+    )
+    snap = files("governance.snapshots.schemas").joinpath("governance-snapshot.v1.schema.json")
+    for resource in (hist, hdiag, hevo, obs, snap):
+        assert resource.is_file()
+        text = resource.read_text(encoding="utf-8")
+        assert "urn:collibra-governance-automation:schema:" in text
 
 
 def test_entry_point_module_help() -> None:
@@ -43,6 +62,7 @@ def test_entry_point_module_help() -> None:
     assert "preflight" in result.stdout
     assert "compare" in result.stdout
     assert "drift" in result.stdout
+    assert "history" in result.stdout
     assert "password=" not in result.stdout
 
 
