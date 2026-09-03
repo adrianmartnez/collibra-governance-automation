@@ -1154,10 +1154,10 @@ def test_pinned_schema_sha256_matches_upstream_artifact() -> None:
     assert digest == "2cb7dd6fe43344d2233e0406438622681dc3ebadcf8f0d606a15b40c8f6752c0"
 
 
-def test_package_version_is_130() -> None:
-    assert __version__ == "1.3.0"
+def test_package_version_is_140() -> None:
+    assert __version__ == "1.4.0"
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    assert 'version = "1.3.0"' in pyproject.read_text(encoding="utf-8")
+    assert 'version = "1.4.0"' in pyproject.read_text(encoding="utf-8")
 
 
 def test_existing_four_schemas_still_packaged() -> None:

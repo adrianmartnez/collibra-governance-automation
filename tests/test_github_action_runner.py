@@ -247,7 +247,7 @@ def test_import_shadow_workspace_package_not_executed(tmp_path: Path) -> None:
     env["GITHUB_TOKEN"] = "should-be-stripped"
     completed = run_governance_cli(["--version"], workspace=tmp_path, env=env)
     assert completed.returncode == 0
-    assert "1.3.0" in completed.stdout
+    assert "1.4.0" in completed.stdout
     assert not sentinel.exists()
 
 
