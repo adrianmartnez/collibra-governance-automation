@@ -2,9 +2,15 @@
 
 [![CI](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml)
 
-Deterministic Governance-as-Code and governance change intelligence between metadata sources, open standards, policies, lineage, pull-request review, and governance platforms.
+A Python Governance-as-Code engine for analyzing metadata provenance, authority, conflicts, lineage, impact, and drift before changes reach a governance platform.
 
-Flow:
+It ingests PostgreSQL, ODCS, dbt, and OpenLineage metadata into deterministic governance state, supports pull-request-native review and plan-before-apply workflows, and provides a safe reconciliation boundary for Collibra.
+
+**Current release:** `v1.4.0`
+
+**Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
+
+## Core flow
 
 ```text
 metadata / contracts / lineage
@@ -13,15 +19,15 @@ metadata / contracts / lineage
 -> governance change intelligence (check / impact / plan / explain)
 -> snapshot compare -> drift classification
 -> snapshots + optional governance context -> local history / evolution
--> CLI and GitHub PR review (review != apply)
+-> CLI and GitHub PR review
 -> explicit mutation gates -> safe reconciliation (Collibra boundary)
 ```
 
-This is not another data catalog, not only a crawler, and not a Collibra replacement. The core model is vendor-neutral. Collibra remains a first-class integration for mapping, mock/live adapters, and plan-driven synchronization. Impact analysis is read-only (`writes_performed=0`); it does not apply or remediate. Difference is not drift; a conflict finding is not automatically a reconciliation blocker; Action `review` never implies apply.
+The governance model is vendor-neutral. Collibra is a first-class integration for mapping and plan-driven synchronization, while governance analysis remains separate from the vendor boundary.
 
-**Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
+Review, impact, explain, compare, drift, and history workflows are read-only. Remote mutations require explicit apply authorization, live Collibra writes require confirmation, and the project does not perform automatic deletes or remediation.
 
-**Package version:** `1.4.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases. Package SemVer is distinct from versioned machine contracts such as `governance-action-result` v1, `governance-impact-result` v1, and `governance-ci-review-result` v1.
+Package SemVer is independent from versioned machine contracts such as `governance-action-result` v1, `governance-impact-result` v1, and `governance-ci-review-result` v1.
 
 ## What is implemented
 
