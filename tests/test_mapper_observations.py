@@ -210,7 +210,7 @@ def test_openlineage_storage_vs_ownership_facet_provenance_isolation() -> None:
     assert expected_storage_ref not in ownership_refs
 
 
-def test_package_version_still_130() -> None:
+def test_package_version_is_140() -> None:
     from governance import __version__
 
-    assert __version__ == "1.3.0"
+    assert __version__ == "1.4.0"

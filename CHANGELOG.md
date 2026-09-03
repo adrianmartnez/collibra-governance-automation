@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+## 1.4.0 - 2026-09-03
+
+### Added
+
+- Property-level metadata observations with provenance (`governance-property-observations` v1)
+- Deterministic metadata authority policies (`governance-authority` v1)
+- Deterministic property conflict analysis with effective-value derivation and explicit resolved/unresolved states
+- Unsafe reconciliation blocking when unresolved or ambiguous mapped conflicts are relevant to planned mutations (zero-write fail-safe)
+- Read-only `governance explain` workflow/result for authority and conflict decisions
+- Offline snapshot comparison (`governance-snapshot-comparison` v1) with optional root-alignment acknowledgements
+- Expected vs unexpected governance drift classification (`governance-drift-policy` / `governance-drift-result` v1)
+- Deterministic local governance history with optional observations/authority context (`governance-history` / evolution contracts)
+- Official GitHub Action `operation: review` for conflict/authority/drift PR surfacing (`governance-ci-review-result` v1): bounded secret-safe reports with full machine detail retained in artifacts
+
+### Safety
+
+- Authority is explicit; no last-write-wins or first-write-wins selection
+- Unresolved or invalid mapped conflicts that are applicable to planned Collibra mutations block before remote writes
+- `explain` / `compare` / `drift` / `history` / Action `review` perform zero remote governance mutations
+- Action review never mutates Collibra; GitHub token is isolated from review orchestration
+- Public report/summary/outputs redact governed values and `source_ref` where required; full detail stays in artifacts
+- Dry-run-by-default remains; live writes still require `--apply` and `--confirm-live`
+- No automatic delete or destructive reconciliation
+
+### Compatibility
+
+- Package and runtime version are now `1.4.0` (distinct from machine contract versions, which remain v1 where defined)
+- Existing supported v1.0–v1.3 flows are preserved where designed
+- Action `validate` / `check` / `plan` semantics unchanged; impact semantics unchanged
+- Existing public v1 contracts are not silently revved; v1.4 contracts were introduced additively in their feature PRs
+
+### Limitations
+
+- No commercial Collibra tenant validation in this repository
+- Localhost contract-server tests are not a commercial-tenant stand-in
+- No provider SDK
+- No hosted governance service
+- No automatic destructive reconciliation
+- No claim of a transactional remote-state snapshot across concurrent mutations
+- No large-scale performance certification
+- This package remains a technical governance automation project, not a hosted governance platform
+
 ## 1.3.0 - 2026-08-19
 
 ### Added

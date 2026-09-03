@@ -8,17 +8,20 @@ Flow:
 
 ```text
 metadata / contracts / lineage
--> vendor-neutral governance graph
--> governance change intelligence (check / impact / plan)
--> CLI and GitHub PR review
--> safe reconciliation (Collibra integration boundary)
+-> property observations + provenance
+-> authority policy -> conflict / effective value
+-> governance change intelligence (check / impact / plan / explain)
+-> snapshot compare -> drift classification
+-> snapshots + optional governance context -> local history / evolution
+-> CLI and GitHub PR review (review != apply)
+-> explicit mutation gates -> safe reconciliation (Collibra boundary)
 ```
 
-This is not another data catalog, not only a crawler, and not a Collibra replacement. The core model is vendor-neutral. Collibra remains a first-class integration for mapping, mock/live adapters, and plan-driven synchronization. Impact analysis is read-only (`writes_performed=0`); it does not apply or remediate.
+This is not another data catalog, not only a crawler, and not a Collibra replacement. The core model is vendor-neutral. Collibra remains a first-class integration for mapping, mock/live adapters, and plan-driven synchronization. Impact analysis is read-only (`writes_performed=0`); it does not apply or remediate. Difference is not drift; a conflict finding is not automatically a reconciliation blocker; Action `review` never implies apply.
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
-**Package version:** `1.3.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases. Package SemVer is distinct from versioned machine contracts such as `governance-action-result` v1 and `governance-impact-result` v1.
+**Package version:** `1.4.0`. See [CHANGELOG.md](CHANGELOG.md). Tagged releases are published from reviewed `main` commits and are available through GitHub Releases. Package SemVer is distinct from versioned machine contracts such as `governance-action-result` v1, `governance-impact-result` v1, and `governance-ci-review-result` v1.
 
 ## What is implemented
 
@@ -27,8 +30,13 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 | PostgreSQL technical metadata discovery | Implemented (local PostgreSQL demo) |
 | Vendor-neutral governance model | Implemented |
 | Governance graph + provenance foundation | Deterministic |
+| Property-level observations + provenance | Implemented (`governance-property-observations` v1) |
+| Metadata authority policies | Implemented (`governance-authority` v1; explicit; no implicit winner) |
+| Property conflict / effective-value analysis | Implemented (resolved and unresolved states) |
+| Reconciliation safety / conflict blocking | Implemented (mapped unresolved/ambiguous conflicts block before mutation) |
+| `governance explain` (authority/conflict) | Implemented (read-only; zero remote mutations) |
 | Deterministic inventory / snapshot artifacts | Implemented |
-| Governance-as-Code (`governance.yaml`, policies, saved plans) | Implemented (opt-in via `--config`) |
+| Governance-as-Code (`governance.yaml`, policies, authority, saved plans) | Implemented (opt-in via `--config`) |
 | Open Data Contract Standard (ODCS) ingestion | Implemented |
 | dbt manifest metadata + dependency edges | Implemented |
 | OpenLineage events + dataset facets | Implemented |
@@ -39,6 +47,7 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 | `governance drift` CLI + drift-result v1 artifacts | Implemented (offline; explicit policy required when different) |
 | `governance history` CLI + history/evolution v1 artifacts | Implemented (offline local index; optional observations/authority context) |
 | GitHub Action `operation: impact` + PR/step-summary reports | Implemented (read-only) |
+| GitHub Action `operation: review` (conflicts/authority/drift) | Implemented (read-only; secret-safe surfaces; full detail in artifacts) |
 | Collibra mapping + mock adapter | Implemented (local/offline) |
 | Live Collibra Core REST API v2 adapter | Contract-tested (localhost HTTP server; no commercial tenant) |
 | OAuth client credentials (native Collibra + external IdP) | Implemented |
@@ -49,34 +58,31 @@ This is not another data catalog, not only a crawler, and not a Collibra replace
 | Safe plan-driven reconciliation (dry-run by default) | Implemented |
 | Commercial Collibra tenant validation | Not claimed |
 
-Central safety: sync/apply default to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. Impact performs zero remote writes. No automatic deletes. No automatic remediation from impact.
+Central safety: sync/apply default to dry-run (zero remote mutations). Writes require `--apply`. Live writes additionally require `--confirm-live`. Impact, explain, compare, drift, history show/inspect, and Action review perform zero remote governance mutations. No automatic deletes. No automatic remediation from impact or review.
 
 ```mermaid
 flowchart LR
-  PostgreSQL --> Scanner
-  ODCS --> OdcsIngest
-  dbtManifest --> DbtIngest
-  OpenLineage --> OlIngest
-  Scanner --> GovernanceGraph
-  OdcsIngest --> GovernanceGraph
-  DbtIngest --> GovernanceGraph
-  OlIngest --> GovernanceGraph
-  GovernanceGraph --> Provenance
-  GovernanceGraph --> Contracts
-  GovernanceGraph --> Lineage
-  GovernanceGraph --> Policies
-  GovernanceGraph --> ChangeIntelligence
-  ChangeIntelligence --> Check
-  ChangeIntelligence --> Impact
-  ChangeIntelligence --> Plan
+  Sources --> Observations
+  Observations --> Authority
+  Authority --> Conflicts
+  Conflicts --> EffectiveOrUnresolved
+  EffectiveOrUnresolved --> ReconSafety
+  Snapshots --> Comparison
+  Comparison --> Drift
+  Snapshots --> History
+  Observations --> CliAndPrReview
+  Conflicts --> CliAndPrReview
+  Drift --> CliAndPrReview
+  Explain --> CliAndPrReview
   Check --> CliAndPrReview
   Impact --> CliAndPrReview
   Plan --> CliAndPrReview
-  CliAndPrReview --> SafeReconciliation
+  ReconSafety --> SafeReconciliation
+  CliAndPrReview -.->|"review never apply"| Artifacts
   SafeReconciliation --> CollibraAdapters
 ```
 
-Neutral core owns the governance graph, provenance, contracts, lineage, policies, and change intelligence. Collibra adapters are the integration boundary for desired-state mapping and plan-driven sync. Plans are built before any write.
+Neutral core owns observations, authority, conflicts, provenance, contracts, lineage, policies, comparison, drift, history, and change intelligence. Collibra adapters are the integration boundary for desired-state mapping and plan-driven sync. Reconciliation remains plan-driven. `governance apply` executes a saved, reviewable `.gplan`, while legacy `governance sync --apply` executes an in-memory sync plan. Mutations always require explicit apply authorization; live writes additionally require `--confirm-live`.
 
 ## Quick start (clean checkout, mock)
 
@@ -176,7 +182,7 @@ Without `--config`, legacy operational commands keep the v1.0 environment-based 
 
 `governance drift` consumes a persisted `governance-snapshot-comparison` v1 artifact and optionally a `governance-drift-policy` v1 YAML file. When the comparison reports differences, `--policy` is required; missing policy fails explicitly (exit `4`). An explicit empty policy (`rules: []`) is valid and means no differences are permitted. Unexpected drift is reported as data (exit `0`), not as a process failure. Comparison v1 does not include provenance, authority, or conflict payload; drift preserves only context present in the validated comparison input. `writes_performed=0` means zero remote governance mutations.
 
-`governance history` maintains a local offline `governance-history` v1 index of ordered snapshot references (and optional observations/authority context). Four machine contracts: `governance-history`, `governance-history-diagnostics`, `governance-history-evolution`, and `governance-property-observations`. There is no default history path — point `--history` at an explicit external runtime location, e.g. `../governance-runtime/history.json` (not `.governance/history` as a VCS default). Snapshot-only history works without context; provenance / authority / conflict evolution requires observations (and authority for full context). Public Python APIs persist observations independently. `history add` mutates only the local history file; `show` / `inspect` perform zero remote mutations (`writes_performed=0` on evolution). Exit codes: `0` success, `2` usage, `4` validation/integrity. Package remains `1.3.0`.
+`governance history` maintains a local offline `governance-history` v1 index of ordered snapshot references (and optional observations/authority context). It does not consume `governance-drift-result` or a drift policy; snapshot-only history works independently of drift classification. Four machine contracts: `governance-history`, `governance-history-diagnostics`, `governance-history-evolution`, and `governance-property-observations`. There is no default history path — point `--history` at an explicit external runtime location, e.g. `../governance-runtime/history.json` (not `.governance/history` as a VCS default). Snapshot-only history works without context; provenance / authority / conflict evolution requires observations (and authority for full context). Public Python APIs persist observations independently. `history add` mutates only the local history file; `show` / `inspect` perform zero remote mutations (`writes_performed=0` on evolution). Exit codes: `0` success, `2` usage, `4` validation/integrity. Package version is `1.4.0`.
 
 `governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
 
@@ -184,7 +190,7 @@ Without `--config`, legacy operational commands keep the v1.0 environment-based 
 
 ## Governance-as-Code (optional)
 
-Declare sources, optional Collibra targets, artifact paths, policy file hooks, and optional metadata authority files in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml).
+Declare sources, optional Collibra targets, artifact paths, policy file hooks, and optional metadata authority files in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml) and [`sample/authority/metadata-authority.example.yaml`](sample/authority/metadata-authority.example.yaml). Drift demos may use [`sample/drift/governance-drift-policy.example.yaml`](sample/drift/governance-drift-policy.example.yaml).
 
 ```bash
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/governance_demo}"
@@ -254,7 +260,7 @@ Exit codes for `history` only:
 ### Representative local output (mock demo)
 
 ```text
-governance 1.3.0
+governance 1.4.0
 ```
 
 ```text
@@ -336,7 +342,13 @@ Semantics:
 - `config_identity` includes non-empty `authority.files` refs (list order material). `authority_identity` hashes only semantic rule keys; YAML rule ids, descriptions, authority file refs/filenames and formatting are excluded, while selector property paths and authority targets remain material.
 - With explicit ODCS/dbt/OpenLineage inputs on `plan` / `apply`, unresolved or invalid authority conflicts that are **relevant** to a planned Collibra mutation block plan generation (exit 4) or cause stale-plan refusal on apply (exit 5) before remote writes. Unrelated conflicts do not block unrelated actions.
 - Mapped reconciliation targets: `/name` → `display_name`, `/description`, `/attributes/data_type` (columns), `/attributes/ownership` (database/schema/table). Effective `null` omits on CREATE and preserves the current remote value on existing assets (never Attribute DELETE).
+- Conflict analysis states (deterministic): `SINGLE_OBSERVATION`, `AGREEMENT`, `RESOLVED_BY_AUTHORITY`, `UNRESOLVED_CONFLICT`, `INVALID_OR_AMBIGUOUS_AUTHORITY`.
+- A conflict finding is not automatically a reconciliation blocker: only mapped, applicable unresolved/ambiguous conflicts block `plan`/`apply` before mutation.
 - `governance explain` renders observations, provenance, conflict state, winning rule (when present), and reconciliation safety without remote mutations.
+
+### Drift policy sample
+
+Offline expected-difference rules: [`sample/drift/governance-drift-policy.example.yaml`](sample/drift/governance-drift-policy.example.yaml). Drift statuses are `no_difference`, `expected_difference`, and `unexpected_drift`. Difference from `governance compare` is never classified as drift without an explicit policy when the comparison differs.
 
 ## Mock vs live
 
@@ -471,7 +483,7 @@ dry_run = execute_sync_plan(adapter, plan, apply=False)
 
 ## GitHub Action (Governance as Code)
 
-Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `1.3.0`.
+Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `1.4.0`.
 
 The Action installs this package into a fresh Action-owned virtualenv under `RUNNER_TEMP`, then runs the governance CLI with isolated Python (`python -I -m ...`). Consumer site-packages are not modified. Relative config paths resolve against `GITHUB_WORKSPACE` (the consumer must checkout their repository before `uses:`).
 
@@ -656,10 +668,10 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 ### F. Version pinning
 
 - Strongest: pin the Action to a full immutable commit SHA.
-- Release consumers may pin the immutable SemVer tag `v1.3.0` once that tag is published.
-- Prior release tags `v1.2.0` and `v1.1.0` remain available historically.
+- Release consumers may pin the immutable SemVer tag `v1.4.0` once that tag is published.
+- Prior release tags `v1.3.0`, `v1.2.0`, and `v1.1.0` remain available historically.
 - Do not use mutable `@main`.
-- Package version `1.3.0` ships with Action contract v1 and impact result contracts v1; keep Action/package compatibility explicit across releases.
+- Package version `1.4.0` ships with Action contract v1, impact result contracts v1, and review result contract v1; keep Action/package compatibility explicit across releases.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
 
 ## Repository structure
@@ -667,7 +679,7 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 ```text
 action.yml                       official composite GitHub Action
 src/governance/
-  domain/                        vendor-neutral model, graph, lineage, impact helpers
+  domain/                        vendor-neutral model, graph, lineage, observations, authority, conflicts
   scanner/                       PostgreSQL metadata discovery
   exporters/                     deterministic inventory JSON
   integrations/
@@ -676,15 +688,21 @@ src/governance/
     dbt/                         dbt manifest ingestion
     openlineage/                 OpenLineage event ingestion
   impact/                        impact CLI contracts + impact schemas
-  github_ci/                     Action runner, reporting, action-result schema
+  github_ci/                     Action runner, reporting, review, action-result schema
   config_contract/               governance.yaml schema + resolution
   policy/                        policy schema + evaluation
+  authority/                     metadata authority schema + loaders
+  reconciliation/                explain + reconciliation safety
+  comparison/                    snapshot comparison
+  drift/                         drift policy + classification
+  history/                       local offline history + evolution
+  observations/                  property observation schemas
   plans/                         saved .gplan artifacts
   snapshots/                     governance snapshot artifacts
   identity/                      content-identity hashing
   cli.py                         argparse CLI orchestration
 tests/                           unit/integration + fixtures; localhost Collibra contract server
-sample/                          demo SQL, GaC example, Collibra mapping example
+sample/                          demo SQL, GaC/authority/drift examples, Collibra mapping example
 .github/workflows/               CI quality gates
 ```
 
@@ -721,7 +739,7 @@ CI defines eight `ubuntu-latest` jobs:
 - `postgres-integration`
 - `metadata-integration`
 - `collibra-integration`
-- `cli-integration` (includes official Action `uses: ./` PASS, BLOCKED, impact CLEAR/IMPACTED/ERROR smokes)
+- `cli-integration` (includes official Action `uses: ./` plan PASS, blocked check, impact CLEAR/IMPACTED/ERROR, and review PASS/BLOCKED/non-failing smokes)
 
 No commercial Collibra tenant, self-hosted runners, or OS matrix is required. The localhost contract server is not a commercial-tenant stand-in.
 
@@ -729,9 +747,10 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required. Th
 
 - No commercial Collibra tenant validation
 - Local contract-server coverage is not commercial-tenant validation
+- No provider SDK
+- No hosted governance service
 - No automatic deletes or destructive reconciliation
-- No automatic apply/remediation from impact analysis
-- No plan/apply blocking on unresolved property conflicts yet
+- No automatic apply/remediation from impact analysis or Action review
 - No arbitrary tenant customization beyond configured refs
 - No transactional REST snapshot across concurrent mutations
 - No large-scale performance benchmark

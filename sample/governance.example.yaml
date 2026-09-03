@@ -39,6 +39,10 @@ policies:
   files:
     - policies/tables-require-description.warning.yaml
 
+authority:
+  files:
+    - authority/metadata-authority.example.yaml
+
 profiles:
   ci:
     artifacts:

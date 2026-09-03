@@ -153,8 +153,8 @@ def _dataset_identity_from_odcs() -> GraphNodeIdentity:
     return GraphNodeIdentity(NS, "dataset", "orders", parent=None)
 
 
-def test_package_version_1_3_0() -> None:
-    assert governance.__version__ == "1.3.0"
+def test_package_version_1_4_0() -> None:
+    assert governance.__version__ == "1.4.0"
 
 
 def test_explain_json_single_agreement_resolved_unresolved() -> None:

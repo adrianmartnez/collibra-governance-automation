@@ -1,0 +1,19 @@
+# Sample governance-drift-policy v1 for offline drift demos.
+# No credentials. Paths are logical comparison identities only.
+drift_schema: governance-drift-policy
+drift_version: "1"
+rules:
+  - id: allow-source-description
+    match:
+      change: changed
+      object:
+        kind: data_source
+        path: []
+      property: /description
+  - id: allow-customers-table-description
+    match:
+      change: changed
+      object:
+        kind: table
+        path: ["commerce", "customers"]
+      property: /description
