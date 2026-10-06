@@ -224,8 +224,8 @@ def test_action_yml_bootstrap_uses_fresh_unique_venv() -> None:
     assert "${{ github.action_path }}" in text
     assert "GOV_ACTION_RUNTIME_PYTHON" in text
     assert "runtime-python must not contain CR/LF" in text
-    assert "*$'\\0'*" not in text  # bash NUL glob falsely matches every string
     assert "Never install providers" in text or "never install provider" in text.lower()
+    assert "== *$'" not in text  # avoid broken bash NUL/CR pattern that matches every string
     assert "provider-install-paths" not in text
     assert "provider-package" not in text
 

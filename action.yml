@@ -260,8 +260,9 @@ runs:
         # Caller-prepared runtime: install ONLY the Action/core package. Never install providers.
         # Containment uses abspath (does not follow the final interpreter symlink).
         # Venv bin/python commonly symlinks to a system Python outside the workspace.
-        # Do not match *$'\0'* in bash [[ ]] — NUL truncates the pattern and matches every string.
-        # Action env inputs cannot carry embedded NUL; reject CR/LF explicitly.
+        # Do not use a bash NUL glob in [[ ]] — embedded NUL truncates the pattern
+        # and matches every string. Action env inputs cannot carry embedded NUL;
+        # reject CR/LF explicitly.
         case "${runtime_raw}" in
           *$'\r'*|*$'\n'*)
             echo "runtime-python must not contain CR/LF" >&2
