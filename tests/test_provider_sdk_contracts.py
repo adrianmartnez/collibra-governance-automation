@@ -36,6 +36,7 @@ from governance.providers.contracts import (
     MutationResultT_co,
     PlanT_co,
     PreflightResultT_co,
+    RemoteStateRequestT_contra,
     RemoteStateT_co,
     RemoteStateT_contra,
 )
@@ -247,6 +248,15 @@ def test_capability_protocols_are_importable() -> None:
     assert ProviderConfigValidator is not None
 
 
+def test_remote_state_read_accepts_none_request_type() -> None:
+    class _ScopedReader:
+        def read_remote_state(self, request: None) -> str:
+            return "empty" if request is None else "unexpected"
+
+    reader: RemoteStateReadCapability[None, str] = _ScopedReader()
+    assert reader.read_remote_state(None) == "empty"
+
+
 def test_target_planning_requires_explicit_remote_state() -> None:
     class _Planner:
         def build_plan(self, desired_state: dict[str, str], remote_state: dict[str, str]) -> str:
@@ -264,6 +274,7 @@ def test_target_planning_requires_explicit_remote_state() -> None:
 def test_public_protocol_typevars_use_correct_variance() -> None:
     assert CapabilityT_co.__covariant__ is True
     assert CapabilityT_co.__contravariant__ is False
+    assert RemoteStateRequestT_contra.__contravariant__ is True
     assert RemoteStateT_co.__covariant__ is True
     assert RemoteStateT_contra.__contravariant__ is True
     assert DesiredStateT_contra.__contravariant__ is True
@@ -272,7 +283,10 @@ def test_public_protocol_typevars_use_correct_variance() -> None:
     assert MutationRequestT_contra.__contravariant__ is True
     assert MutationResultT_co.__covariant__ is True
 
-    assert RemoteStateReadCapability.__parameters__ == (RemoteStateT_co,)
+    assert RemoteStateReadCapability.__parameters__ == (
+        RemoteStateRequestT_contra,
+        RemoteStateT_co,
+    )
     assert TargetPlanningCapability.__parameters__ == (
         DesiredStateT_contra,
         RemoteStateT_contra,

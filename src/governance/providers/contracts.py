@@ -39,6 +39,7 @@ PROVIDER_ENTRY_POINT_GROUP = "governance.providers"
 _PROVIDER_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
 
 CapabilityT_co = TypeVar("CapabilityT_co", covariant=True)
+RemoteStateRequestT_contra = TypeVar("RemoteStateRequestT_contra", contravariant=True)
 RemoteStateT_co = TypeVar("RemoteStateT_co", covariant=True)
 RemoteStateT_contra = TypeVar("RemoteStateT_contra", contravariant=True)
 DesiredStateT_contra = TypeVar("DesiredStateT_contra", contravariant=True)
@@ -103,10 +104,16 @@ class LineageCapability(Protocol):
     def load_lineage(self) -> Sequence[ColumnLineageAssertion]: ...
 
 
-class RemoteStateReadCapability(Protocol[RemoteStateT_co]):
-    """Read managed remote governance state. Produces remote state only."""
+class RemoteStateReadCapability(Protocol[RemoteStateRequestT_contra, RemoteStateT_co]):
+    """Read managed remote governance state for an explicit request scope.
 
-    def read_remote_state(self) -> RemoteStateT_co: ...
+    The request type is provider-specific (for example desired-state scope).
+    Targets that need no scope MUST declare ``None`` and receive ``None``
+    explicitly. Core supplies the request; providers MUST NOT discover scope
+    from hidden mutable state or config alone.
+    """
+
+    def read_remote_state(self, request: RemoteStateRequestT_contra) -> RemoteStateT_co: ...
 
 
 class TargetPlanningCapability(Protocol[DesiredStateT_contra, RemoteStateT_contra, PlanT_co]):
