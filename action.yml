@@ -110,6 +110,20 @@ inputs:
     description: Align database roots when building comparison from baseline/candidate snapshots
     required: false
     default: "false"
+  runtime-python:
+    description: >
+      Optional workspace-relative path to a caller-prepared Python interpreter that already
+      contains trusted provider packages. When empty, the Action creates an isolated venv
+      and installs only this Action package. The Action never installs provider packages.
+    required: false
+    default: ""
+  impact-sources-from-config:
+    description: >
+      When true, operation=impact may use governance.yaml v2 graph sources from config
+      without requiring legacy impact-odcs / impact-dbt-manifest / impact-openlineage inputs.
+      Default false preserves legacy Phase-A behavior (at least one legacy source required).
+    required: false
+    default: "false"
 
 outputs:
   contract-version:
@@ -226,16 +240,58 @@ runs:
       with:
         python-version: "3.12"
 
-    - name: Bootstrap Action venv
+    - name: Bootstrap Action Python
       id: bootstrap
       shell: bash
+      env:
+        GOV_ACTION_RUNTIME_PYTHON: ${{ inputs.runtime-python }}
       run: |
         set -euo pipefail
-        ACTION_VENV="$(mktemp -d "${RUNNER_TEMP}/gac-action-venv.XXXXXX")"
-        python -m venv "${ACTION_VENV}"
-        "${ACTION_VENV}/bin/python" -m pip install --upgrade pip
-        "${ACTION_VENV}/bin/python" -m pip install "${{ github.action_path }}"
-        echo "action-python=${ACTION_VENV}/bin/python" >> "${GITHUB_OUTPUT}"
+        workspace="${GITHUB_WORKSPACE}"
+        runtime_raw="${GOV_ACTION_RUNTIME_PYTHON:-}"
+        if [[ -z "${runtime_raw}" ]]; then
+          ACTION_VENV="$(mktemp -d "${RUNNER_TEMP}/gac-action-venv.XXXXXX")"
+          python -m venv "${ACTION_VENV}"
+          "${ACTION_VENV}/bin/python" -m pip install --upgrade pip
+          "${ACTION_VENV}/bin/python" -m pip install "${{ github.action_path }}"
+          echo "action-python=${ACTION_VENV}/bin/python" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
+        # Caller-prepared runtime: install ONLY the Action/core package. Never install providers.
+        if [[ "${runtime_raw}" == *$'\0'* || "${runtime_raw}" == *$'\r'* || "${runtime_raw}" == *$'\n'* ]]; then
+          echo "runtime-python must not contain NUL/CR/LF" >&2
+          exit 1
+        fi
+        if [[ "${runtime_raw}" = /* ]]; then
+          echo "runtime-python must be a workspace-relative path" >&2
+          exit 1
+        fi
+        candidate="${workspace}/${runtime_raw}"
+        if [[ ! -e "${candidate}" ]]; then
+          echo "runtime-python path does not exist: ${runtime_raw}" >&2
+          exit 1
+        fi
+        resolved="$(python -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${candidate}")"
+        workspace_real="$(python -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "${workspace}")"
+        case "${resolved}" in
+          "${workspace_real}"|"${workspace_real}"/*) ;;
+          *)
+            echo "runtime-python resolves outside GITHUB_WORKSPACE" >&2
+            exit 1
+            ;;
+        esac
+        if [[ ! -f "${resolved}" ]]; then
+          echo "runtime-python must resolve to a file" >&2
+          exit 1
+        fi
+        if [[ ! -x "${resolved}" ]]; then
+          echo "runtime-python must be executable" >&2
+          exit 1
+        fi
+        "${resolved}" -c "import sys; assert sys.version_info >= (3, 12), sys.version"
+        "${resolved}" -m pip install --upgrade pip
+        "${resolved}" -m pip install "${{ github.action_path }}"
+        echo "action-python=${resolved}" >> "${GITHUB_OUTPUT}"
 
     - name: Run governance orchestration
       id: governance-run
@@ -257,6 +313,7 @@ runs:
         GOV_ACTION_IMPACT_ODCS: ${{ inputs.impact-odcs }}
         GOV_ACTION_IMPACT_DBT_MANIFEST: ${{ inputs.impact-dbt-manifest }}
         GOV_ACTION_IMPACT_OPENLINEAGE: ${{ inputs.impact-openlineage }}
+        GOV_ACTION_IMPACT_SOURCES_FROM_CONFIG: ${{ inputs.impact-sources-from-config }}
         GOV_ACTION_DBT_DEFAULT_DATABASE: ${{ inputs.dbt-default-database }}
         GOV_ACTION_REVIEW_OBSERVATIONS: ${{ inputs.review-observations }}
         GOV_ACTION_REVIEW_COMPARISON: ${{ inputs.review-comparison }}
@@ -282,6 +339,7 @@ runs:
           --impact-odcs "$GOV_ACTION_IMPACT_ODCS" \
           --impact-dbt-manifest "$GOV_ACTION_IMPACT_DBT_MANIFEST" \
           --impact-openlineage "$GOV_ACTION_IMPACT_OPENLINEAGE" \
+          --impact-sources-from-config "$GOV_ACTION_IMPACT_SOURCES_FROM_CONFIG" \
           --dbt-default-database "$GOV_ACTION_DBT_DEFAULT_DATABASE" \
           --review-observations "$GOV_ACTION_REVIEW_OBSERVATIONS" \
           --review-comparison "$GOV_ACTION_REVIEW_COMPARISON" \

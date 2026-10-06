@@ -463,6 +463,7 @@ def _parse_impact_sources(
     odcs_raw: str,
     dbt_raw: str,
     openlineage_raw: str,
+    allow_empty: bool = False,
 ) -> list[tuple[str, str]]:
     """Return canonical sorted (kind, relative_path) source specs."""
     kind_paths: dict[str, list[str]] = {
@@ -487,7 +488,7 @@ def _parse_impact_sources(
             normalized.append(relative)
         for relative in normalized:
             specs.append((kind, relative))
-    if not specs:
+    if not specs and not allow_empty:
         raise ActionInputContractError(
             "impact requires at least one ODCS, dbt-manifest, or OpenLineage source"
         )
@@ -1224,11 +1225,20 @@ def run_orchestration(args: argparse.Namespace, *, stdout: TextIO | None = None)
             impact_changes_rel = _validate_contained_path(
                 paths, str(changes_raw), field="impact-changes"
             )
+            sources_from_config = _parse_bool(
+                getattr(args, "impact_sources_from_config", "false"),
+                field="impact-sources-from-config",
+            )
+            if sources_from_config and not config.strip():
+                raise ActionInputContractError(
+                    "config is required when impact-sources-from-config is true"
+                )
             impact_sources = _parse_impact_sources(
                 paths,
                 odcs_raw=args.impact_odcs or "",
                 dbt_raw=args.impact_dbt_manifest or "",
                 openlineage_raw=args.impact_openlineage or "",
+                allow_empty=sources_from_config,
             )
             if profile.strip() and not config.strip():
                 raise ActionInputContractError("profile requires config for impact")
@@ -1788,6 +1798,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--impact-odcs", default="")
     run.add_argument("--impact-dbt-manifest", default="")
     run.add_argument("--impact-openlineage", default="")
+    run.add_argument("--impact-sources-from-config", default="false")
     run.add_argument("--dbt-default-database", default="")
     run.add_argument("--review-observations", default="")
     run.add_argument("--review-comparison", default="")
