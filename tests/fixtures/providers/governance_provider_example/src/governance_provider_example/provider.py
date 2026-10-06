@@ -202,9 +202,7 @@ def _build_graph(document: Mapping[str, Any], *, namespace: str, path: Path) -> 
                 identity=identity,
                 name=name.strip(),
                 description=(
-                    item.get("description")
-                    if isinstance(item.get("description"), str)
-                    else None
+                    item.get("description") if isinstance(item.get("description"), str) else None
                 ),
                 provenance=(_provenance(path),),
             )
