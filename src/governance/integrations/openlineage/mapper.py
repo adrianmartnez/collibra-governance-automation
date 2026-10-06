@@ -68,7 +68,8 @@ def map_openlineage_events_with_observations(
     ns = _require_namespace(namespace)
     validated = validate_openlineage_events(events)
     try:
-        return _map_openlineage_result(validated, namespace=ns)
+        result, _assertions = _map_openlineage_result_with_assertions(validated, namespace=ns)
+        return result
     except (TypeError, ValueError) as exc:
         raise OpenLineageMappingError(
             [
@@ -93,6 +94,25 @@ def load_openlineage_graph_with_observations(
     ns = _require_namespace(namespace)
     events = load_openlineage_events(path)
     return map_openlineage_events_with_observations(events, namespace=ns)
+
+
+def load_openlineage_lineage(
+    path: str | Path, *, namespace: str
+) -> tuple[ColumnLineageAssertion, ...]:
+    """Load OpenLineage events and return column lineage assertions."""
+    ns = _require_namespace(namespace)
+    events = load_openlineage_events(path)
+    validated = validate_openlineage_events(events)
+    return _column_lineage_assertions_for_events(validated, namespace=ns)
+
+
+def _column_lineage_assertions_for_events(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    namespace: str,
+) -> tuple[ColumnLineageAssertion, ...]:
+    _, assertions = _map_openlineage_result_with_assertions(events, namespace=namespace)
+    return tuple(assertions)
 
 
 def _require_namespace(namespace: object) -> str:
@@ -773,9 +793,9 @@ def _emit_column_lineage_edges(
     nodes: list[GraphNode],
     edges: list[GraphEdge],
     observations: PropertyObservationBuilder,
-) -> None:
+) -> list[ColumnLineageAssertion]:
     if not registry:
-        return
+        return []
 
     columns: dict[GraphNodeIdentity, GraphNode] = {
         node.identity: node for node in nodes if node.identity.kind == NODE_KIND_COLUMN
@@ -825,13 +845,14 @@ def _emit_column_lineage_edges(
             )
         )
     edges.extend(materialize_column_lineage_edges(assertions))
+    return assertions
 
 
-def _map_openlineage_result(
+def _map_openlineage_result_with_assertions(
     events: Sequence[Mapping[str, Any]],
     *,
     namespace: str,
-) -> GovernanceMappingResult:
+) -> tuple[GovernanceMappingResult, list[ColumnLineageAssertion]]:
     dataset_states: dict[tuple[str, str], _DatasetState] = {}
     column_lineage: dict[_ColumnLineageKey, list[ProvenanceRecord]] = {}
     run_states: dict[str, _RunState] = {}
@@ -998,7 +1019,7 @@ def _map_openlineage_result(
                     observations=observations,
                 )
 
-    _emit_column_lineage_edges(
+    lineage_assertions = _emit_column_lineage_edges(
         namespace=namespace,
         registry=column_lineage,
         identities=identities,
@@ -1025,7 +1046,10 @@ def _map_openlineage_result(
             edges=edges,
         )
 
-    return GovernanceMappingResult(
-        graph=GovernanceGraph.from_parts(nodes, edges),
-        observations=observations.build(),
+    return (
+        GovernanceMappingResult(
+            graph=GovernanceGraph.from_parts(nodes, edges),
+            observations=observations.build(),
+        ),
+        lineage_assertions,
     )

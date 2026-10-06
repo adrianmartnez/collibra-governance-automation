@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 import psycopg
@@ -130,6 +131,16 @@ WHERE con.contype = 'f'
   AND rn.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'
 ORDER BY sn.nspname, sc.relname, con.conname, ord.ordinality
 """
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresConnectionParams:
+    host: str
+    port: int
+    db: str
+    user: str
+    password: str
+    source_name: str
 
 
 class MetadataDiscoveryError(RuntimeError):
@@ -434,18 +445,34 @@ def build_governance_model(
 class PostgresMetadataScanner:
     """Discover technical metadata from a connected PostgreSQL database."""
 
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
+    def __init__(self, settings: Settings | PostgresConnectionParams) -> None:
+        self._settings = settings if isinstance(settings, Settings) else None
+        self._params = settings if isinstance(settings, PostgresConnectionParams) else None
 
     def scan(self) -> GovernanceModel:
+        if self._params is not None:
+            host = self._params.host
+            port = self._params.port
+            dbname = self._params.db
+            user = self._params.user
+            password = self._params.password
+            source_name = self._params.source_name
+        else:
+            assert self._settings is not None
+            host = self._settings.postgres_host
+            port = self._settings.postgres_port
+            dbname = self._settings.postgres_db
+            user = self._settings.postgres_user
+            password = self._settings.postgres_password
+            source_name = self._settings.postgres_source_name
         try:
             with (
                 psycopg.connect(
-                    host=self._settings.postgres_host,
-                    port=self._settings.postgres_port,
-                    dbname=self._settings.postgres_db,
-                    user=self._settings.postgres_user,
-                    password=self._settings.postgres_password,
+                    host=host,
+                    port=port,
+                    dbname=dbname,
+                    user=user,
+                    password=password,
                     connect_timeout=5,
                     row_factory=dict_row,
                 ) as connection,
@@ -473,7 +500,7 @@ class PostgresMetadataScanner:
                 foreign_key_rows = list(cursor.fetchall())
 
             return build_governance_model(
-                source_name=self._settings.postgres_source_name,
+                source_name=source_name,
                 database_row=database_row,
                 schema_rows=schema_rows,
                 table_column_rows=table_column_rows,
