@@ -680,10 +680,15 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 - Package version `1.4.0` ships with Action contract v1, impact result contracts v1, and review result contract v1; keep Action/package compatibility explicit across releases.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
 
+## Documentation
+
+- [Provider SDK v2 architecture and compatibility contract](docs/architecture/provider-sdk-v2.md) — normative design for the upcoming provider ecosystem ([epic #19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)). The public Provider SDK is **not implemented** yet; this document freezes architecture only.
+
 ## Repository structure
 
 ```text
 action.yml                       official composite GitHub Action
+docs/architecture/               normative architecture contracts (Provider SDK v2)
 src/governance/
   domain/                        vendor-neutral model, graph, lineage, observations, authority, conflicts
   scanner/                       PostgreSQL metadata discovery
@@ -753,7 +758,7 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required. Th
 
 - No commercial Collibra tenant validation
 - Local contract-server coverage is not commercial-tenant validation
-- No provider SDK
+- No provider SDK implementation yet (architecture contract: [docs/architecture/provider-sdk-v2.md](docs/architecture/provider-sdk-v2.md); tracked in [#19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19))
 - No hosted governance service
 - No automatic deletes or destructive reconciliation
 - No automatic apply/remediation from impact analysis or Action review
