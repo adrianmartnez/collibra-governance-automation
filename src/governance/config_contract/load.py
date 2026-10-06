@@ -23,7 +23,7 @@ def load_canonical_config(
     """Parse, validate, overlay profile, and normalize governance.yaml."""
     config_path = Path(path)
     document = parse_governance_yaml(config_path)
-    validate_structure(document)
+    validate_structure(document, version="1")
 
     env = environ if environ is not None else os.environ
     selected = select_profile_name(
@@ -32,7 +32,7 @@ def load_canonical_config(
     )
     effective = apply_profile_overlay(document, selected)
     # Re-validate structure after overlay so invalid overlays fail closed.
-    validate_structure(effective)
+    validate_structure(effective, version="1")
     validate_semantics(effective)
     return normalize_document(effective, config_path=config_path)
 

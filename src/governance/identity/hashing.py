@@ -12,6 +12,7 @@ HASHING_CONTRACT_VERSION = "1"
 ALGORITHM = "sha256"
 
 _PREFIX_CONFIG = b"gov-config-v1\n"
+_PREFIX_CONFIG_V2 = b"gov-config-v2\n"
 _PREFIX_SNAPSHOT = b"gov-snapshot-v1\n"
 _PREFIX_MAPPING = b"gov-mapping-v1\n"
 _PREFIX_POLICY = b"gov-policy-v1\n"
@@ -63,6 +64,11 @@ def _sha256_identity(prefix: bytes, payload: bytes) -> ContentIdentity:
 def config_identity(identity_projection: dict[str, Any]) -> ContentIdentity:
     """Identity for the governance-relevant projection of CanonicalConfig."""
     return _sha256_identity(_PREFIX_CONFIG, canonical_json_bytes(identity_projection))
+
+
+def config_identity_v2(identity_projection: dict[str, Any]) -> ContentIdentity:
+    """Identity for the governance-relevant projection of CanonicalConfigV2."""
+    return _sha256_identity(_PREFIX_CONFIG_V2, canonical_json_bytes(identity_projection))
 
 
 def snapshot_identity(canonical_snapshot_without_identity: dict[str, Any]) -> ContentIdentity:

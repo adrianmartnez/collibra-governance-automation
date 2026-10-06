@@ -191,6 +191,7 @@ def test_capability_factory_receives_runtime_context() -> None:
 
     binding = CapabilityBinding(capability_id=CapabilityId.LINEAGE, factory=factory)
     context = ProviderRuntimeContext(config={"path": "x"})
+    assert context.config_root is None
     assert binding.factory(context) is not None
     assert seen[0].config["path"] == "x"
 

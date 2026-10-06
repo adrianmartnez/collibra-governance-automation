@@ -52,11 +52,15 @@ PreflightResultT_co = TypeVar("PreflightResultT_co", covariant=True)
 class ProviderRuntimeContext:
     """Vendor-neutral runtime context for capability factory construction.
 
-    Holds only the bounded provider-specific payload. Core owns global config
-    resolution; secrets and operational I/O are out of scope here.
+    Holds the resolved provider-specific payload and the config file directory.
+    Core owns global config resolution; secrets and operational I/O are out of
+    scope here. ``config`` is omitted from ``repr`` so resolved secret values
+    are not leaked via logging or exception formatting. ``config_root`` is
+    ``None`` when not provided (do not treat ``""`` as cwd).
     """
 
-    config: Mapping[str, object] = field(default_factory=dict)
+    config: Mapping[str, object] = field(default_factory=dict, repr=False)
+    config_root: str | None = None
 
 
 class CapabilityFactory(Protocol[CapabilityT_co]):

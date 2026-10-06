@@ -1,0 +1,10 @@
+schema_version: "2"
+
+sources:
+  - id: primary
+    provider: example.fixture
+    config:
+      "foo/bar":
+        $env: TOKEN_A
+      "foo~bar":
+        $env: TOKEN_B

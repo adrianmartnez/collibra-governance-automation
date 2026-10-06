@@ -166,7 +166,7 @@ flowchart TB
 | --- | --- | --- |
 | Public Provider SDK | None | `governance.providers` landed (SDK API `1`); built-ins not yet registered |
 | Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Still hardcoded until provider-driven orchestration (#95–#98) |
-| Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | Still v1; v2 additive provider config in #93/#94 |
+| Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | v1 unchanged; additive v2 loader/resolution in #93/#94 (`LoadedConfigV2`) |
 | Discovery | N/A | `discover_providers()` via entry points group `governance.providers` |
 | Collibra/PG packaging | In-repo integrations | Remain in-repo as built-ins for v2.0 |
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from jsonschema import Draft202012Validator
@@ -20,26 +21,38 @@ try:
 except ImportError:  # pragma: no cover
     from importlib_resources import files  # type: ignore[no-redef]
 
-_SCHEMA_RESOURCE = "governance-config.v1.schema.json"
-_validator: Draft202012Validator | None = None
+_SCHEMA_RESOURCES: dict[str, str] = {
+    "1": "governance-config.v1.schema.json",
+    "2": "governance-config.v2.schema.json",
+}
+_VALIDATORS: dict[str, Draft202012Validator] = {}
 
 
-def load_schema() -> dict[str, Any]:
+def load_schema(version: str = "1") -> dict[str, Any]:
+    """Load a packaged governance-config JSON Schema by expected version."""
+    resource = _SCHEMA_RESOURCES.get(version)
+    if resource is None:
+        raise UnsupportedConfigVersionError(
+            [
+                DiagnosticError(
+                    code=CODE_UNSUPPORTED,
+                    path="/schema_version",
+                    message="unsupported configuration schema_version",
+                )
+            ]
+        )
     text = (
-        files("governance.config_contract.schemas")
-        .joinpath(_SCHEMA_RESOURCE)
-        .read_text(encoding="utf-8")
+        files("governance.config_contract.schemas").joinpath(resource).read_text(encoding="utf-8")
     )
-    import json
-
     return json.loads(text)
 
 
-def _get_validator() -> Draft202012Validator:
-    global _validator
-    if _validator is None:
-        _validator = Draft202012Validator(load_schema())
-    return _validator
+def _get_validator(version: str) -> Draft202012Validator:
+    validator = _VALIDATORS.get(version)
+    if validator is None:
+        validator = Draft202012Validator(load_schema(version))
+        _VALIDATORS[version] = validator
+    return validator
 
 
 def _pointer_from_path(path: list[Any]) -> str:
@@ -75,8 +88,23 @@ def _safe_schema_message(error: ValidationError) -> str:
     return "configuration failed structural validation"
 
 
-def validate_structure(document: Any) -> None:
-    """Validate structural schema. Raises ConfigSchemaError / UnsupportedConfigVersionError."""
+def validate_structure(document: Any, *, version: str = "1") -> None:
+    """Validate structural schema for an expected version.
+
+    The ``version`` argument is the loader's expected schema version. A document
+    declaring a different ``schema_version`` fails closed as unsupported.
+    """
+    if version not in _SCHEMA_RESOURCES:
+        raise UnsupportedConfigVersionError(
+            [
+                DiagnosticError(
+                    code=CODE_UNSUPPORTED,
+                    path="/schema_version",
+                    message="unsupported configuration schema_version",
+                )
+            ]
+        )
+
     if not isinstance(document, dict):
         raise ConfigSchemaError(
             [
@@ -88,8 +116,8 @@ def validate_structure(document: Any) -> None:
             ]
         )
 
-    version = document.get("schema_version")
-    if version is not None and version != "1":
+    declared = document.get("schema_version")
+    if declared is not None and declared != version:
         raise UnsupportedConfigVersionError(
             [
                 DiagnosticError(
@@ -102,7 +130,7 @@ def validate_structure(document: Any) -> None:
 
     errors: list[DiagnosticError] = []
     for error in sorted(
-        _get_validator().iter_errors(document),
+        _get_validator(version).iter_errors(document),
         key=lambda err: list(err.absolute_path),
     ):
         path = _pointer_from_path(list(error.absolute_path))

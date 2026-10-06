@@ -1,0 +1,9 @@
+schema_version: "2"
+
+sources:
+  - id: primary
+    provider: example.fixture
+    config:
+      token:
+        $env: PROVIDER_TOKEN
+        extra: bad

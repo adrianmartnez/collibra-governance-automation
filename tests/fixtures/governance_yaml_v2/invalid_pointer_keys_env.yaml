@@ -1,0 +1,10 @@
+schema_version: "2"
+
+sources:
+  - id: primary
+    provider: example.fixture
+    config:
+      "foo/bar":
+        $env: "bad name!"
+      "foo~bar":
+        ok: true
