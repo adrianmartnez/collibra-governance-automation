@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from governance.domain.graph import GraphNodeIdentity
 from governance.domain.observations import PropertyObservationSet
+from governance.providers.registry import ProviderRegistry
 from governance.reconciliation.errors import ReconciliationError
 
 
@@ -22,6 +23,7 @@ def compose_reconciliation_sources(
     dbt_paths: list[str] | tuple[str, ...] | None = None,
     openlineage_paths: list[str] | tuple[str, ...] | None = None,
     dbt_default_database: str | None = None,
+    registry: ProviderRegistry | None = None,
 ) -> ReconciliationSourceBundle:
     """Load mapper-time observations + known object identities via built-in providers.
 
@@ -44,7 +46,8 @@ def compose_reconciliation_sources(
     dbt = sorted(str(path) for path in (dbt_paths or ()))
     openlineage = sorted(str(path) for path in (openlineage_paths or ()))
 
-    registry = build_provider_registry(discover_external=False)
+    if registry is None:
+        registry = build_provider_registry(discover_external=True)
     jobs = compose_legacy_reconciliation_jobs(
         namespace=ns,
         odcs_paths=odcs,

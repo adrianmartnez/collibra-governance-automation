@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
@@ -23,7 +24,10 @@ from governance.config import (
     DEFAULT_POSTGRES_SOURCE_NAME,
     DEFAULT_POSTGRES_USER,
     Settings,
+    parse_batch_ceiling_text,
+    require_strict_positive_int,
 )
+from governance.config_contract.resolve import ConfigResolutionError, validate_collibra_runtime
 from governance.integrations.collibra.adapters import CollibraAdapter, build_collibra_adapter
 from governance.integrations.collibra.import_api import execute_collibra_plan
 from governance.integrations.collibra.mapping import (
@@ -40,7 +44,7 @@ from governance.integrations.collibra.models import (
 )
 from governance.integrations.collibra.preflight import run_preflight
 from governance.integrations.collibra.sync import build_sync_plan
-from governance.providers.builtins._common import is_env_ref
+from governance.providers.builtins._common import is_env_ref, reject_unknown_keys
 from governance.providers.capabilities import CapabilityId
 from governance.providers.contracts import (
     CapabilityBinding,
@@ -75,18 +79,45 @@ _OPTIONAL_INT_KEYS = (
     "batch_max_additional_characteristics",
 )
 
+_COLLIBRA_TOP_LEVEL_KEYS = frozenset(
+    {
+        "mode",
+        "mapping",
+        "base_url",
+        "username",
+        "password",
+        "bearer_token",
+        "client_id",
+        "client_secret",
+        "token_url",
+        "oauth_scope",
+        "oauth_client_auth",
+        "timeout_seconds",
+        "job_poll_interval_seconds",
+        "job_poll_timeout_seconds",
+        "execution_mode",
+        "synchronization_id",
+        "batch_max_resources",
+        "batch_max_additional_characteristics",
+        "source_name",
+    }
+)
+
+_MAPPING_ROOT_KEYS = frozenset(
+    {
+        "domain_ref",
+        "asset_type_refs",
+        "relation_type_refs",
+        "attribute_type_refs",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CollibraMutationRequest:
     """Authorized mutation payload (adapter supplied by the provider runtime)."""
 
     plan: SyncPlan
-    mapping_config: CollibraMappingConfig
-    apply: bool
-    execution_mode: str
-    synchronization_id: str | None = None
-    max_resources: int | None = None
-    max_additional_characteristics: int | None = None
 
 
 class _CollibraProviderRuntime:
@@ -252,27 +283,19 @@ class _CollibraAuthorizedMutationCapability:
         return execute_collibra_plan(
             self._runtime.adapter(),
             request.plan,
-            request.mapping_config,
-            apply=request.apply,
-            execution_mode=request.execution_mode,
-            synchronization_id=request.synchronization_id,
-            max_resources=request.max_resources,
-            max_additional_characteristics=request.max_additional_characteristics,
+            self._runtime.mapping_config,
+            apply=True,
+            execution_mode=self._runtime.execution_mode,
+            synchronization_id=self._runtime.synchronization_id or None,
+            max_resources=self._runtime.batch_max_resources,
+            max_additional_characteristics=self._runtime.batch_max_additional_characteristics,
         )
 
 
 class _CollibraConfigValidator:
     def validate(self, config: Mapping[str, object]) -> None:
         diagnostics: list[ProviderDiagnostic] = []
-
-        if "mapping_path" in config:
-            diagnostics.append(
-                ProviderDiagnostic(
-                    code=CODE_INVALID_DESCRIPTOR,
-                    path="/mapping_path",
-                    message="mapping_path is not supported; use inline mapping",
-                )
-            )
+        diagnostics.extend(reject_unknown_keys(config, _COLLIBRA_TOP_LEVEL_KEYS))
 
         mode = config.get("mode")
         if mode is None:
@@ -382,6 +405,7 @@ class _CollibraConfigValidator:
 
 def _validate_mapping_unresolved(mapping: Mapping[str, object]) -> list[ProviderDiagnostic]:
     diagnostics: list[ProviderDiagnostic] = []
+    diagnostics.extend(reject_unknown_keys(mapping, _MAPPING_ROOT_KEYS, pointer_prefix="/mapping"))
 
     domain_ref = mapping.get("domain_ref")
     if is_env_ref(domain_ref):
@@ -417,6 +441,9 @@ def _validate_mapping_unresolved(mapping: Mapping[str, object]) -> list[Provider
                 )
             )
             continue
+        diagnostics.extend(
+            reject_unknown_keys(refs, frozenset(required_keys), pointer_prefix=pointer)
+        )
         for key in required_keys:
             item_path = f"{pointer}/{key}"
             value = refs.get(key)
@@ -479,41 +506,121 @@ def _resolved_str(config: Mapping[str, object], key: str, default: str = "") -> 
     return str(raw)
 
 
-def _resolved_float(config: Mapping[str, object], key: str, default: float) -> float:
+def _resolved_strict_positive_float(
+    config: Mapping[str, object],
+    key: str,
+    default: float,
+) -> float:
     raw = config.get(key)
     if raw is None:
         return default
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+    path = f"/{key}"
+    if isinstance(raw, bool):
         raise ProviderError(
             [
                 ProviderDiagnostic(
                     code=CODE_INVALID_DESCRIPTOR,
-                    path=f"/{key}",
-                    message=f"{key} must be a number",
+                    path=path,
+                    message=f"{key} must be a positive number",
                 )
             ]
         )
-    return float(raw)
-
-
-def _resolved_int(config: Mapping[str, object], key: str, default: int) -> int:
-    raw = config.get(key)
-    if raw is None:
-        return default
-    if isinstance(raw, bool) or not isinstance(raw, int):
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+    elif isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            raise ProviderError(
+                [
+                    ProviderDiagnostic(
+                        code=CODE_INVALID_DESCRIPTOR,
+                        path=path,
+                        message=f"{key} must be a positive number",
+                    )
+                ]
+            )
+        try:
+            value = float(text)
+        except ValueError as exc:
+            raise ProviderError(
+                [
+                    ProviderDiagnostic(
+                        code=CODE_INVALID_DESCRIPTOR,
+                        path=path,
+                        message=f"{key} must be a positive number",
+                    )
+                ]
+            ) from exc
+    else:
         raise ProviderError(
             [
                 ProviderDiagnostic(
                     code=CODE_INVALID_DESCRIPTOR,
-                    path=f"/{key}",
-                    message=f"{key} must be an integer",
+                    path=path,
+                    message=f"{key} must be a positive number",
                 )
             ]
         )
-    return raw
+    if not math.isfinite(value) or value <= 0:
+        raise ProviderError(
+            [
+                ProviderDiagnostic(
+                    code=CODE_INVALID_DESCRIPTOR,
+                    path=path,
+                    message=f"{key} must be a positive finite number",
+                )
+            ]
+        )
+    return value
 
 
-def _runtime_from_context(context: ProviderRuntimeContext) -> _CollibraProviderRuntime:
+def _resolved_batch_ceiling(config: Mapping[str, object], key: str, default: int) -> int:
+    raw = config.get(key)
+    if raw is None:
+        return default
+    path = f"/{key}"
+    hard_max = (
+        DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES
+        if key == "batch_max_resources"
+        else DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS
+    )
+    try:
+        if isinstance(raw, bool):
+            raise ValueError(f"{key} must be a positive integer")
+        if isinstance(raw, int):
+            value = require_strict_positive_int(raw, key)
+        elif isinstance(raw, str):
+            value = parse_batch_ceiling_text(raw.strip(), key)
+        else:
+            raise ValueError(f"{key} must be a positive integer")
+    except ValueError as exc:
+        raise ProviderError(
+            [
+                ProviderDiagnostic(
+                    code=CODE_INVALID_DESCRIPTOR,
+                    path=path,
+                    message=str(exc),
+                )
+            ]
+        ) from exc
+    if value > hard_max:
+        raise ProviderError(
+            [
+                ProviderDiagnostic(
+                    code=CODE_INVALID_DESCRIPTOR,
+                    path=path,
+                    message=f"{key} exceeds hard maximum {hard_max}",
+                )
+            ]
+        )
+    return value
+
+
+def collibra_runtime_from_context(
+    context: ProviderRuntimeContext,
+    *,
+    validate_runtime: bool = True,
+) -> _CollibraProviderRuntime:
     config = context.config
     mapping_raw = config.get("mapping")
     if not isinstance(mapping_raw, Mapping):
@@ -529,7 +636,7 @@ def _runtime_from_context(context: ProviderRuntimeContext) -> _CollibraProviderR
     mapping_config = _mapping_config_from_resolved(mapping_raw)
     mode = _resolved_str(config, "mode", DEFAULT_COLLIBRA_MODE)
     try:
-        return _CollibraProviderRuntime(
+        runtime = _CollibraProviderRuntime(
             mapping_config=mapping_config,
             mode=mode,
             base_url=_resolved_str(config, "base_url"),
@@ -541,31 +648,44 @@ def _runtime_from_context(context: ProviderRuntimeContext) -> _CollibraProviderR
             token_url=_resolved_str(config, "token_url"),
             oauth_scope=_resolved_str(config, "oauth_scope"),
             oauth_client_auth=_resolved_str(config, "oauth_client_auth"),
-            timeout_seconds=_resolved_float(
+            timeout_seconds=_resolved_strict_positive_float(
                 config, "timeout_seconds", DEFAULT_COLLIBRA_TIMEOUT_SECONDS
             ),
-            job_poll_interval_seconds=_resolved_float(
+            job_poll_interval_seconds=_resolved_strict_positive_float(
                 config,
                 "job_poll_interval_seconds",
                 DEFAULT_COLLIBRA_JOB_POLL_INTERVAL_SECONDS,
             ),
-            job_poll_timeout_seconds=_resolved_float(
+            job_poll_timeout_seconds=_resolved_strict_positive_float(
                 config,
                 "job_poll_timeout_seconds",
                 DEFAULT_COLLIBRA_JOB_POLL_TIMEOUT_SECONDS,
             ),
             execution_mode=_resolved_str(config, "execution_mode", DEFAULT_COLLIBRA_EXECUTION_MODE),
             synchronization_id=_resolved_str(config, "synchronization_id"),
-            batch_max_resources=_resolved_int(
+            batch_max_resources=_resolved_batch_ceiling(
                 config, "batch_max_resources", DEFAULT_COLLIBRA_BATCH_MAX_RESOURCES
             ),
-            batch_max_additional_characteristics=_resolved_int(
+            batch_max_additional_characteristics=_resolved_batch_ceiling(
                 config,
                 "batch_max_additional_characteristics",
                 DEFAULT_COLLIBRA_BATCH_MAX_ADDITIONAL_CHARACTERISTICS,
             ),
             source_name=_resolved_str(config, "source_name", DEFAULT_POSTGRES_SOURCE_NAME),
         )
+        if validate_runtime:
+            validate_collibra_runtime(runtime.build_settings(), None)
+        return runtime
+    except ConfigResolutionError as exc:
+        raise ProviderError(
+            [
+                ProviderDiagnostic(
+                    code=CODE_INVALID_DESCRIPTOR,
+                    path=exc.path or "/",
+                    message=str(exc),
+                )
+            ]
+        ) from exc
     except ValueError as exc:
         raise ProviderError(
             [
@@ -581,25 +701,27 @@ def _runtime_from_context(context: ProviderRuntimeContext) -> _CollibraProviderR
 def _remote_state_read_factory(
     context: ProviderRuntimeContext,
 ) -> _CollibraRemoteStateReadCapability:
-    return _CollibraRemoteStateReadCapability(_runtime_from_context(context))
+    return _CollibraRemoteStateReadCapability(collibra_runtime_from_context(context))
 
 
 def _target_planning_factory(
     context: ProviderRuntimeContext,
 ) -> _CollibraTargetPlanningCapability:
-    return _CollibraTargetPlanningCapability(_runtime_from_context(context))
+    return _CollibraTargetPlanningCapability(collibra_runtime_from_context(context))
 
 
 def _compatibility_preflight_factory(
     context: ProviderRuntimeContext,
 ) -> _CollibraCompatibilityPreflightCapability:
-    return _CollibraCompatibilityPreflightCapability(_runtime_from_context(context))
+    return _CollibraCompatibilityPreflightCapability(
+        collibra_runtime_from_context(context, validate_runtime=False)
+    )
 
 
 def _authorized_mutation_factory(
     context: ProviderRuntimeContext,
 ) -> _CollibraAuthorizedMutationCapability:
-    return _CollibraAuthorizedMutationCapability(_runtime_from_context(context))
+    return _CollibraAuthorizedMutationCapability(collibra_runtime_from_context(context))
 
 
 def register() -> ProviderRegistration:
@@ -639,7 +761,17 @@ def register() -> ProviderRegistration:
     )
 
 
+def collibra_mapping_and_settings_from_context(
+    context: ProviderRuntimeContext,
+) -> tuple[CollibraMappingConfig, Settings]:
+    """Resolved inline mapping and Collibra-oriented Settings from provider context."""
+    runtime = collibra_runtime_from_context(context)
+    return runtime.mapping_config, runtime.build_settings()
+
+
 __all__ = [
     "CollibraMutationRequest",
+    "collibra_mapping_and_settings_from_context",
+    "collibra_runtime_from_context",
     "register",
 ]

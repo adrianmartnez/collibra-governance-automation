@@ -14,6 +14,7 @@ from governance.integrations.openlineage.mapper import (
     load_openlineage_lineage,
 )
 from governance.providers.builtins._common import (
+    reject_unknown_keys,
     require_literal_relative_path,
     resolve_document_path,
 )
@@ -56,9 +57,13 @@ class _OpenLineageLineageCapability:
         return load_openlineage_lineage(self._path, namespace=self._namespace)
 
 
+_OPENLINEAGE_ALLOWED_KEYS = frozenset({"path", "namespace"})
+
+
 class _OpenLineageConfigValidator:
     def validate(self, config: Mapping[str, object]) -> None:
         diagnostics: list[ProviderDiagnostic] = []
+        diagnostics.extend(reject_unknown_keys(config, _OPENLINEAGE_ALLOWED_KEYS))
         try:
             require_literal_relative_path("path", config.get("path"), pointer="/path")
         except ProviderError as exc:

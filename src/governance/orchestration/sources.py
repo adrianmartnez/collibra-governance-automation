@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from governance.config_contract.provider_resolution import (
     ResolvedProviderBinding,
@@ -14,6 +15,9 @@ from governance.domain.models import GovernanceModel
 from governance.domain.observations import PropertyObservationSet
 from governance.providers import CapabilityId, ProviderRegistry
 from governance.providers.contracts import (
+    GovernanceGraphCapability,
+    MetadataDiscoveryCapability,
+    PropertyObservationsCapability,
     ProviderRegistration,
     ProviderRuntimeContext,
 )
@@ -41,11 +45,11 @@ class SourceExecutionResult:
 
 def run_metadata_discovery(binding: ResolvedProviderBinding) -> GovernanceModel:
     """Construct metadata_discovery and invoke ``discover()``."""
-    capability = construct_provider_capability(binding, CapabilityId.METADATA_DISCOVERY)
-    discover = getattr(capability, "discover", None)
-    if not callable(discover):
-        raise TypeError("metadata_discovery capability missing discover()")
-    return discover()
+    capability = cast(
+        MetadataDiscoveryCapability,
+        construct_provider_capability(binding, CapabilityId.METADATA_DISCOVERY),
+    )
+    return capability.discover()
 
 
 def run_reconciliation_sources(jobs: Sequence[SourceCapabilityJob]) -> SourceExecutionResult:
@@ -66,23 +70,21 @@ def run_reconciliation_sources(jobs: Sequence[SourceCapabilityJob]) -> SourceExe
                         )
                     ]
                 )
-            obs_cap = construct_provider_capability(job.binding, CapabilityId.PROPERTY_OBSERVATIONS)
-            load_obs = getattr(obs_cap, "load_observations", None)
-            if not callable(load_obs):
-                raise TypeError("property_observations capability missing load_observations()")
-            observations = load_obs()
+            obs_cap = cast(
+                PropertyObservationsCapability,
+                construct_provider_capability(job.binding, CapabilityId.PROPERTY_OBSERVATIONS),
+            )
+            observations = obs_cap.load_observations()
             if not isinstance(observations, PropertyObservationSet):
                 raise TypeError("load_observations must return PropertyObservationSet")
             observation_sets.append(observations)
 
             if CapabilityId.GOVERNANCE_GRAPH in job.capabilities:
-                graph_cap = construct_provider_capability(
-                    job.binding, CapabilityId.GOVERNANCE_GRAPH
+                graph_cap = cast(
+                    GovernanceGraphCapability,
+                    construct_provider_capability(job.binding, CapabilityId.GOVERNANCE_GRAPH),
                 )
-                load_graph = getattr(graph_cap, "load_graph", None)
-                if not callable(load_graph):
-                    raise TypeError("governance_graph capability missing load_graph()")
-                graph = load_graph()
+                graph = graph_cap.load_graph()
                 if not isinstance(graph, GovernanceGraph):
                     raise TypeError("load_graph must return GovernanceGraph")
                 for node in graph.nodes:
@@ -132,11 +134,11 @@ def run_impact_graph(jobs: Sequence[SourceCapabilityJob]) -> GovernanceGraph:
     for job in jobs:
         path = job.diagnostic_path or f"/sources/{job.logical_id}"
         try:
-            graph_cap = construct_provider_capability(job.binding, CapabilityId.GOVERNANCE_GRAPH)
-            load_graph = getattr(graph_cap, "load_graph", None)
-            if not callable(load_graph):
-                raise TypeError("governance_graph capability missing load_graph()")
-            graph = load_graph()
+            graph_cap = cast(
+                GovernanceGraphCapability,
+                construct_provider_capability(job.binding, CapabilityId.GOVERNANCE_GRAPH),
+            )
+            graph = graph_cap.load_graph()
             if not isinstance(graph, GovernanceGraph):
                 raise TypeError("load_graph must return GovernanceGraph")
             graphs.append(graph)

@@ -720,6 +720,28 @@ def _add_relation(
     bucket.append(related)
 
 
+def preview_collibra_plan_result(
+    plan: SyncPlan,
+    mapping_config: CollibraMappingConfig,
+    *,
+    execution_mode: str,
+    synchronization_id: str | None = None,
+    max_resources: int | None = None,
+    max_additional_characteristics: int | None = None,
+) -> Any:
+    """Dry-run result for import_v2 / sync_v2 without adapter I/O."""
+    return _execute_collibra_plan(
+        None,
+        plan,
+        mapping_config,
+        apply=False,
+        execution_mode=execution_mode,
+        synchronization_id=synchronization_id,
+        max_resources=max_resources,
+        max_additional_characteristics=max_additional_characteristics,
+    )
+
+
 def execute_collibra_plan(
     adapter: Any,
     plan: SyncPlan,

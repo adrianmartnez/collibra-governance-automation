@@ -2,7 +2,58 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from governance.providers.errors import CODE_INVALID_DESCRIPTOR, ProviderDiagnostic, ProviderError
+
+
+def reject_unknown_keys(
+    config: Mapping[str, object],
+    allowed: frozenset[str],
+    *,
+    pointer_prefix: str = "",
+) -> list[ProviderDiagnostic]:
+    """Reject top-level keys outside ``allowed`` with JSON pointer paths."""
+    diagnostics: list[ProviderDiagnostic] = []
+    for key in config:
+        if key not in allowed:
+            path = f"{pointer_prefix}/{key}" if pointer_prefix else f"/{key}"
+            diagnostics.append(
+                ProviderDiagnostic(
+                    code=CODE_INVALID_DESCRIPTOR,
+                    path=path,
+                    message=f"unknown property {key!r} is not allowed",
+                )
+            )
+    return diagnostics
+
+
+def require_non_empty_string_or_env(
+    key: str,
+    value: object,
+    *,
+    pointer: str | None = None,
+) -> list[ProviderDiagnostic]:
+    path = pointer or f"/{key}"
+    if value is None:
+        return [
+            ProviderDiagnostic(
+                code=CODE_INVALID_DESCRIPTOR,
+                path=path,
+                message=f"{key} is required",
+            )
+        ]
+    if is_env_ref(value):
+        return []
+    if isinstance(value, str) and value.strip():
+        return []
+    return [
+        ProviderDiagnostic(
+            code=CODE_INVALID_DESCRIPTOR,
+            path=path,
+            message=f"{key} must be a non-empty string or environment reference",
+        )
+    ]
 
 
 def is_env_ref(value: object) -> bool:

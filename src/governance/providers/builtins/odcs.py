@@ -10,6 +10,7 @@ from governance.domain.graph import GovernanceGraph
 from governance.domain.observations import PropertyObservationSet
 from governance.integrations.odcs import load_odcs_graph_with_observations
 from governance.providers.builtins._common import (
+    reject_unknown_keys,
     require_literal_relative_path,
     resolve_document_path,
 )
@@ -41,9 +42,13 @@ class _OdcsObservationsCapability:
         return load_odcs_graph_with_observations(self._path, namespace=self._namespace).observations
 
 
+_ODCS_ALLOWED_KEYS = frozenset({"path", "namespace"})
+
+
 class _OdcsConfigValidator:
     def validate(self, config: Mapping[str, object]) -> None:
         diagnostics: list[ProviderDiagnostic] = []
+        diagnostics.extend(reject_unknown_keys(config, _ODCS_ALLOWED_KEYS))
         try:
             require_literal_relative_path("path", config.get("path"), pointer="/path")
         except ProviderError as exc:

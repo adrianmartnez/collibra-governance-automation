@@ -154,14 +154,33 @@ def execute_sync_plan(
         if action.action_type in {SyncActionType.CREATE, SyncActionType.UPDATE}
     ]
     if not apply:
-        return SyncResult(
-            success=True,
-            dry_run=True,
-            applied_count=0,
-            unchanged_count=unchanged_count,
-            plan=plan,
-        )
+        return dry_run_sync_result(plan)
+    return _apply_sync_plan_mutations(
+        adapter,
+        plan,
+        unchanged_count=unchanged_count,
+        mutating=mutating,
+    )
 
+
+def dry_run_sync_result(plan: SyncPlan) -> SyncResult:
+    """Pure dry-run ``SyncResult`` matching ``execute_sync_plan`` when ``apply=False``."""
+    return SyncResult(
+        success=True,
+        dry_run=True,
+        applied_count=0,
+        unchanged_count=len(plan.unchanged),
+        plan=plan,
+    )
+
+
+def _apply_sync_plan_mutations(
+    adapter: CollibraAdapter,
+    plan: SyncPlan,
+    *,
+    unchanged_count: int,
+    mutating: list[SyncAction],
+) -> SyncResult:
     local_to_remote = _seed_remote_ids_from_plan(plan)
     applied = 0
 
