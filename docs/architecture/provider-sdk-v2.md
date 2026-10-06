@@ -168,7 +168,7 @@ flowchart TB
 | Aspect | Pre-#90 (v1.4) | After foundation (#90–#92) / remaining v2 work |
 | --- | --- | --- |
 | Public Provider SDK | None | `governance.providers` landed (SDK API `1`); built-ins not yet registered |
-| Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Still hardcoded until provider-driven orchestration (#95–#98) |
+| Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Provider-driven orchestration via built-in capabilities (#95–#98) |
 | Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | v1 unchanged; additive v2 loader/resolution in #93/#94 (`LoadedConfigV2`) |
 | Discovery | N/A | `discover_providers()` via entry points group `governance.providers` |
 | Collibra/PG packaging | In-repo integrations | Remain in-repo as built-ins for v2.0 |
@@ -245,7 +245,10 @@ Capabilities reflect real roles already present in the repository. They are the 
 | `metadata_discovery` | Produce technical/discovered metadata usable by inventory/snapshots | PostgreSQL scanner |
 | `governance_graph` | Produce a `GovernanceGraph` | ODCS, dbt, OpenLineage mappers |
 | `property_observations` | Produce property observations / provenance | ODCS, dbt, OpenLineage |
-| `lineage` | Produce lineage assertions/edges | dbt, OpenLineage |
+| `lineage` | Produce lineage assertions/edges | OpenLineage |
+
+> **Note:** dbt dependency graph edges are **not** the same as SDK `ColumnLineageAssertion` /
+> the `lineage` capability; among built-in providers, only OpenLineage implements `lineage`.
 
 ### Target-side
 
