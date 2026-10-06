@@ -258,6 +258,8 @@ runs:
           exit 0
         fi
         # Caller-prepared runtime: install ONLY the Action/core package. Never install providers.
+        # Containment uses abspath (does not follow the final interpreter symlink).
+        # Venv bin/python commonly symlinks to a system Python outside the workspace.
         if [[ "${runtime_raw}" == *$'\0'* || "${runtime_raw}" == *$'\r'* || "${runtime_raw}" == *$'\n'* ]]; then
           echo "runtime-python must not contain NUL/CR/LF" >&2
           exit 1
@@ -266,40 +268,38 @@ runs:
           echo "runtime-python must be a workspace-relative path" >&2
           exit 1
         fi
-        # Containment uses abspath (does not follow the final interpreter symlink).
-        # Venv bin/python commonly symlinks to a system Python outside the workspace;
-        # realpath on the executable would false-reject a valid caller-prepared runtime.
-        validated="$(
-          python -c '
-import os
-import sys
-from pathlib import Path
-
-workspace = Path(sys.argv[1])
-raw = sys.argv[2]
-parts = Path(raw).parts
-if not raw or Path(raw).is_absolute() or ".." in parts:
-    raise SystemExit("runtime-python must be a relative path without \"..\"")
-workspace_abs = Path(os.path.abspath(str(workspace)))
-candidate = Path(os.path.abspath(str(workspace_abs / raw)))
-try:
-    if os.path.commonpath([str(workspace_abs), str(candidate)]) != str(workspace_abs):
-        raise SystemExit("runtime-python escapes GITHUB_WORKSPACE")
-except ValueError as exc:
-    raise SystemExit("runtime-python escapes GITHUB_WORKSPACE") from exc
-if not candidate.exists():
-    raise SystemExit(f"runtime-python path does not exist: {raw}")
-if not candidate.is_file():
-    raise SystemExit("runtime-python must be a file")
-if not os.access(candidate, os.X_OK):
-    raise SystemExit("runtime-python must be executable")
-print(candidate)
-' "${workspace}" "${runtime_raw}"
-        )"
-        "${validated}" -c "import sys; assert sys.version_info >= (3, 12), sys.version"
-        "${validated}" -m pip install --upgrade pip
-        "${validated}" -m pip install "${{ github.action_path }}"
-        echo "action-python=${validated}" >> "${GITHUB_OUTPUT}"
+        case "${runtime_raw}" in
+          *..*)
+            echo "runtime-python must not contain '..'" >&2
+            exit 1
+            ;;
+        esac
+        candidate="${workspace}/${runtime_raw}"
+        if [[ ! -e "${candidate}" ]]; then
+          echo "runtime-python path does not exist: ${runtime_raw}" >&2
+          exit 1
+        fi
+        if [[ ! -f "${candidate}" ]]; then
+          echo "runtime-python must be a file" >&2
+          exit 1
+        fi
+        if [[ ! -x "${candidate}" ]]; then
+          echo "runtime-python must be executable" >&2
+          exit 1
+        fi
+        workspace_abs="$(cd "${workspace}" && pwd -P)"
+        candidate_abs="$(cd "$(dirname "${candidate}")" && pwd -P)/$(basename "${candidate}")"
+        case "${candidate_abs}" in
+          "${workspace_abs}"|"${workspace_abs}"/*) ;;
+          *)
+            echo "runtime-python escapes GITHUB_WORKSPACE" >&2
+            exit 1
+            ;;
+        esac
+        "${candidate}" -c "import sys; assert sys.version_info >= (3, 12), sys.version"
+        "${candidate}" -m pip install --upgrade pip
+        "${candidate}" -m pip install "${{ github.action_path }}"
+        echo "action-python=${candidate}" >> "${GITHUB_OUTPUT}"
 
     - name: Run governance orchestration
       id: governance-run
