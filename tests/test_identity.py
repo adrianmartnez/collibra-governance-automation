@@ -22,6 +22,7 @@ from governance.domain import (
 from governance.identity import (
     HASHING_CONTRACT_VERSION,
     config_identity,
+    config_identity_v2,
     graph_identity,
     mapping_identity,
     plan_identity,
@@ -54,6 +55,7 @@ def test_domain_separation_between_components() -> None:
     payload = {"x": 1}
     identities = [
         config_identity(payload),
+        config_identity_v2(payload),
         snapshot_identity(payload),
         mapping_identity(payload),
         policy_identity(payload),
@@ -64,6 +66,7 @@ def test_domain_separation_between_components() -> None:
     ]
     digests = [identity.digest for identity in identities]
     assert len(set(digests)) == len(digests)
+    assert config_identity(payload) != config_identity_v2(payload)
     assert config_identity(payload) != graph_identity(payload)
     assert snapshot_identity(payload) != graph_identity(payload)
 

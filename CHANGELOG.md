@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Additive `governance.yaml` schema v2 with provider-neutral multi source/target entries and `$env` refs (v1 loader/schema unchanged)
+- `LoadedConfigV2` atomic load result (`CanonicalConfigV2` + role-scoped `EffectiveProviderLocations`)
+- Pre-I/O `resolve_provider_configuration` / `construct_provider_capability` boundary (#93/#94)
+- Domain-separated `config_identity_v2` (`gov-config-v2` prefix); locations never enter the hash
+
 ## 1.4.0 - 2026-09-03
 
 ### Added

@@ -1,0 +1,21 @@
+schema_version: "2"
+
+sources:
+  - id: zebra
+    provider: example.source
+    config:
+      order: 1
+  - id: alpha
+    provider: example.source
+    config:
+      order: 2
+
+targets:
+  - id: omega
+    provider: example.target
+    config:
+      order: 1
+  - id: beta
+    provider: example.target
+    config:
+      order: 2

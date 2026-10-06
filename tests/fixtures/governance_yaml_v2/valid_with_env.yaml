@@ -1,0 +1,12 @@
+schema_version: "2"
+
+sources:
+  - id: primary
+    provider: example.fixture
+    config:
+      token:
+        $env: PROVIDER_TOKEN
+      nested:
+        host: example.local
+        password:
+          $env: PROVIDER_PASSWORD

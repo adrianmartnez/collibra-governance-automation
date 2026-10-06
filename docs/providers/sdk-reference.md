@@ -76,9 +76,9 @@ def factory(context: ProviderRuntimeContext) -> SomeCapability:
     ...
 ```
 
-`ProviderRuntimeContext.config` is the bounded provider payload only. Registration and discovery never invoke factories and never perform operational I/O.
+`ProviderRuntimeContext` carries the resolved bounded provider payload in `.config` and the governance.yaml directory in `.config_root`. The `config` field is omitted from `repr` so resolved secret values are not leaked. Registration and discovery never invoke factories and never perform operational I/O.
 
-Optional `ProviderConfigValidator.validate(config) -> None` validates that bounded payload later (#93/#94). It must not merge profiles, resolve secrets, or authorize mutation.
+Optional `ProviderConfigValidator.validate(config) -> None` validates the **unresolved** bounded payload during `resolve_provider_configuration` (before core `$env` resolution). It must not merge profiles, resolve secrets, or authorize mutation. Capability factories run only via explicit `construct_provider_capability` after resolution.
 
 ## Registry
 
