@@ -743,7 +743,7 @@ def test_cli_diff_successful_read_emits_success(
         lambda model, mapping: CollibraDesiredState(assets=()),
     )
     monkeypatch.setattr(
-        "governance.cli.build_collibra_adapter",
+        "governance.providers.builtins.collibra.build_collibra_adapter",
         lambda settings, mapping: _EmptyRemoteAdapter(),
     )
     with bound_sink(sink):
@@ -778,7 +778,7 @@ def test_cli_sync_preread_error_emits_error(monkeypatch: pytest.MonkeyPatch) -> 
         lambda model, mapping: CollibraDesiredState(assets=()),
     )
     monkeypatch.setattr(
-        "governance.cli.build_collibra_adapter",
+        "governance.providers.builtins.collibra.build_collibra_adapter",
         lambda settings, mapping: BoomAdapter(),
     )
     with bound_sink(sink), pytest.raises(CollibraAdapterError):
@@ -891,7 +891,9 @@ def test_cli_preflight_incompatible_emits_failure(
         "governance.cli._load_canonical_and_settings",
         lambda **kwargs: (canonical, settings, NormalizedAuthorityPolicySet()),
     )
-    monkeypatch.setattr("governance.cli.run_preflight", lambda settings, mapping: report)
+    monkeypatch.setattr(
+        "governance.providers.builtins.collibra.run_preflight", lambda settings, mapping: report
+    )
     args = Namespace(format="json", config="governance.yaml", profile=None)
     with bound_sink(sink):
         code = _cmd_preflight(args)

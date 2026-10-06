@@ -220,7 +220,9 @@ def _patch_scanner(monkeypatch: pytest.MonkeyPatch, model: GovernanceModel | Non
         def scan(self) -> GovernanceModel:
             return target
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", FakeScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", FakeScanner
+    )
 
 
 def _patch_adapter(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -257,7 +259,7 @@ def _patch_adapter(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         calls["adapters"].append(adapter)
         return adapter
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
     return calls
 
 
@@ -425,7 +427,9 @@ def test_plan_inspect_offline(
             scanner_calls["count"] += 1
             raise AssertionError("inspect must not scan")
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", BoomScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", BoomScanner
+    )
     assert main(["plan", "inspect", str(plan_path), "--format", "json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == load_saved_plan(plan_path).to_dict()
@@ -446,7 +450,7 @@ def test_dry_apply_zero_writes(
         build_calls["count"] += 1
         raise AssertionError("apply must not rebuild sync plan")
 
-    monkeypatch.setattr("governance.cli.build_sync_plan", boom_build)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_sync_plan", boom_build)
 
     assert main(["apply", str(plan_path), "--config", str(config), "--format", "json"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -474,7 +478,7 @@ def test_apply_does_not_call_build_sync_plan(
         build_calls["count"] += 1
         raise AssertionError("apply must use saved actions only")
 
-    monkeypatch.setattr("governance.cli.build_sync_plan", boom_build)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_sync_plan", boom_build)
     assert (
         main(
             [

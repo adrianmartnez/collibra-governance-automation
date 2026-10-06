@@ -232,7 +232,9 @@ def _patch_scanner(monkeypatch: pytest.MonkeyPatch, model: GovernanceModel | Non
         def scan(self) -> GovernanceModel:
             return target
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", FakeScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", FakeScanner
+    )
 
 
 def _patch_adapter(
@@ -268,7 +270,7 @@ def _patch_adapter(
         calls["adapters"].append(adapter)
         return adapter
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
     return calls
 
 

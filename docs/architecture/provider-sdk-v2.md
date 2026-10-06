@@ -7,10 +7,13 @@
 - **PR sequence:** 1/6 of v2.0 (`Provider Ecosystem`); foundation implementation is PR 2/6 (#90–#92)
 
 > **Implementation state:** This document freezes architectural decisions for the Provider SDK.
-> The public foundation under `governance.providers` (SDK API version `1`, registry, and entry-point
-> discovery) is implemented against this contract. Built-in integrations are not yet migrated;
-> CLI/Action/config v1 behavior remains unchanged. Issues #93–#101 MUST continue to implement
-> against this contract and MUST NOT redefine its fundamental semantics.
+> The public foundation under `governance.providers` (SDK API version `1`, registry, entry-point
+> discovery, and built-in registrations via atomic `build_provider_registry`) is implemented
+> against this contract. `governance.yaml` v2 uses inline provider mapping and
+> `resolve_provider_configuration`; v1 CLI/Action paths that resolve `Settings` are unchanged.
+> Desired-state projection for Collibra (`map_to_desired_state`) remains Collibra-specific even
+> when targets are provider-driven. Issues #93–#101 MUST continue to implement against this
+> contract and MUST NOT redefine its fundamental semantics.
 > Public reference: [docs/providers/sdk-reference.md](../providers/sdk-reference.md).
 
 Language in this document uses **MUST / MUST NOT / SHOULD / MAY** with normative force for future

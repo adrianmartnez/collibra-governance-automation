@@ -865,7 +865,7 @@ def test_conflict_only_review_zero_remote_io(
         boom("build_collibra_adapter"),
     )
     monkeypatch.setattr(
-        "governance.cli.build_collibra_adapter",
+        "governance.providers.builtins.collibra.build_collibra_adapter",
         boom("cli.build_collibra_adapter"),
     )
     httpx = pytest.importorskip("httpx")

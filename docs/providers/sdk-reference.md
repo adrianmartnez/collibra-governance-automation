@@ -7,7 +7,9 @@ Public Python surface for third-party and future built-in providers.
 **Entry-point group:** `governance.providers`  
 **Package version:** remains independent (`1.4.0` at foundation landing)
 
-Built-in integrations (PostgreSQL, ODCS, dbt, OpenLineage, Collibra) are **not** yet registered through this SDK. Existing CLI/Action behavior is unchanged.
+Built-in providers (PostgreSQL, ODCS, dbt, OpenLineage, Collibra) register through the same
+`ProviderRegistry` as third-party entry points. v1 CLI/Action paths that use `Settings`
+resolution are unchanged until explicitly migrated.
 
 ## Import surface
 
@@ -56,7 +58,7 @@ No capability implies another. Negotiation is explicit via `ProviderRegistry.req
 
 ### Target capability contracts
 
-- `remote_state_read` produces remote state (`RemoteStateReadCapability`).
+- `remote_state_read` produces remote state (`RemoteStateReadCapability.read_remote_state(request)`).
 - `target_planning` consumes **desired state + remote state** and produces a plan
   (`TargetPlanningCapability.build_plan(desired_state, remote_state)`).
 - Planning MUST NOT mutate remote state and MUST NOT perform a second remote read.
