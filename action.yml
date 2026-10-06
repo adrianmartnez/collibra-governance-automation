@@ -260,15 +260,17 @@ runs:
         # Caller-prepared runtime: install ONLY the Action/core package. Never install providers.
         # Containment uses abspath (does not follow the final interpreter symlink).
         # Venv bin/python commonly symlinks to a system Python outside the workspace.
-        if [[ "${runtime_raw}" == *$'\0'* || "${runtime_raw}" == *$'\r'* || "${runtime_raw}" == *$'\n'* ]]; then
-          echo "runtime-python must not contain NUL/CR/LF" >&2
-          exit 1
-        fi
-        if [[ "${runtime_raw}" = /* ]]; then
-          echo "runtime-python must be a workspace-relative path" >&2
-          exit 1
-        fi
+        # Do not match *$'\0'* in bash [[ ]] — NUL truncates the pattern and matches every string.
+        # Action env inputs cannot carry embedded NUL; reject CR/LF explicitly.
         case "${runtime_raw}" in
+          *$'\r'*|*$'\n'*)
+            echo "runtime-python must not contain CR/LF" >&2
+            exit 1
+            ;;
+          /*)
+            echo "runtime-python must be a workspace-relative path" >&2
+            exit 1
+            ;;
           *..*)
             echo "runtime-python must not contain '..'" >&2
             exit 1
