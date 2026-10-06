@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from governance.config import Settings
+from governance.config_contract.models import CanonicalConfig
 from governance.domain.authority import NormalizedAuthorityPolicySet
 from governance.identity import plan_identity
 from governance.identity.hashing import ContentIdentity
@@ -48,6 +49,8 @@ from governance.integrations.collibra.telemetry import (
     execution_scope,
     sink_from_environ,
 )
+from governance.orchestration.operation_runtime import OperationRuntime
+from governance.orchestration.registry import build_provider_registry
 from governance.plans import SavedGovernancePlan
 from governance.plans.apply_result import build_apply_result
 from support.collibra_contract_server import (
@@ -84,6 +87,19 @@ def _settings(**overrides: object) -> Settings:
     }
     values.update(overrides)
     return Settings(**values)
+
+
+def _fake_operation_runtime(
+    settings: Settings,
+    canonical: object,
+) -> OperationRuntime:
+    return OperationRuntime(
+        registry=build_provider_registry(discover_external=False),
+        authority=NormalizedAuthorityPolicySet(),
+        kind="1",
+        canonical_v1=canonical if isinstance(canonical, CanonicalConfig) else None,
+        settings=settings,
+    )
 
 
 def test_build_event_drops_secrets_and_unknown_keys() -> None:
@@ -737,7 +753,10 @@ def test_cli_diff_successful_read_emits_success(
     from governance.cli import _cmd_diff
 
     sink = RecordingSink()
-    monkeypatch.setattr("governance.cli._scan_model", lambda settings: object())
+    monkeypatch.setattr(
+        "governance.cli._scan_model",
+        lambda settings, registry=None: object(),
+    )
     monkeypatch.setattr(
         "governance.cli.map_to_desired_state",
         lambda model, mapping: CollibraDesiredState(assets=()),
@@ -772,7 +791,10 @@ def test_cli_sync_preread_error_emits_error(monkeypatch: pytest.MonkeyPatch) -> 
             raise CollibraAdapterError("read failed", operation="get")
 
     sink = RecordingSink()
-    monkeypatch.setattr("governance.cli._scan_model", lambda settings: object())
+    monkeypatch.setattr(
+        "governance.cli._scan_model",
+        lambda settings, registry=None: object(),
+    )
     monkeypatch.setattr(
         "governance.cli.map_to_desired_state",
         lambda model, mapping: CollibraDesiredState(assets=()),
@@ -836,14 +858,27 @@ def test_cli_apply_stale_emits_failure(
             return {}
 
     monkeypatch.setattr("governance.cli.load_saved_plan", lambda path: saved)
+    runtime = _fake_operation_runtime(settings, canonical)
+    object.__setattr__(runtime, "canonical_v1", canonical)
     monkeypatch.setattr(
-        "governance.cli._load_canonical_and_settings",
-        lambda **kwargs: (canonical, settings, NormalizedAuthorityPolicySet()),
+        "governance.cli._load_operation_runtime",
+        lambda **kwargs: runtime,
     )
     monkeypatch.setattr("governance.cli.load_normalized_policies", lambda canonical: _Policies())
     monkeypatch.setattr("governance.cli.validate_collibra_runtime", lambda *args, **kwargs: None)
-    monkeypatch.setattr("governance.cli._scan_model", lambda settings: object())
+    monkeypatch.setattr(
+        "governance.cli.scan_model_from_runtime",
+        lambda operation: object(),
+    )
     monkeypatch.setattr("governance.cli.GovernanceSnapshot", _GS)
+    monkeypatch.setattr(
+        "governance.cli.target_context_projection_for_runtime",
+        lambda operation: {"mode": "mock", "provider": "collibra"},
+    )
+    monkeypatch.setattr(
+        "governance.cli._resolve_mapping_for_operation",
+        lambda operation, mode: mock_mapping_config(),
+    )
     args = Namespace(
         format="json",
         apply=False,
@@ -887,13 +922,13 @@ def test_cli_preflight_incompatible_emits_failure(
             ),
         ),
     )
+    runtime = _fake_operation_runtime(settings, canonical)
+    object.__setattr__(runtime, "canonical_v1", canonical)
     monkeypatch.setattr(
-        "governance.cli._load_canonical_and_settings",
-        lambda **kwargs: (canonical, settings, NormalizedAuthorityPolicySet()),
+        "governance.cli._load_operation_runtime",
+        lambda **kwargs: runtime,
     )
-    monkeypatch.setattr(
-        "governance.providers.builtins.collibra.run_preflight", lambda settings, mapping: report
-    )
+    monkeypatch.setattr("governance.cli.invoke_preflight", lambda binding: report)
     args = Namespace(format="json", config="governance.yaml", profile=None)
     with bound_sink(sink):
         code = _cmd_preflight(args)
