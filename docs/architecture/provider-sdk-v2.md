@@ -1,15 +1,17 @@
 # Provider SDK v2 — Architecture and Compatibility Contract
 
-**Status:** Normative architecture contract (documentation only)  
-**Package version at freeze:** `collibra-governance-automation` `1.4.0`  
-**Epic:** [#19 — Publish the provider SDK and extension ecosystem](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)  
-**Issue:** [#89 — Define the v2 Provider SDK architecture and compatibility contract](https://github.com/adrianmartnez/collibra-governance-automation/issues/89)  
-**PR sequence:** 1/6 of v2.0 (`Provider Ecosystem`)
+- **Status:** Normative architecture contract
+- **Package version at freeze:** `collibra-governance-automation` `1.4.0`
+- **Epic:** [#19 — Publish the provider SDK and extension ecosystem](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)
+- **Issue:** [#89 — Define the v2 Provider SDK architecture and compatibility contract](https://github.com/adrianmartnez/collibra-governance-automation/issues/89)
+- **PR sequence:** 1/6 of v2.0 (`Provider Ecosystem`); foundation implementation is PR 2/6 (#90–#92)
 
 > **Implementation state:** This document freezes architectural decisions for the Provider SDK.
-> As of this document, the public Provider SDK is **not implemented**. Runtime behavior remains
-> the stable v1.4 architecture. Issues #90–#101 MUST implement against this contract and MUST NOT
-> redefine its fundamental semantics.
+> The public foundation under `governance.providers` (SDK API version `1`, registry, and entry-point
+> discovery) is implemented against this contract. Built-in integrations are not yet migrated;
+> CLI/Action/config v1 behavior remains unchanged. Issues #93–#101 MUST continue to implement
+> against this contract and MUST NOT redefine its fundamental semantics.
+> Public reference: [docs/providers/sdk-reference.md](../providers/sdk-reference.md).
 
 Language in this document uses **MUST / MUST NOT / SHOULD / MAY** with normative force for future
 implementation. Statements about current v1.4 behavior are descriptive and tagged as such.
@@ -114,7 +116,7 @@ Governance Core
 ├── stale-plan protection
 ├── reconciliation safety
 │
-└── Provider SDK  (future: governance.providers)
+└── Provider SDK  (governance.providers; foundation landed in #90–#92)
      ├── provider descriptor / identity
      ├── SDK compatibility
      ├── capabilities
@@ -160,12 +162,12 @@ flowchart TB
 
 ### Current v1.4 vs target v2
 
-| Aspect | v1.4 (current) | v2 target (this contract) |
+| Aspect | Pre-#90 (v1.4) | After foundation (#90–#92) / remaining v2 work |
 | --- | --- | --- |
-| Public Provider SDK | None | `governance.providers` (#90+) |
-| Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Provider-driven orchestration (#95–#98) |
-| Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | v2 additive provider config; v1 remains supported |
-| Discovery | N/A | Python entry points group `governance.providers` |
+| Public Provider SDK | None | `governance.providers` landed (SDK API `1`); built-ins not yet registered |
+| Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Still hardcoded until provider-driven orchestration (#95–#98) |
+| Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | Still v1; v2 additive provider config in #93/#94 |
+| Discovery | N/A | `discover_providers()` via entry points group `governance.providers` |
 | Collibra/PG packaging | In-repo integrations | Remain in-repo as built-ins for v2.0 |
 
 Hardcoded composition in v1.4 is acknowledged and is **intentionally not refactored** by the PR that lands this document.

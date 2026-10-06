@@ -682,15 +682,20 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 
 ## Documentation
 
-- [Provider SDK v2 architecture and compatibility contract](docs/architecture/provider-sdk-v2.md) — normative design for the upcoming provider ecosystem ([epic #19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)). The public Provider SDK is **not implemented** yet; this document freezes architecture only.
+- [Provider SDK v2 architecture and compatibility contract](docs/architecture/provider-sdk-v2.md) — normative design for the provider ecosystem ([epic #19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)).
+- [Provider SDK public reference](docs/providers/sdk-reference.md) — public import surface, registration, registry, and entry-point discovery (SDK API version `1`).
+
+Provider SDK foundation is implemented under `governance.providers`. Built-in integrations are not yet provider-driven; v2.0 ecosystem work continues in follow-up issues. This is not a v2.0.0 release.
 
 ## Repository structure
 
 ```text
 action.yml                       official composite GitHub Action
 docs/architecture/               normative architecture contracts (Provider SDK v2)
+docs/providers/                  Provider SDK public reference
 src/governance/
   domain/                        vendor-neutral model, graph, lineage, observations, authority, conflicts
+  providers/                     public Provider SDK (descriptor, registry, discovery)
   scanner/                       PostgreSQL metadata discovery
   exporters/                     deterministic inventory JSON
   integrations/
@@ -722,8 +727,9 @@ sample/                          demo SQL, GaC/authority/drift examples, Collibr
 ```bash
 ruff check src tests
 ruff format --check src tests
-pytest -m "not integration and not collibra_integration and not cli_integration and not collibra_contract"
+pytest -m "not integration and not collibra_integration and not cli_integration and not collibra_contract and not provider_packaging"
 python -m build
+pytest -m provider_packaging
 ```
 
 Contract tests (loopback HTTP only; no commercial tenant):
@@ -758,7 +764,7 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required. Th
 
 - No commercial Collibra tenant validation
 - Local contract-server coverage is not commercial-tenant validation
-- No provider SDK implementation yet (architecture contract: [docs/architecture/provider-sdk-v2.md](docs/architecture/provider-sdk-v2.md); tracked in [#19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19))
+- Provider SDK foundation is available (`governance.providers`, SDK API `1`); built-in integrations are not yet registered/provider-driven (architecture: [docs/architecture/provider-sdk-v2.md](docs/architecture/provider-sdk-v2.md); reference: [docs/providers/sdk-reference.md](docs/providers/sdk-reference.md); epic [#19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19))
 - No hosted governance service
 - No automatic deletes or destructive reconciliation
 - No automatic apply/remediation from impact analysis or Action review

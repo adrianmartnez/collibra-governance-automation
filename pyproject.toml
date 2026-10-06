@@ -16,6 +16,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "PyYAML>=6.0.1,<7",
     "jsonschema>=4.23,<5",
+    "packaging>=24",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +59,7 @@ markers = [
     "collibra_integration: Collibra mock lifecycle against local PostgreSQL demo",
     "cli_integration: end-to-end CLI smoke against local PostgreSQL demo",
     "collibra_contract: localhost Collibra contract HTTP server (no commercial tenant)",
+    "provider_packaging: clean-venv Provider SDK wheelhouse discovery smoke",
 ]
 
 [tool.ruff]

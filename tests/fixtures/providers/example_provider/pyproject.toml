@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "governance-example-provider"
+version = "0.1.0"
+description = "Fixture third-party provider used to prove Provider SDK entry-point discovery."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.entry-points."governance.providers"]
+example = "governance_example_provider.provider:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]
