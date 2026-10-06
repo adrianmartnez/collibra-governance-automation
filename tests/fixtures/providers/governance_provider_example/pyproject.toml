@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "governance-provider-example"
+version = "0.1.0"
+description = "Independent example provider proving third-party Provider SDK loading (example.catalog)."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+authors = [{ name = "adrianmartnez" }]
+# Host package must provide Provider SDK API 1 (governance.providers / governance.domain /
+# governance.conformance). Until collibra-governance-automation v2.0 is published on PyPI,
+# install a compatible core build explicitly (see .github/workflows/ci.yml).
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.entry-points."governance.providers"]
+catalog = "governance_provider_example.provider:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
