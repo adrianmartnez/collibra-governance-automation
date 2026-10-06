@@ -18,6 +18,19 @@ ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ENV_KEY = "$env"
 
 
+def escape_json_pointer_segment(value: str) -> str:
+    """Escape one RFC 6901 JSON Pointer reference token."""
+    return value.replace("~", "~0").replace("/", "~1")
+
+
+def join_json_pointer(base: str, segment: str) -> str:
+    """Append an escaped segment to a JSON Pointer base path."""
+    escaped = escape_json_pointer_segment(segment)
+    if not base:
+        return f"/{escaped}"
+    return f"{base}/{escaped}"
+
+
 def is_env_ref(value: object) -> bool:
     return (
         isinstance(value, Mapping)
@@ -43,7 +56,7 @@ def validate_env_ref_shape(value: Mapping[str, object], *, path: str) -> str:
             [
                 DiagnosticError(
                     code=CODE_SEMANTIC,
-                    path=f"{path}/$env",
+                    path=join_json_pointer(path, ENV_KEY),
                     message="environment variable name is invalid",
                 )
             ]
@@ -84,11 +97,11 @@ def assert_json_compatible(value: object, *, path: str) -> None:
                         )
                     ]
                 )
-            assert_json_compatible(item, path=f"{path}/{key}" if path else f"/{key}")
+            assert_json_compatible(item, path=join_json_pointer(path, key))
         return
     if isinstance(value, list):
         for index, item in enumerate(value):
-            assert_json_compatible(item, path=f"{path}/{index}")
+            assert_json_compatible(item, path=join_json_pointer(path, str(index)))
         return
     raise ConfigSemanticError(
         [
@@ -131,7 +144,7 @@ def resolve_env_refs(
     if is_env_ref(value):
         assert isinstance(value, Mapping)
         name = validate_env_ref_shape(value, path=path)
-        if name not in environ or environ[name] == "":
+        if name not in environ:
             raise ConfigResolutionError(
                 f"environment variable {name!r} is unresolved",
                 path=path,
@@ -142,12 +155,12 @@ def resolve_env_refs(
         resolved: dict[str, object] = {}
         for key in sorted(value.keys()):
             key_s = str(key)
-            child_path = f"{path}/{key_s}" if path else f"/{key_s}"
+            child_path = join_json_pointer(path, key_s)
             resolved[key_s] = resolve_env_refs(value[key], environ, path=child_path)
         return resolved
     if isinstance(value, list):
         return [
-            resolve_env_refs(item, environ, path=f"{path}/{index}")
+            resolve_env_refs(item, environ, path=join_json_pointer(path, str(index)))
             for index, item in enumerate(value)
         ]
     return value

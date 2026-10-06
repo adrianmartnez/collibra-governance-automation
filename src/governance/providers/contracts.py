@@ -55,11 +55,12 @@ class ProviderRuntimeContext:
     Holds the resolved provider-specific payload and the config file directory.
     Core owns global config resolution; secrets and operational I/O are out of
     scope here. ``config`` is omitted from ``repr`` so resolved secret values
-    are not leaked via logging or exception formatting.
+    are not leaked via logging or exception formatting. ``config_root`` is
+    ``None`` when not provided (do not treat ``""`` as cwd).
     """
 
     config: Mapping[str, object] = field(default_factory=dict, repr=False)
-    config_root: str = ""
+    config_root: str | None = None
 
 
 class CapabilityFactory(Protocol[CapabilityT_co]):

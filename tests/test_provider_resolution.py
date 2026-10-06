@@ -249,3 +249,106 @@ def test_loaded_atomic_boundary() -> None:
     loaded = load_canonical_config_v2(FIXTURES / "valid_minimal.yaml")
     assert isinstance(loaded, LoadedConfigV2)
     assert loaded.locations.source_locations["primary"] == "/sources/0"
+
+
+def test_absent_env_var_is_unresolved() -> None:
+    loaded = load_canonical_config_v2(FIXTURES / "valid_with_env.yaml")
+    registry = ProviderRegistry()
+    registry.register(_registration("example.fixture"))
+    with pytest.raises(ConfigResolutionError) as exc:
+        resolve_provider_configuration(
+            loaded,
+            registry=registry,
+            environ={"PROVIDER_PASSWORD": "pw"},
+        )
+    assert exc.value.code == "environment_reference_unresolved"
+    assert "PROVIDER_TOKEN" in str(exc.value)
+
+
+def test_empty_env_var_resolves_to_empty_string() -> None:
+    loaded = load_canonical_config_v2(FIXTURES / "valid_with_env.yaml")
+    registry = ProviderRegistry()
+    registry.register(_registration("example.fixture"))
+    resolved = resolve_provider_configuration(
+        loaded,
+        registry=registry,
+        environ={"PROVIDER_TOKEN": "", "PROVIDER_PASSWORD": "pw"},
+    )
+    assert resolved.sources[0].runtime_context.config["token"] == ""
+    assert resolved.sources[0].runtime_context.config["nested"]["password"] == "pw"
+
+
+def test_factory_may_reject_empty_resolved_env_secret_safe() -> None:
+    loaded = load_canonical_config_v2(FIXTURES / "valid_with_env.yaml")
+
+    def factory(context: ProviderRuntimeContext) -> object:
+        token = context.config.get("token")
+        if token == "":
+            raise RuntimeError(f"token empty but secret was {SECRET}")
+        return object()
+
+    registry = ProviderRegistry()
+    registry.register(
+        ProviderRegistration(
+            descriptor=ProviderDescriptor(
+                provider_id="example.fixture",
+                display_name="example.fixture",
+                provider_version="1.0.0",
+                sdk_compatibility="==1",
+                capabilities=(CapabilityId.LINEAGE,),
+            ),
+            bindings=(CapabilityBinding(capability_id=CapabilityId.LINEAGE, factory=factory),),
+        )
+    )
+    resolved = resolve_provider_configuration(
+        loaded,
+        registry=registry,
+        environ={"PROVIDER_TOKEN": "", "PROVIDER_PASSWORD": "pw"},
+    )
+    assert resolved.sources[0].runtime_context.config["token"] == ""
+    with pytest.raises(ProviderConstructionError) as exc:
+        construct_provider_capability(resolved.sources[0], CapabilityId.LINEAGE)
+    text = " ".join(item.message for item in exc.value.errors)
+    assert SECRET not in text
+    assert "RuntimeError" in text
+    assert exc.value.__cause__ is None
+
+
+def test_runtime_context_default_config_root_is_none() -> None:
+    context = ProviderRuntimeContext(config={"x": 1})
+    assert context.config_root is None
+
+
+def test_v2_resolution_sets_absolute_config_root() -> None:
+    loaded = load_canonical_config_v2(FIXTURES / "valid_minimal.yaml")
+    registry = ProviderRegistry()
+    registry.register(_registration("example.fixture"))
+    resolved = resolve_provider_configuration(loaded, registry=registry, environ={})
+    root = resolved.sources[0].runtime_context.config_root
+    assert root is not None
+    assert root == loaded.canonical.config_root
+    assert Path(root).is_absolute()
+
+
+def test_rfc6901_escaped_keys_in_env_resolution_diagnostics() -> None:
+    loaded = load_canonical_config_v2(FIXTURES / "valid_pointer_keys.yaml")
+    registry = ProviderRegistry()
+    registry.register(_registration("example.fixture"))
+    with pytest.raises(ConfigResolutionError) as exc:
+        resolve_provider_configuration(loaded, registry=registry, environ={})
+    assert exc.value.path in {
+        "/sources/0/config/foo~1bar",
+        "/sources/0/config/foo~0bar",
+    }
+    # Unescaped slash must not appear as a path segment separator for the key.
+    assert exc.value.path != "/sources/0/config/foo/bar"
+    assert not exc.value.path.endswith("/foo~bar")
+
+    resolved = resolve_provider_configuration(
+        loaded,
+        registry=registry,
+        environ={"TOKEN_A": "a", "TOKEN_B": "b"},
+    )
+    config = resolved.sources[0].runtime_context.config
+    assert config["foo/bar"] == "a"
+    assert config["foo~bar"] == "b"

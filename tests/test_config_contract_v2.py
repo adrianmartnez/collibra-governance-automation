@@ -120,3 +120,39 @@ def test_unknown_top_level_field_rejected() -> None:
             load_canonical_config_v2(bad)
     finally:
         bad.unlink(missing_ok=True)
+
+
+def test_schema_cache_v1_then_v2_no_contamination() -> None:
+    v1 = load_canonical_config(V1_FIXTURES / "valid_minimal.yaml")
+    v2 = load_canonical_config_v2(FIXTURES / "valid_minimal.yaml")
+    again = load_canonical_config(V1_FIXTURES / "valid_minimal.yaml")
+    assert v1.schema_version == "1"
+    assert v2.canonical.schema_version == "2"
+    assert again.schema_version == "1"
+    assert again.identity_projection() == v1.identity_projection()
+
+
+def test_schema_cache_v2_then_v1_no_contamination() -> None:
+    v2 = load_canonical_config_v2(FIXTURES / "valid_minimal.yaml")
+    v1 = load_canonical_config(V1_FIXTURES / "valid_minimal.yaml")
+    again = load_canonical_config_v2(FIXTURES / "valid_minimal.yaml")
+    assert v2.canonical.schema_version == "2"
+    assert v1.schema_version == "1"
+    assert again.canonical.schema_version == "2"
+    assert again.canonical.identity_projection() == v2.canonical.identity_projection()
+
+
+def test_rfc6901_escaped_keys_in_semantic_diagnostics() -> None:
+    with pytest.raises(ConfigSemanticError) as exc:
+        load_canonical_config_v2(FIXTURES / "invalid_pointer_keys_env.yaml")
+    paths = {error.path for error in exc.value.errors}
+    assert any(path.startswith("/sources/0/config/foo~1bar") for path in paths)
+    assert not any("/sources/0/config/foo/bar" in path for path in paths)
+    assert not any(path.startswith("/sources/0/config/foo~bar") for path in paths)
+
+
+def test_rfc6901_keys_load_with_escaped_locations_only_for_entries() -> None:
+    loaded = load_canonical_config_v2(FIXTURES / "valid_pointer_keys.yaml")
+    config = loaded.canonical.sources[0].config
+    assert config["foo/bar"] == {"$env": "TOKEN_A"}
+    assert config["foo~bar"] == {"$env": "TOKEN_B"}
