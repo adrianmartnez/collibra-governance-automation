@@ -29,6 +29,16 @@ from governance.providers import (
     RemoteStateReadCapability,
     TargetPlanningCapability,
 )
+from governance.providers.contracts import (
+    CapabilityT_co,
+    DesiredStateT_contra,
+    MutationRequestT_contra,
+    MutationResultT_co,
+    PlanT_co,
+    PreflightResultT_co,
+    RemoteStateT_co,
+    RemoteStateT_contra,
+)
 
 
 def _factory(_context: ProviderRuntimeContext) -> object:
@@ -234,6 +244,52 @@ def test_capability_protocols_are_importable() -> None:
     assert CompatibilityPreflightCapability is not None
     assert AuthorizedMutationCapability is not None
     assert ProviderConfigValidator is not None
+
+
+def test_target_planning_requires_explicit_remote_state() -> None:
+    class _Planner:
+        def build_plan(self, desired_state: dict[str, str], remote_state: dict[str, str]) -> str:
+            return f"{desired_state['name']}:{remote_state['id']}"
+
+    planner: TargetPlanningCapability[dict[str, str], dict[str, str], str] = _Planner()
+    assert planner.build_plan({"name": "desired"}, {"id": "remote-1"}) == "desired:remote-1"
+
+    signature = TargetPlanningCapability.build_plan.__annotations__
+    assert "desired_state" in signature
+    assert "remote_state" in signature
+    assert "return" in signature
+
+
+def test_public_protocol_typevars_use_correct_variance() -> None:
+    assert CapabilityT_co.__covariant__ is True
+    assert CapabilityT_co.__contravariant__ is False
+    assert RemoteStateT_co.__covariant__ is True
+    assert RemoteStateT_contra.__contravariant__ is True
+    assert DesiredStateT_contra.__contravariant__ is True
+    assert PlanT_co.__covariant__ is True
+    assert PreflightResultT_co.__covariant__ is True
+    assert MutationRequestT_contra.__contravariant__ is True
+    assert MutationResultT_co.__covariant__ is True
+
+    assert RemoteStateReadCapability.__parameters__ == (RemoteStateT_co,)
+    assert TargetPlanningCapability.__parameters__ == (
+        DesiredStateT_contra,
+        RemoteStateT_contra,
+        PlanT_co,
+    )
+    assert CompatibilityPreflightCapability.__parameters__ == (PreflightResultT_co,)
+    assert AuthorizedMutationCapability.__parameters__ == (
+        MutationRequestT_contra,
+        MutationResultT_co,
+    )
+
+
+def test_capability_binding_invalid_id_raises_registration_error() -> None:
+    with pytest.raises(ProviderRegistrationError) as exc_info:
+        CapabilityBinding(capability_id="not_a_capability", factory=_factory)  # type: ignore[arg-type]
+    assert not isinstance(exc_info.value, ProviderDescriptorError)
+    assert type(exc_info.value) is ProviderRegistrationError
+    assert any(item.code == "unknown_capability" for item in exc_info.value.errors)
 
 
 def test_providers_package_does_not_import_integrations_or_cli() -> None:

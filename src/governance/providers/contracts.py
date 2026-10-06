@@ -39,12 +39,13 @@ PROVIDER_ENTRY_POINT_GROUP = "governance.providers"
 _PROVIDER_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
 
 CapabilityT_co = TypeVar("CapabilityT_co", covariant=True)
-RemoteStateT = TypeVar("RemoteStateT")
-PlanT = TypeVar("PlanT")
-MutationRequestT = TypeVar("MutationRequestT")
-MutationResultT = TypeVar("MutationResultT")
-PreflightResultT = TypeVar("PreflightResultT")
-DesiredStateT = TypeVar("DesiredStateT")
+RemoteStateT_co = TypeVar("RemoteStateT_co", covariant=True)
+RemoteStateT_contra = TypeVar("RemoteStateT_contra", contravariant=True)
+DesiredStateT_contra = TypeVar("DesiredStateT_contra", contravariant=True)
+PlanT_co = TypeVar("PlanT_co", covariant=True)
+MutationRequestT_contra = TypeVar("MutationRequestT_contra", contravariant=True)
+MutationResultT_co = TypeVar("MutationResultT_co", covariant=True)
+PreflightResultT_co = TypeVar("PreflightResultT_co", covariant=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,26 +99,39 @@ class LineageCapability(Protocol):
     def load_lineage(self) -> Sequence[ColumnLineageAssertion]: ...
 
 
-class RemoteStateReadCapability(Protocol[RemoteStateT]):
-    def read_remote_state(self) -> RemoteStateT: ...
+class RemoteStateReadCapability(Protocol[RemoteStateT_co]):
+    """Read managed remote governance state. Produces remote state only."""
+
+    def read_remote_state(self) -> RemoteStateT_co: ...
 
 
-class TargetPlanningCapability(Protocol[DesiredStateT, PlanT]):
-    def build_plan(self, desired_state: DesiredStateT) -> PlanT: ...
+class TargetPlanningCapability(Protocol[DesiredStateT_contra, RemoteStateT_contra, PlanT_co]):
+    """Build a plan from explicit desired state and previously read remote state.
+
+    Planning MUST NOT mutate remote governance state and MUST NOT perform a
+    second remote-state read. Remote state is supplied by the core from
+    ``remote_state_read`` (or equivalent), not discovered implicitly.
+    """
+
+    def build_plan(
+        self,
+        desired_state: DesiredStateT_contra,
+        remote_state: RemoteStateT_contra,
+    ) -> PlanT_co: ...
 
 
-class CompatibilityPreflightCapability(Protocol[PreflightResultT]):
-    def run_preflight(self) -> PreflightResultT: ...
+class CompatibilityPreflightCapability(Protocol[PreflightResultT_co]):
+    def run_preflight(self) -> PreflightResultT_co: ...
 
 
-class AuthorizedMutationCapability(Protocol[MutationRequestT, MutationResultT]):
+class AuthorizedMutationCapability(Protocol[MutationRequestT_contra, MutationResultT_co]):
     """Execute a mutation already authorized by the core.
 
     Presence of this capability NEVER constitutes authorization. The core
     MUST deliver already-authorized work; the provider MUST NOT self-authorize.
     """
 
-    def execute_authorized(self, request: MutationRequestT) -> MutationResultT: ...
+    def execute_authorized(self, request: MutationRequestT_contra) -> MutationResultT_co: ...
 
 
 def _validate_provider_id(provider_id: object) -> str:
@@ -306,7 +320,12 @@ class CapabilityBinding:
     factory: CapabilityFactory[object]
 
     def __post_init__(self) -> None:
-        capability = parse_capability_id(self.capability_id, path="/capability_id")
+        try:
+            capability = parse_capability_id(self.capability_id, path="/capability_id")
+        except ProviderDescriptorError as exc:
+            # Binding validation is part of registration coherence, not descriptor
+            # construction; surface as ProviderRegistrationError.
+            raise ProviderRegistrationError(exc.errors) from exc
         object.__setattr__(self, "capability_id", capability)
         if not callable(self.factory):
             raise ProviderRegistrationError(

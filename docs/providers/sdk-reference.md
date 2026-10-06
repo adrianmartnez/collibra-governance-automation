@@ -54,6 +54,17 @@ Invalid IDs are rejected (no silent lowercasing). A specifier such as `>=2` is s
 
 No capability implies another. Negotiation is explicit via `ProviderRegistry.require_capabilities`.
 
+### Target capability contracts
+
+- `remote_state_read` produces remote state (`RemoteStateReadCapability`).
+- `target_planning` consumes **desired state + remote state** and produces a plan
+  (`TargetPlanningCapability.build_plan(desired_state, remote_state)`).
+- Planning MUST NOT mutate remote state and MUST NOT perform a second remote read.
+- `authorized_mutation` executes work already authorized by the core; it never authorizes itself.
+
+Generic TypeVars on these protocols use PEP 484 variance (`_co` / `_contra`) appropriate to
+input-only vs output-only positions.
+
 ## Registration and factories
 
 Entry points must expose a **zero-argument** callable returning `ProviderRegistration`.

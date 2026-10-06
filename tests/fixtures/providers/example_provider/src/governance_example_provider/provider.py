@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from governance.domain.lineage import ColumnLineageAssertion
 from governance.providers import (
     CapabilityBinding,
     CapabilityId,
@@ -12,7 +15,7 @@ from governance.providers import (
 
 
 class _FixtureLineageCapability:
-    def load_lineage(self) -> tuple[object, ...]:
+    def load_lineage(self) -> Sequence[ColumnLineageAssertion]:
         return ()
 
 

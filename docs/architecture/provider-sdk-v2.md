@@ -249,7 +249,7 @@ Capabilities reflect real roles already present in the repository. They are the 
 | Capability ID | Meaning | v1.4 examples (descriptive) |
 | --- | --- | --- |
 | `remote_state_read` | Read managed remote governance state | Collibra remote-state read |
-| `target_planning` | Mapping / planning boundary producing desired or plan-ready structures without mutation | Collibra mapping + sync plan build |
+| `target_planning` | Mapping / planning boundary: consume explicit desired state + remote state, produce a plan without mutation or a second remote read | Collibra mapping + sync plan build |
 | `compatibility_preflight` | Read-only compatibility / transport / auth readiness checks | `governance preflight` |
 | `authorized_mutation` | Execute a mutation **only when** the core delivers an already-authorized mutation workflow | Collibra sync/import execution paths |
 
