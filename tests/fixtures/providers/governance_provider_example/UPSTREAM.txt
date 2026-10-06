@@ -1,0 +1,8 @@
+UPSTREAM_REPOSITORY=adrianmartnez/governance-provider-example
+UPSTREAM_COMMIT=764a14a658a66c839523788ee98fab62a6c2d038
+
+This directory is a bounded pinned snapshot of the authoritative companion
+repository for offline/reproducible core CI. It does not auto-sync.
+
+Authoritative source:
+https://github.com/adrianmartnez/governance-provider-example

@@ -1,0 +1,8 @@
+schema_version: "2"
+
+sources:
+  - id: external_catalog
+    provider: example.catalog
+    config:
+      path: catalog.json
+      namespace: demo

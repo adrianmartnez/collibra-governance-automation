@@ -7,9 +7,21 @@ Public Python surface for third-party and future built-in providers.
 **Entry-point group:** `governance.providers`  
 **Package version:** remains independent (`1.4.0` at foundation landing)
 
+Public surfaces for Provider SDK API `1`:
+
+| Module | Role |
+| --- | --- |
+| `governance.providers` | Provider SDK |
+| `governance.domain` | Vendor-neutral domain companion API |
+| `governance.conformance` | Conformance / test API |
+
 Built-in providers (PostgreSQL, ODCS, dbt, OpenLineage, Collibra) register through the same
 `ProviderRegistry` as third-party entry points. v1 CLI/Action paths that use `Settings`
 resolution are unchanged until explicitly migrated.
+
+Author docs index: [README.md](README.md). Conformance: [conformance.md](conformance.md).
+Template: https://github.com/adrianmartnez/governance-provider-example
+
 
 ## Import surface
 
@@ -141,4 +153,7 @@ def register() -> ProviderRegistration:
 
 ## Trust boundary
 
-Installed providers are trusted Python dependencies. There is no sandbox. Conformance (future) is not a security audit, vendor certification, or production certification.
+Installed providers are trusted Python dependencies. There is no sandbox. Conformance
+validates cooperative observable behavior; it is not a security audit, vendor
+certification, or production certification. See [trust-model.md](trust-model.md) and
+[conformance.md](conformance.md).

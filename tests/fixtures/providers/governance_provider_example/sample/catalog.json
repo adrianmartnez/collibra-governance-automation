@@ -1,0 +1,14 @@
+{
+  "datasets": [
+    {
+      "id": "orders",
+      "name": "Orders",
+      "description": "Customer orders dataset"
+    },
+    {
+      "id": "customers",
+      "name": "Customers",
+      "description": "Customer master dataset"
+    }
+  ]
+}

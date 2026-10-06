@@ -4,6 +4,10 @@
 
 ### Added
 
+- Public `governance.conformance` Provider SDK conformance kit (#99)
+- Independent third-party provider proof `example.catalog` via companion template repository and pinned core snapshot (#100)
+- Additive GitHub Action inputs `runtime-python` and `impact-sources-from-config` for provider-neutral automation without automatic provider installation (#101)
+- Provider author documentation under `docs/providers/` (author guide, capabilities, conformance, trust, packaging, Action, migration)
 - Additive `governance.yaml` schema v2 with provider-neutral multi source/target entries and `$env` refs (v1 loader/schema unchanged)
 - `LoadedConfigV2` atomic load result (`CanonicalConfigV2` + role-scoped `EffectiveProviderLocations`)
 - Pre-I/O `resolve_provider_configuration` / `construct_provider_capability` boundary (#93/#94)

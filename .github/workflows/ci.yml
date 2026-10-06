@@ -471,9 +471,42 @@ jobs:
           test "${{ steps.gac-action-review-blocked-ok.outputs.writes-performed }}" = "0"
           test -f "${{ steps.gac-action-review-blocked-ok.outputs.review-result-path }}"
 
+      - name: Prepare provider-neutral Action runtime
+        run: |
+          set -euo pipefail
+          python -m venv .governance-runtime
+          .governance-runtime/bin/python -m pip install --upgrade pip
+          .governance-runtime/bin/python -m pip install .
+          .governance-runtime/bin/python -m pip install ./tests/fixtures/providers/governance_provider_example
+
+      - name: Official Action provider-neutral impact smoke
+        id: gac-action-provider-neutral
+        uses: ./
+        with:
+          runtime-python: .governance-runtime/bin/python
+          config: tests/fixtures/providers/governance_provider_example/sample/governance.yaml
+          operation: impact
+          impact-sources-from-config: "true"
+          impact-namespace: demo
+          impact-changes: tests/fixtures/providers/governance_provider_example/sample/changes.json
+          output-directory: .governance-ci-provider-neutral
+          pr-comment: "false"
+
+      - name: Assert provider-neutral impact Action outputs
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          test "${{ steps.gac-action-provider-neutral.outcome }}" = "success"
+          test "${{ steps.gac-action-provider-neutral.outputs.status }}" = "passed"
+          test "${{ steps.gac-action-provider-neutral.outputs.impact-status }}" = "clear" -o "${{ steps.gac-action-provider-neutral.outputs.impact-status }}" = "impacted"
+          test "${{ steps.gac-action-provider-neutral.outputs.impact-result-version }}" = "1"
+          test "${{ steps.gac-action-provider-neutral.outputs.writes-performed }}" = "0"
+          test -f "${{ steps.gac-action-provider-neutral.outputs.impact-result-path }}"
+          python -c "import json; p=json.load(open('${{ steps.gac-action-provider-neutral.outputs.impact-result-path }}',encoding='utf-8')); assert p['result_schema']=='governance-impact-result'; assert p['result_version']=='1'; assert p['writes_performed']==0"
+
       - name: Cleanup Action smoke artifacts
         if: ${{ always() }}
-        run: rm -rf .governance-ci-action .governance-ci-blocked .governance-ci-impact-clear .governance-ci-impact-impacted .governance-ci-impact-error .governance-ci-review-pass .governance-ci-review-blocked .governance-ci-review-blocked-ok
+        run: rm -rf .governance-ci-action .governance-ci-blocked .governance-ci-impact-clear .governance-ci-impact-impacted .governance-ci-impact-error .governance-ci-review-pass .governance-ci-review-blocked .governance-ci-review-blocked-ok .governance-ci-provider-neutral .governance-runtime
 
       - name: Teardown
         if: always()

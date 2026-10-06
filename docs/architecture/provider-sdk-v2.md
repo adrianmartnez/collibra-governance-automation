@@ -12,7 +12,9 @@
 > against this contract. `governance.yaml` v2 uses inline provider mapping and
 > `resolve_provider_configuration`; v1 CLI/Action paths that resolve `Settings` are unchanged.
 > Desired-state projection for Collibra (`map_to_desired_state`) remains Collibra-specific even
-> when targets are provider-driven. Issues #93–#101 MUST continue to implement against this
+> when targets are provider-driven. Public conformance lives under `governance.conformance` (#99).
+> Third-party proof/template: `adrianmartnez/governance-provider-example` (#100/#101).
+> Issues #102 MUST continue to implement against this
 > contract and MUST NOT redefine its fundamental semantics.
 > Public reference: [docs/providers/sdk-reference.md](../providers/sdk-reference.md).
 

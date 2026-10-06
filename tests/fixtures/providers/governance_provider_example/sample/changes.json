@@ -1,0 +1,12 @@
+{
+  "changes_schema": "governance-impact-changes",
+  "changes_version": "1",
+  "changed_nodes": [
+    {
+      "namespace": "demo",
+      "kind": "dataset",
+      "logical_id": "orders",
+      "parent": null
+    }
+  ]
+}

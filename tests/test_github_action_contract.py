@@ -54,6 +54,7 @@ EXPECTED_INPUTS = {
     "impact-odcs": {"required": False, "default": ""},
     "impact-dbt-manifest": {"required": False, "default": ""},
     "impact-openlineage": {"required": False, "default": ""},
+    "impact-sources-from-config": {"required": False, "default": "false"},
     "dbt-default-database": {"required": False, "default": ""},
     "review-observations": {"required": False, "default": ""},
     "review-comparison": {"required": False, "default": ""},
@@ -62,6 +63,7 @@ EXPECTED_INPUTS = {
     "review-drift-policy": {"required": False, "default": ""},
     "review-align-source-roots": {"required": False, "default": "false"},
     "review-align-database-roots": {"required": False, "default": "false"},
+    "runtime-python": {"required": False, "default": ""},
 }
 
 EXPECTED_OUTPUTS = (
@@ -117,6 +119,7 @@ ORCHESTRATION_ENV_KEYS = (
     "GOV_ACTION_IMPACT_ODCS",
     "GOV_ACTION_IMPACT_DBT_MANIFEST",
     "GOV_ACTION_IMPACT_OPENLINEAGE",
+    "GOV_ACTION_IMPACT_SOURCES_FROM_CONFIG",
     "GOV_ACTION_DBT_DEFAULT_DATABASE",
     "GOV_ACTION_REVIEW_OBSERVATIONS",
     "GOV_ACTION_REVIEW_COMPARISON",
@@ -219,6 +222,22 @@ def test_action_yml_bootstrap_uses_fresh_unique_venv() -> None:
     assert 'RUNNER_TEMP}/gac-action-venv"' not in text  # fixed path without XXXXXX
     assert "python -m venv" in text
     assert "${{ github.action_path }}" in text
+    assert "GOV_ACTION_RUNTIME_PYTHON" in text
+    assert "runtime-python must not contain CR/LF" in text
+    assert "Never install providers" in text or "never install provider" in text.lower()
+    assert "== *$'" not in text  # avoid broken bash NUL/CR pattern that matches every string
+    assert "provider-install-paths" not in text
+    assert "provider-package" not in text
+
+
+def test_action_yml_forwards_impact_sources_from_config() -> None:
+    action = _load_action()
+    run_step = next(step for step in action["runs"]["steps"] if step.get("id") == "governance-run")
+    script = run_step["run"]
+    assert "--impact-sources-from-config" in script
+    assert "$GOV_ACTION_IMPACT_SOURCES_FROM_CONFIG" in script
+    assert action["inputs"]["impact-sources-from-config"]["default"] == "false"
+    assert action["inputs"]["runtime-python"]["default"] == ""
 
 
 def test_schema_packaged_via_importlib_resources() -> None:
