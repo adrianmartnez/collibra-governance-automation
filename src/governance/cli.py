@@ -155,6 +155,7 @@ from governance.orchestration.operation_runtime import (
     load_operation_runtime,
     map_provider_errors,
     mapping_for_operation,
+    preflight_target_binding,
     scan_model_from_runtime,
     settings_for_operation,
     target_context_projection_for_runtime,
@@ -225,7 +226,10 @@ from governance.policy import (
     policy_diagnostics_failure,
 )
 from governance.providers import ProviderDiscoveryError, ProviderRegistryError
-from governance.providers.builtins.collibra import CollibraMutationRequest
+from governance.providers.builtins.collibra import (
+    CollibraMutationRequest,
+    collibra_runtime_from_context,
+)
 from governance.providers.contracts import ProviderRuntimeContext
 from governance.providers.registry import ProviderRegistry
 from governance.reconciliation import (
@@ -392,36 +396,40 @@ def _run(argv: list[str] | None) -> int:
                 raise mapped from exc
             raise
         canonical = operation.policies_canonical
+        if command == "scan":
+            return _cmd_scan_from_operation(operation, json_output=bool(args.json))
+        if command == "export":
+            artifact: ArtifactKind = getattr(args, "artifact", "inventory") or "inventory"
+            output = _resolve_export_output(
+                None,
+                canonical=operation.policies_canonical,
+                artifact=artifact,
+                cli_output=getattr(args, "output", None),
+            )
+            return _cmd_export_from_operation(
+                operation,
+                output_path=output,
+                artifact=artifact,
+            )
         if command in {"diff", "sync"} and not operation.has_targets:
             raise CliOperationalError(_SAFE_TARGET_REQUIRED)
         try:
-            settings = settings_for_operation(
-                operation,
-                require_target=command not in {"scan", "export"},
-            )
+            settings = settings_for_operation(operation)
         except ConfigResolutionError as exc:
             return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
     else:
         settings = load_settings()
 
     if command == "scan":
-        if operation is not None:
-            return _cmd_scan_from_operation(operation, json_output=bool(args.json))
         return _cmd_scan(settings, json_output=bool(args.json))
     if command == "export":
-        artifact: ArtifactKind = getattr(args, "artifact", "inventory") or "inventory"
+        artifact = getattr(args, "artifact", "inventory") or "inventory"
         output = _resolve_export_output(
             settings,
             canonical=canonical,
             artifact=artifact,
             cli_output=getattr(args, "output", None),
         )
-        if operation is not None:
-            return _cmd_export_from_operation(
-                operation,
-                output_path=output,
-                artifact=artifact,
-            )
         return _cmd_export(settings, output_path=output, artifact=artifact)
     if command == "diff":
         mode = _resolve_mode(settings, getattr(args, "mode", None))
@@ -1148,11 +1156,6 @@ def _cmd_check(args: argparse.Namespace) -> int:
         policy_set = load_normalized_policies(operation.policies_canonical)
     except PolicyError as exc:
         return _emit_policy_error(exc, fmt)
-
-    try:
-        settings_for_operation(operation)
-    except ConfigResolutionError as exc:
-        return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
 
     try:
         model = scan_model_from_runtime(operation)
@@ -2219,10 +2222,19 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
     if isinstance(loaded, int):
         return loaded
     operation = loaded
-    settings = settings_for_operation(operation)
 
     if not operation.has_targets:
         return _emit_operational_message(_SAFE_TARGET_REQUIRED, fmt)
+
+    try:
+        preflight_binding = preflight_target_binding(operation)
+    except ConfigSemanticError as exc:
+        return _emit_config_contract_error(exc, fmt)
+
+    settings = collibra_runtime_from_context(
+        preflight_binding.runtime_context,
+        validate_runtime=False,
+    ).build_settings()
 
     mode = _effective_mode_or_invalid(
         settings,
@@ -2270,8 +2282,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     odcs_paths = list(getattr(args, "odcs", None) or [])
     dbt_paths = list(getattr(args, "dbt_manifest", None) or [])
     openlineage_paths = list(getattr(args, "openlineage", None) or [])
-    if not odcs_paths and not dbt_paths and not openlineage_paths:
-        raise CliUsageError("at least one of --odcs, --dbt-manifest, or --openlineage is required")
+    has_legacy = bool(odcs_paths or dbt_paths or openlineage_paths)
 
     policy_set = None
     affected_policies = ()
@@ -2311,6 +2322,14 @@ def _cmd_impact(args: argparse.Namespace) -> int:
                 policy_set = load_normalized_policies(impact_operation.policies_canonical)
             except PolicyError as exc:
                 return _emit_policy_error(exc, fmt)
+
+    if not has_legacy:
+        if impact_operation is not None and impact_operation.kind == "2":
+            pass
+        else:
+            raise CliUsageError(
+                "at least one of --odcs, --dbt-manifest, or --openlineage is required"
+            )
 
     try:
         changed_nodes = load_impact_changes(args.changes, expected_namespace=namespace)
@@ -2538,6 +2557,11 @@ def _compose_impact_graph(
             dbt_default_database=dbt_default_database,
             registry=registry,
         )
+    if not jobs:
+        raise CliUsageError(
+            "no governance_graph sources available; declare sources in governance.yaml v2 "
+            "or pass --odcs/--dbt-manifest/--openlineage"
+        )
     graphs: list[GovernanceGraph] = []
     for job in jobs:
         try:
@@ -2555,8 +2579,6 @@ def _compose_impact_graph(
                 ]
             ) from exc
     try:
-        if not graphs:
-            return GovernanceGraph.from_parts((), ())
         return GovernanceGraph.from_parts(
             [node for graph in graphs for node in graph.nodes],
             [edge for graph in graphs for edge in graph.edges],
@@ -2838,7 +2860,7 @@ def _resolve_cli_mapping_path(
 
 
 def _resolve_export_output(
-    settings: Settings,
+    settings: Settings | None,
     *,
     canonical: CanonicalConfig | CanonicalConfigV2 | None,
     artifact: ArtifactKind,
@@ -2855,6 +2877,8 @@ def _resolve_export_output(
         if isinstance(canonical, CanonicalConfig):
             return str(resolve_inventory_path(canonical))
         return str(root / canonical.artifacts.inventory_path)
+    if settings is None:
+        raise CliUsageError("export output path requires --output or --config with artifacts")
     if artifact == "snapshot":
         inventory = Path(settings.inventory_output_path)
         return str(inventory.with_name("governance-snapshot.json"))

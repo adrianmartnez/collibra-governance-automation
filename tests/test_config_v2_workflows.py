@@ -173,8 +173,13 @@ def _write_v2_config(
                 },
             }
         ]
+    document: dict[str, Any] = {
+        "schema_version": "2",
+        "sources": sources,
+        "policies": {"files": []},
+    }
     if targets is None:
-        targets = [
+        document["targets"] = [
             {
                 "id": "collibra",
                 "provider": "collibra",
@@ -186,12 +191,8 @@ def _write_v2_config(
                 },
             }
         ]
-    document: dict[str, Any] = {
-        "schema_version": "2",
-        "sources": sources,
-        "targets": targets,
-        "policies": {"files": []},
-    }
+    elif targets:
+        document["targets"] = targets
     if authority is not None:
         document["authority"] = authority
     path = tmp_path / "governance.yaml"
@@ -798,3 +799,245 @@ def test_v2_impact_graph_from_odcs_source(
     assert len(jobs) == 1
     graph = run_impact_graph(jobs)
     assert graph.nodes
+
+
+def _patch_external_metadata_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source: str = "external-demo",
+) -> GovernanceModel:
+    expected = _minimal_model(source=source)
+
+    def factory(_context: ProviderRuntimeContext) -> object:
+        class _Cap:
+            def discover(self) -> GovernanceModel:
+                return expected
+
+        return _Cap()
+
+    registration = ProviderRegistration(
+        descriptor=ProviderDescriptor(
+            provider_id="acme.external",
+            display_name="External",
+            provider_version="1.0.0",
+            sdk_compatibility="==1",
+            capabilities=(CapabilityId.METADATA_DISCOVERY,),
+        ),
+        bindings=(
+            CapabilityBinding(
+                capability_id=CapabilityId.METADATA_DISCOVERY,
+                factory=factory,
+            ),
+        ),
+    )
+
+    def _registry(**_kwargs: object) -> ProviderRegistry:
+        registry = build_provider_registry(discover_external=False)
+        registry.register(registration)
+        return registry
+
+    monkeypatch.setattr(
+        "governance.orchestration.operation_runtime.build_provider_registry",
+        _registry,
+    )
+    return expected
+
+
+def test_cli_v2_external_metadata_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    expected = _patch_external_metadata_registry(monkeypatch)
+    config = _write_v2_config(
+        tmp_path,
+        sources=[
+            {
+                "id": "external",
+                "provider": "acme.external",
+                "config": {"option": "value"},
+            }
+        ],
+        targets=[],
+    )
+
+    assert main(["scan", "--config", str(config), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["source"] == expected.data_sources[0].name
+    assert payload["tables"] == 2
+
+
+def test_cli_v2_external_metadata_check_without_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _patch_external_metadata_registry(monkeypatch)
+    config = _write_v2_config(
+        tmp_path,
+        sources=[
+            {
+                "id": "external",
+                "provider": "acme.external",
+                "config": {"option": "value"},
+            }
+        ],
+        targets=[],
+    )
+
+    assert main(["check", "--config", str(config), "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_cli_v2_check_postgresql_without_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _patch_env(monkeypatch)
+    _patch_postgres_scanner(monkeypatch)
+    config = _write_v2_config(tmp_path, targets=[])
+
+    assert main(["check", "--config", str(config), "--format", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+
+
+def test_cli_v2_preflight_collibra_without_metadata_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from governance.integrations.collibra.preflight import (
+        CODE_MOCK_MODE,
+        STATUS_VERIFIED,
+        PreflightCheck,
+        PreflightReport,
+    )
+
+    _patch_env(monkeypatch)
+    scanner = _patch_postgres_scanner(monkeypatch, boom=True)
+    import yaml
+
+    doc = {
+        "apiVersion": "v3.1.0",
+        "kind": "DataContract",
+        "id": "contract-orders",
+        "version": "1.0.0",
+        "status": "active",
+        "name": "Orders Contract",
+    }
+    odcs_name = "contract.odcs.yaml"
+    (tmp_path / odcs_name).write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    config = _write_v2_config(
+        tmp_path,
+        sources=[
+            {
+                "id": "contracts",
+                "provider": "odcs",
+                "config": {
+                    "path": odcs_name,
+                    "namespace": "governance-demo",
+                },
+            }
+        ],
+        targets=[
+            {
+                "id": "collibra",
+                "provider": "collibra",
+                "config": {
+                    "mode": "mock",
+                    "mapping": dict(MAPPING_INLINE),
+                },
+            }
+        ],
+    )
+
+    report = PreflightReport(
+        overall=STATUS_VERIFIED,
+        mode="mock",
+        transport=None,
+        writes_performed=0,
+        checks=(
+            PreflightCheck(
+                id="mock",
+                status=STATUS_VERIFIED,
+                code=CODE_MOCK_MODE,
+                message="mock mode",
+                blocking=False,
+            ),
+        ),
+    )
+    monkeypatch.setattr("governance.cli.invoke_preflight", lambda _binding: report)
+
+    code = main(["preflight", "--config", str(config), "--format", "json"])
+    capsys.readouterr()
+    assert code == 0
+    assert scanner["count"] == 0
+
+
+def test_cli_v2_impact_config_only_odcs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_env(monkeypatch)
+    import yaml
+
+    doc = {
+        "apiVersion": "v3.1.0",
+        "kind": "DataContract",
+        "id": "contract-orders",
+        "version": "1.0.0",
+        "status": "active",
+        "name": "Orders Contract",
+    }
+    odcs_name = "contract.odcs.yaml"
+    (tmp_path / odcs_name).write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    config = _write_v2_config(
+        tmp_path,
+        sources=[
+            {
+                "id": "contracts",
+                "provider": "odcs",
+                "config": {
+                    "path": odcs_name,
+                    "namespace": "governance-demo",
+                },
+            },
+        ],
+        targets=[],
+    )
+    changes = {
+        "changes_schema": "governance-impact-changes",
+        "changes_version": "1",
+        "changed_nodes": [
+            {
+                "namespace": "governance-demo",
+                "kind": "contract",
+                "logical_id": "contract-orders",
+                "parent": None,
+            }
+        ],
+    }
+    changes_path = tmp_path / "changes.json"
+    changes_path.write_text(json.dumps(changes), encoding="utf-8")
+    output_path = tmp_path / "impact.json"
+
+    code = main(
+        [
+            "impact",
+            "--config",
+            str(config),
+            "--namespace",
+            "governance-demo",
+            "--changes",
+            str(changes_path),
+            "--output",
+            str(output_path),
+            "--format",
+            "json",
+        ]
+    )
+    assert code in {0, 6}
+    assert output_path.is_file()

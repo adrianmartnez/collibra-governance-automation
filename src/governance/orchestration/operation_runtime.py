@@ -41,7 +41,6 @@ from governance.orchestration.selection import (
 from governance.orchestration.sources import run_metadata_discovery
 from governance.providers import CapabilityId
 from governance.providers.builtins.collibra import collibra_runtime_from_context
-from governance.providers.builtins.postgresql import _connection_params_from_config
 from governance.providers.errors import ProviderError
 from governance.providers.registry import ProviderRegistry
 
@@ -139,6 +138,10 @@ def collibra_binding(
     runtime: OperationRuntime,
     mapping_config: CollibraMappingConfig | None = None,
 ) -> ResolvedProviderBinding:
+    """Collibra target for plan/apply/diff/sync (``remote_state_read`` / ``target_planning``).
+
+    Preflight uses :func:`preflight_target_binding` with ``compatibility_preflight`` selection.
+    """
     if runtime.kind == "1":
         assert mapping_config is not None
         return collibra_binding_from_settings(
@@ -201,31 +204,42 @@ def _provider_config_resolution_error(
     )
 
 
-def settings_for_operation(
-    runtime: OperationRuntime,
-    *,
-    require_target: bool = True,
-) -> Settings:
+def _postgres_params_from_metadata_binding(
+    metadata: ResolvedProviderBinding,
+) -> object:
+    from governance.providers.builtins.postgresql import _connection_params_from_config
+
+    if metadata.provider_id != "postgresql":
+        raise ConfigSemanticError(
+            [
+                DiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path=metadata.config_path or "/sources",
+                    message=(
+                        "Collibra Settings bridging requires a postgresql metadata source "
+                        f"(metadata_discovery); found provider {metadata.provider_id!r}. "
+                        "Use scan/check/export via provider capabilities without Settings, "
+                        "or add a postgresql source for legacy Collibra workflows."
+                    ),
+                )
+            ]
+        )
+    try:
+        return _connection_params_from_config(metadata.runtime_context.config)
+    except ProviderError as exc:
+        raise _provider_config_resolution_error(exc, config_path=metadata.config_path) from exc
+
+
+def settings_for_operation(runtime: OperationRuntime) -> Settings:
+    """Collibra/v1 compatibility ``Settings`` projection — NOT a provider-neutral runtime.
+
+    v2 requires the unique ``metadata_discovery`` binding to be ``provider_id=='postgresql'``.
+    Scan, check, and export must use :func:`scan_model_from_runtime` instead.
+    """
     if runtime.kind == "1":
         return _v1_settings(runtime)
     metadata = metadata_binding(runtime)
-    try:
-        params = _connection_params_from_config(metadata.runtime_context.config)
-    except ProviderError as exc:
-        raise _provider_config_resolution_error(exc, config_path=metadata.config_path) from exc
-    if not require_target:
-        from governance.config import DEFAULT_COLLIBRA_MODE, DEFAULT_INVENTORY_OUTPUT_PATH
-
-        return Settings(
-            postgres_host=params.host,
-            postgres_port=params.port,
-            postgres_db=params.db,
-            postgres_user=params.user,
-            postgres_password=params.password,
-            postgres_source_name=params.source_name,
-            inventory_output_path=DEFAULT_INVENTORY_OUTPUT_PATH,
-            collibra_mode=DEFAULT_COLLIBRA_MODE,
-        )
+    params = _postgres_params_from_metadata_binding(metadata)
     collibra = collibra_binding(runtime)
     try:
         collibra_runtime = collibra_runtime_from_context(collibra.runtime_context)
@@ -254,6 +268,78 @@ def scan_model_from_runtime(runtime: OperationRuntime) -> GovernanceModel:
     return run_metadata_discovery(metadata_binding(runtime))
 
 
+def preflight_target_binding(runtime: OperationRuntime) -> ResolvedProviderBinding:
+    if runtime.kind == "1":
+        settings = _v1_settings(runtime)
+        mapping = _v1_collibra_mapping_for_preflight(runtime, settings)
+        return collibra_binding_from_settings(settings, mapping, runtime.registry)
+    assert runtime.resolved is not None
+    bindings = select_bindings_with_capability(
+        runtime.resolved,
+        role="target",
+        capability=CapabilityId.COMPATIBILITY_PREFLIGHT,
+    )
+    binding = require_unique_binding(
+        bindings,
+        capability=CapabilityId.COMPATIBILITY_PREFLIGHT,
+        role="target",
+    )
+    if binding.provider_id != "collibra":
+        raise ConfigSemanticError(
+            [
+                DiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path=binding.config_path or "/targets",
+                    message=(
+                        "compatibility preflight requires a collibra target; "
+                        f"found provider {binding.provider_id!r}"
+                    ),
+                )
+            ]
+        )
+    return binding
+
+
+def _v1_collibra_mapping_for_preflight(
+    runtime: OperationRuntime,
+    settings: Settings,
+) -> CollibraMappingConfig:
+    from governance.config_contract.resolve import resolve_mapping_path
+    from governance.integrations.collibra.mapping import (
+        CollibraMappingError,
+        load_mapping_config_file,
+        mock_mapping_config,
+    )
+
+    assert runtime.canonical_v1 is not None
+    mode = settings.collibra_mode.strip().lower()
+    if mode == "mock":
+        return mock_mapping_config()
+    mapped = resolve_mapping_path(runtime.canonical_v1)
+    if mapped is None:
+        raise ConfigSemanticError(
+            [
+                DiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path="/targets",
+                    message="collibra mapping is required for preflight when mode is not mock",
+                )
+            ]
+        )
+    try:
+        return load_mapping_config_file(str(mapped))
+    except CollibraMappingError as exc:
+        raise ConfigSemanticError(
+            [
+                DiagnosticError(
+                    code=CODE_SEMANTIC,
+                    path=str(mapped),
+                    message=str(exc) or "invalid collibra mapping",
+                )
+            ]
+        ) from exc
+
+
 def target_context_projection_for_runtime(runtime: OperationRuntime) -> dict[str, object]:
     """Build target context projection; v2 uses metadata ``source_name`` for sync_v2."""
     if runtime.kind == "1":
@@ -261,7 +347,7 @@ def target_context_projection_for_runtime(runtime: OperationRuntime) -> dict[str
 
         return build_target_context_projection(_v1_settings(runtime))
     metadata = metadata_binding(runtime)
-    params = _connection_params_from_config(metadata.runtime_context.config)
+    params = _postgres_params_from_metadata_binding(metadata)
     collibra = collibra_binding(runtime)
     collibra_runtime = collibra_runtime_from_context(collibra.runtime_context)
     return collibra_runtime.build_target_context(source_name=params.source_name)
@@ -290,6 +376,7 @@ __all__ = [
     "map_provider_errors",
     "mapping_for_operation",
     "metadata_binding",
+    "preflight_target_binding",
     "scan_model_from_runtime",
     "settings_for_operation",
     "target_context_projection_for_runtime",
