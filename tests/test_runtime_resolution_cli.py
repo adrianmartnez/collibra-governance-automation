@@ -189,7 +189,9 @@ def _patch_scanner(
                 raise boom
             return _model()
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", FakeScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", FakeScanner
+    )
     return calls
 
 
@@ -208,7 +210,7 @@ def _patch_adapter(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         adapter.read_remote_state = tracked_read  # type: ignore[method-assign]
         return adapter
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
     return calls
 
 
@@ -447,7 +449,9 @@ def test_plan_genuine_collibra_read_failure_exit_1(
 
         return BoomAdapter()
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", boom_factory)
+    monkeypatch.setattr(
+        "governance.providers.builtins.collibra.build_collibra_adapter", boom_factory
+    )
 
     assert (
         main(

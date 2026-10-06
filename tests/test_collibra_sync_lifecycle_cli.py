@@ -66,7 +66,7 @@ def _patch_live_sync_http(
             sleeper=lambda _seconds: None,
         )
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
 
 
 def _generate_sync_plan(
@@ -96,7 +96,7 @@ def _generate_sync_plan(
             sleeper=lambda _seconds: None,
         )
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
     config = _write_workspace(tmp_path)
     plan_path = tmp_path / "plan.gplan"
     assert (

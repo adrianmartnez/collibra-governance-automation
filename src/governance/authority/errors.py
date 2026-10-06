@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from governance.config_contract.errors import DiagnosticError
     from governance.config_contract.models import CanonicalConfig
+    from governance.config_contract.models_v2 import CanonicalConfigV2
 
 CODE_PARSE = "parse_error"
 CODE_MISSING = "missing_authority_file"
@@ -64,7 +65,7 @@ class UnsupportedAuthorityVersionError(AuthorityError):
 def map_authority_exception_to_config_diagnostics(
     exc: AuthorityError,
     *,
-    canonical: CanonicalConfig | None = None,
+    canonical: CanonicalConfig | CanonicalConfigV2 | None = None,
 ) -> list[DiagnosticError]:
     """Map an AuthorityError into config DiagnosticError list for CLI/Action."""
     from governance.config_contract.errors import DiagnosticError

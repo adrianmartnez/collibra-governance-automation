@@ -8,6 +8,9 @@
 - `LoadedConfigV2` atomic load result (`CanonicalConfigV2` + role-scoped `EffectiveProviderLocations`)
 - Pre-I/O `resolve_provider_configuration` / `construct_provider_capability` boundary (#93/#94)
 - Domain-separated `config_identity_v2` (`gov-config-v2` prefix); locations never enter the hash
+- Built-in provider registrations and atomic `build_provider_registry` (#95/#96)
+- Version-aware `load_runtime_configuration` and v2 provider resolution orchestration (#97)
+- Provider-driven source/target orchestration hooks; Collibra desired-state mapping remains Collibra-specific (#98)
 
 ## 1.4.0 - 2026-09-03
 

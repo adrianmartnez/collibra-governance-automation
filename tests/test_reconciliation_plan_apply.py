@@ -232,7 +232,9 @@ def _patch_scanner(monkeypatch: pytest.MonkeyPatch) -> None:
         def scan(self) -> GovernanceModel:
             return target
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", FakeScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", FakeScanner
+    )
 
 
 def _patch_adapter(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
@@ -268,7 +270,7 @@ def _patch_adapter(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         adapter.create_relationship = tracked_rel  # type: ignore[method-assign]
         return adapter
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
     return calls
 
 
@@ -369,7 +371,7 @@ def test_v1_plan_with_source_flag_exit_5_loaders_not_called(
 
     monkeypatch.setattr("governance.cli.compose_reconciliation_sources", boom_compose)
     monkeypatch.setattr(
-        "governance.reconciliation.sources.load_odcs_graph_with_observations",
+        "governance.providers.builtins.odcs.load_odcs_graph_with_observations",
         boom_odcs,
     )
     fake_odcs = tmp_path / "unused-contract.json"

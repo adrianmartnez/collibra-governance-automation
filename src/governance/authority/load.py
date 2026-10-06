@@ -17,7 +17,7 @@ from governance.authority.errors import (
 )
 from governance.authority.parse import parse_authority_yaml
 from governance.authority.schema import validate_authority_structure
-from governance.config_contract.models import CanonicalConfig
+from governance.config_contract.models import AuthorityConfig, CanonicalConfig
 from governance.config_contract.paths import normalize_relative_path
 from governance.domain.authority import (
     AUTHORITY_NODE_KINDS,
@@ -172,9 +172,13 @@ def load_normalized_authority_files(
     return NormalizedAuthorityPolicySet(rules=rules)
 
 
-def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthorityPolicySet:
-    """Load authority referenced by CanonicalConfig. Empty files => empty set."""
-    if not canonical.authority.files:
+def load_normalized_authority_from_files_config(
+    *,
+    authority: AuthorityConfig,
+    config_root: str,
+) -> NormalizedAuthorityPolicySet:
+    """Load authority file paths relative to ``config_root`` (v1 and v2)."""
+    if not authority.files:
         return NormalizedAuthorityPolicySet()
 
     paths: list[Path] = []
@@ -182,7 +186,7 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
     index_map: list[int] = []
     gate_errors: list[AuthorityDiagnosticError] = []
 
-    for index, relative in enumerate(canonical.authority.files):
+    for index, relative in enumerate(authority.files):
         source = relative.replace("\\", "/")
         try:
             normalize_relative_path(relative, pointer=f"/authority/files/{index}")
@@ -198,7 +202,7 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
             )
             continue
 
-        paths.append(Path(canonical.config_root) / relative)
+        paths.append(Path(config_root) / relative)
         sources.append(source)
         index_map.append(index)
 
@@ -227,6 +231,14 @@ def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthority
         raise AuthoritySemanticError(combined)
     assert result is not None
     return result
+
+
+def load_normalized_authority(canonical: CanonicalConfig) -> NormalizedAuthorityPolicySet:
+    """Load authority referenced by CanonicalConfig. Empty files => empty set."""
+    return load_normalized_authority_from_files_config(
+        authority=canonical.authority,
+        config_root=canonical.config_root,
+    )
 
 
 def _normalize_document(

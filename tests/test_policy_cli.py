@@ -146,7 +146,9 @@ def _patch_scanner(monkeypatch: pytest.MonkeyPatch, model: GovernanceModel) -> d
             calls["count"] += 1
             return model
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", FakeScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", FakeScanner
+    )
     return calls
 
 
@@ -167,7 +169,7 @@ def _patch_adapter(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         adapter.read_remote_state = tracked  # type: ignore[method-assign]
         return adapter
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
     return calls
 
 

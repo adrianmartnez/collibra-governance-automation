@@ -159,7 +159,7 @@ def test_invalid_config_skips_operational_io(monkeypatch: pytest.MonkeyPatch) ->
         raise AssertionError("scanner must not run")
 
     monkeypatch.setattr(
-        "governance.cli.PostgresMetadataScanner.scan",
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner.scan",
         boom_scan,
     )
     code = main(
@@ -175,7 +175,7 @@ def test_invalid_config_skips_operational_io(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_diff_requires_target_with_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "governance.cli.PostgresMetadataScanner.scan",
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner.scan",
         lambda self: (_ for _ in ()).throw(AssertionError("no scan")),
     )
     code = main(["diff", "--config", str(FIXTURES / "valid_minimal.yaml"), "--mode", "mock"])

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from governance.config_contract.models import CanonicalConfig
+from governance.config_contract.models_v2 import CanonicalConfigV2
 from governance.config_contract.paths import normalize_relative_path
 from governance.policy.errors import (
     CODE_DUPLICATE,
@@ -32,8 +33,10 @@ _RULE_ALLOWED_KINDS = {
 }
 
 
-def load_normalized_policies(canonical: CanonicalConfig) -> NormalizedPolicySet:
-    """Load policies referenced by CanonicalConfig. Empty files => empty set."""
+def load_normalized_policies(
+    canonical: CanonicalConfig | CanonicalConfigV2,
+) -> NormalizedPolicySet:
+    """Load policies referenced by canonical config (v1 or v2). Empty files => empty set."""
     if not canonical.policies.files:
         return NormalizedPolicySet()
 

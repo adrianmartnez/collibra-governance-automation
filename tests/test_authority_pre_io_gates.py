@@ -83,8 +83,10 @@ def _spy_collibra(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
         calls["preflight"] += 1
         raise AssertionError("preflight must not run when authority is invalid")
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", boom_adapter)
-    monkeypatch.setattr("governance.cli.run_preflight", boom_preflight)
+    monkeypatch.setattr(
+        "governance.providers.builtins.collibra.build_collibra_adapter", boom_adapter
+    )
+    monkeypatch.setattr("governance.providers.builtins.collibra.run_preflight", boom_preflight)
     return calls
 
 
@@ -162,9 +164,18 @@ def test_invalid_authority_blocks_impact_before_provider_io(
         raise AssertionError("openlineage loader must not run")
 
     monkeypatch.setattr("governance.cli.load_impact_changes", boom_changes)
-    monkeypatch.setattr("governance.cli.load_odcs_graph", boom_odcs)
-    monkeypatch.setattr("governance.cli.load_dbt_graph", boom_dbt)
-    monkeypatch.setattr("governance.cli.load_openlineage_graph", boom_ol)
+    monkeypatch.setattr(
+        "governance.providers.builtins.odcs.load_odcs_graph_with_observations",
+        boom_odcs,
+    )
+    monkeypatch.setattr(
+        "governance.providers.builtins.dbt.load_dbt_graph_with_observations",
+        boom_dbt,
+    )
+    monkeypatch.setattr(
+        "governance.providers.builtins.openlineage.load_openlineage_graph_with_observations",
+        boom_ol,
+    )
 
     code = main(
         [
@@ -223,7 +234,9 @@ def test_apply_allows_saved_plan_read_then_aborts_before_scan(
 
     monkeypatch.setattr("governance.cli.load_saved_plan", fake_load_saved_plan)
     monkeypatch.setattr("governance.cli._scan_model", boom_scan)
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", boom_adapter)
+    monkeypatch.setattr(
+        "governance.providers.builtins.collibra.build_collibra_adapter", boom_adapter
+    )
 
     code = main(["apply", str(plan_path), "--config", str(config), "--format", "json"])
     assert code in {1, 4}

@@ -146,7 +146,9 @@ def _patch_scanner(monkeypatch: pytest.MonkeyPatch) -> None:
         def scan(self) -> GovernanceModel:
             return model
 
-    monkeypatch.setattr("governance.cli.PostgresMetadataScanner", FakeScanner)
+    monkeypatch.setattr(
+        "governance.providers.builtins.postgresql.PostgresMetadataScanner", FakeScanner
+    )
 
 
 def _empty_page() -> dict[str, object]:
@@ -205,7 +207,7 @@ def _patch_live_import_http(
             sleeper=lambda _s: None,
         )
 
-    monkeypatch.setattr("governance.cli.build_collibra_adapter", factory)
+    monkeypatch.setattr("governance.providers.builtins.collibra.build_collibra_adapter", factory)
 
 
 def _post_paths(requests: list[httpx.Request]) -> list[str]:

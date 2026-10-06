@@ -18,6 +18,7 @@ from governance.integrations.openlineage.load import load_openlineage_events
 from governance.integrations.openlineage.mapper import (
     load_openlineage_graph,
     load_openlineage_graph_with_observations,
+    load_openlineage_lineage,
     map_openlineage_events,
     map_openlineage_events_with_observations,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "load_openlineage_events",
     "load_openlineage_graph",
     "load_openlineage_graph_with_observations",
+    "load_openlineage_lineage",
     "map_openlineage_events",
     "map_openlineage_events_with_observations",
     "validate_openlineage_events",

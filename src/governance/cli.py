@@ -18,7 +18,10 @@ from governance.authority.errors import (
     AuthorityError,
     map_authority_exception_to_config_diagnostics,
 )
-from governance.authority.load import load_normalized_authority
+from governance.authority.load import (
+    load_normalized_authority,
+    load_normalized_authority_from_files_config,
+)
 from governance.comparison import (
     ComparisonError,
     RootAlignmentAck,
@@ -42,12 +45,15 @@ from governance.config_contract import (
     load_canonical_config,
     resolve_inventory_path,
     resolve_mapping_path,
-    resolve_settings,
     resolve_snapshot_path,
     runtime_invalid_diagnostic,
     unresolved_env_diagnostic,
     validate_collibra_runtime,
-    validate_governance_config,
+)
+from governance.config_contract.errors import ConfigSemanticError, DiagnosticError
+from governance.config_contract.models_v2 import CanonicalConfigV2
+from governance.config_contract.provider_resolution import (
+    ResolvedProviderBinding,
 )
 from governance.config_contract.resolution_diagnostics import CODE_ENV_UNRESOLVED
 from governance.domain import GovernanceGraph, GovernanceModel
@@ -73,7 +79,6 @@ from governance.exporters import (
     write_inventory,
 )
 from governance.history import (
-    DiagnosticError,
     GovernanceHistory,
     HistoryError,
     append_history_entry,
@@ -90,6 +95,7 @@ from governance.history import (
 from governance.history.errors import CODE_WRITE_ERROR
 from governance.identity import (
     config_identity,
+    config_identity_v2,
     mapping_identity,
     policy_identity,
     target_context_identity,
@@ -125,22 +131,57 @@ from governance.integrations.collibra import (
     SyncObjectKind,
     SyncPlan,
     SyncResult,
-    build_collibra_adapter,
-    build_sync_plan,
-    execute_collibra_plan,
     format_preflight_human,
     load_mapping_config_file,
     map_to_desired_state,
     mapping_contains_example_placeholders,
     mock_mapping_config,
     preflight_exit_code,
-    run_preflight,
 )
 from governance.integrations.collibra.telemetry import execution_scope, finish_execution
-from governance.integrations.dbt import DbtError, load_dbt_graph
-from governance.integrations.odcs import OdcsError, load_odcs_graph
-from governance.integrations.openlineage import OpenLineageError, load_openlineage_graph
 from governance.operation_diagnostics import operation_diagnostics_failure
+from governance.orchestration.compat_v1 import (
+    collibra_binding_from_settings,
+    postgresql_binding_from_settings,
+)
+from governance.orchestration.config import (
+    V1RuntimeConfiguration,
+    V2RuntimeConfiguration,
+    load_runtime_configuration,
+    resolve_v2_providers,
+)
+from governance.orchestration.operation_runtime import (
+    OperationRuntime,
+    load_operation_runtime,
+    map_provider_errors,
+    mapping_for_operation,
+    preflight_target_binding,
+    scan_model_from_runtime,
+    settings_for_operation,
+    target_context_projection_for_runtime,
+)
+from governance.orchestration.operation_runtime import (
+    collibra_binding as operation_collibra_binding,
+)
+from governance.orchestration.registry import build_provider_registry
+from governance.orchestration.selection import (
+    compose_v2_impact_jobs,
+    compose_v2_reconciliation_jobs,
+)
+from governance.orchestration.sources import (
+    compose_legacy_impact_jobs,
+    compose_legacy_reconciliation_jobs,
+    run_impact_graph,
+    run_metadata_discovery,
+    run_reconciliation_sources,
+)
+from governance.orchestration.targets import (
+    dry_run_collibra_plan_result,
+    invoke_authorized_mutation,
+    invoke_preflight,
+    invoke_remote_state_read,
+    invoke_target_planning,
+)
 from governance.plans import (
     PLAN_VERSION,
     PLAN_VERSION_V2,
@@ -174,7 +215,6 @@ from governance.plans.errors import (
     PlanIntegrityError,
 )
 from governance.plans.target_context import (
-    build_target_context_projection,
     target_context_public,
 )
 from governance.policy import (
@@ -185,6 +225,13 @@ from governance.policy import (
     load_normalized_policies,
     policy_diagnostics_failure,
 )
+from governance.providers import ProviderDiscoveryError, ProviderRegistryError
+from governance.providers.builtins.collibra import (
+    CollibraMutationRequest,
+    collibra_runtime_from_context,
+)
+from governance.providers.contracts import ProviderRuntimeContext
+from governance.providers.registry import ProviderRegistry
 from governance.reconciliation import (
     ExplainError,
     ReconciliationError,
@@ -206,7 +253,7 @@ from governance.reconciliation import (
     validate_assumptions_safety,
     write_explain_artifact,
 )
-from governance.scanner import MetadataDiscoveryError, PostgresMetadataScanner
+from governance.scanner import MetadataDiscoveryError
 from governance.snapshots import (
     GovernanceSnapshot,
     SnapshotError,
@@ -274,6 +321,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except CliOperationalError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except ConfigSemanticError as exc:
+        return _emit_config_contract_error(exc, "human")
     except ConfigContractError as exc:
         print(f"error: {_SAFE_CONFIG}", file=sys.stderr)
         for item in exc.errors:
@@ -323,24 +372,58 @@ def _run(argv: list[str] | None) -> int:
     if command == "preflight":
         return _cmd_preflight(args)
 
-    canonical: CanonicalConfig | None = None
+    operation: OperationRuntime | None = None
+    canonical: CanonicalConfig | CanonicalConfigV2 | None = None
     config_path = getattr(args, "config", None)
+    fmt: OutputFormat = "json" if getattr(args, "json", False) else "human"
     if config_path is not None:
-        canonical = load_canonical_config(
-            config_path,
-            profile=getattr(args, "profile", None),
-        )
-        load_normalized_authority(canonical)
-        if command in {"diff", "sync"} and not canonical.targets:
+        try:
+            operation = load_operation_runtime(
+                config_path=config_path,
+                profile=getattr(args, "profile", None),
+            )
+        except ConfigContractError:
+            raise
+        except AuthorityError:
+            raise
+        except ConfigResolutionError as exc:
+            return _emit_resolution_error(exc, fmt, canonical=None)
+        except ConfigSemanticError as exc:
+            raise ConfigContractError(list(exc.errors)) from exc
+        except BaseException as exc:
+            mapped = map_provider_errors(exc)
+            if isinstance(mapped, ConfigContractError):
+                raise mapped from exc
+            raise
+        canonical = operation.policies_canonical
+        if command == "scan":
+            return _cmd_scan_from_operation(operation, json_output=bool(args.json))
+        if command == "export":
+            artifact: ArtifactKind = getattr(args, "artifact", "inventory") or "inventory"
+            output = _resolve_export_output(
+                None,
+                canonical=operation.policies_canonical,
+                artifact=artifact,
+                cli_output=getattr(args, "output", None),
+            )
+            return _cmd_export_from_operation(
+                operation,
+                output_path=output,
+                artifact=artifact,
+            )
+        if command in {"diff", "sync"} and not operation.has_targets:
             raise CliOperationalError(_SAFE_TARGET_REQUIRED)
-        settings = resolve_settings(canonical)
+        try:
+            settings = settings_for_operation(operation)
+        except ConfigResolutionError as exc:
+            return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
     else:
         settings = load_settings()
 
     if command == "scan":
         return _cmd_scan(settings, json_output=bool(args.json))
     if command == "export":
-        artifact: ArtifactKind = getattr(args, "artifact", "inventory") or "inventory"
+        artifact = getattr(args, "artifact", "inventory") or "inventory"
         output = _resolve_export_output(
             settings,
             canonical=canonical,
@@ -351,7 +434,7 @@ def _run(argv: list[str] | None) -> int:
     if command == "diff":
         mode = _resolve_mode(settings, getattr(args, "mode", None))
         mapping_path = _resolve_cli_mapping_path(
-            canonical,
+            canonical if isinstance(canonical, CanonicalConfig) else None,
             getattr(args, "mapping_config", None),
         )
         return _cmd_diff(
@@ -359,6 +442,7 @@ def _run(argv: list[str] | None) -> int:
             mode=mode,
             mapping_config_path=mapping_path,
             json_output=bool(args.json),
+            operation=operation,
         )
     if command == "sync":
         mode = _resolve_mode(settings, getattr(args, "mode", None))
@@ -366,7 +450,7 @@ def _run(argv: list[str] | None) -> int:
         confirm_live = bool(getattr(args, "confirm_live", False))
         _validate_sync_flags(mode=mode, apply=apply, confirm_live=confirm_live)
         mapping_path = _resolve_cli_mapping_path(
-            canonical,
+            canonical if isinstance(canonical, CanonicalConfig) else None,
             getattr(args, "mapping_config", None),
         )
         return _cmd_sync(
@@ -375,6 +459,7 @@ def _run(argv: list[str] | None) -> int:
             mapping_config_path=mapping_path,
             apply=apply,
             json_output=bool(args.json),
+            operation=operation,
         )
     parser.error(f"unknown command: {command}")
     return 2
@@ -953,7 +1038,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     config_path = Path(args.config)
     json_output = bool(args.json)
     try:
-        canonical, identity = validate_governance_config(
+        runtime = load_runtime_configuration(
             config_path,
             profile=getattr(args, "profile", None),
         )
@@ -966,6 +1051,71 @@ def _cmd_config(args: argparse.Namespace) -> int:
             for item in exc.errors:
                 print(f"error path={item.path or '/'} code={item.code} message={item.message}")
         return 1
+
+    if isinstance(runtime, V2RuntimeConfiguration):
+        identity = config_identity_v2(runtime.loaded.canonical.identity_projection()).to_dict()
+        try:
+            registry = build_provider_registry(discover_external=True)
+            resolve_v2_providers(runtime, registry=registry)
+        except (ProviderRegistryError, ProviderDiscoveryError) as exc:
+            mapped = [
+                DiagnosticError(code=item.code, path=item.path, message=item.message)
+                for item in exc.errors
+            ]
+            payload = diagnostics_failure(mapped)
+            if json_output:
+                _print_json(payload)
+            else:
+                print("ok=false")
+                for item in mapped:
+                    print(f"error path={item.path or '/'} code={item.code} message={item.message}")
+            return 1
+        except ConfigResolutionError as exc:
+            payload = unresolved_env_diagnostic(
+                path=exc.path or "",
+                message=_SAFE_RESOLUTION,
+            )
+            if json_output:
+                _print_json(payload)
+            else:
+                print("ok=false")
+                print(
+                    f"error path={exc.path or '/'} code={exc.code} message={_SAFE_RESOLUTION}",
+                    file=sys.stderr,
+                )
+            return 1
+
+        try:
+            load_normalized_authority_from_files_config(
+                authority=runtime.loaded.canonical.authority,
+                config_root=runtime.loaded.canonical.config_root,
+            )
+        except AuthorityError as exc:
+            mapped = map_authority_exception_to_config_diagnostics(
+                exc,
+                canonical=runtime.loaded.canonical,
+            )
+            payload = diagnostics_failure(mapped)
+            if json_output:
+                _print_json(payload)
+            else:
+                print("ok=false")
+                for item in mapped:
+                    print(f"error path={item.path or '/'} code={item.code} message={item.message}")
+            return 1
+
+        payload = diagnostics_success(identity)
+        if json_output:
+            _print_json(payload)
+        else:
+            print("ok=true")
+            print(f"algorithm={identity['algorithm']}")
+            print(f"hashing_contract_version={identity['hashing_contract_version']}")
+            print(f"digest={identity['digest']}")
+        return 0
+
+    canonical = runtime.canonical
+    identity = config_identity(canonical.identity_projection()).to_dict()
 
     try:
         load_normalized_authority(canonical)
@@ -993,22 +1143,24 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     fmt: OutputFormat = args.format
-    loaded = _load_canonical_and_settings(
+    loaded = _load_operation_runtime(
         config_path=args.config,
         profile=getattr(args, "profile", None),
         fmt=fmt,
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings, _authority = loaded
+    operation = loaded
 
     try:
-        policy_set = load_normalized_policies(canonical)
+        policy_set = load_normalized_policies(operation.policies_canonical)
     except PolicyError as exc:
         return _emit_policy_error(exc, fmt)
 
     try:
-        model = _scan_model(settings)
+        model = scan_model_from_runtime(operation)
+    except ConfigResolutionError as exc:
+        return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
     except Exception as exc:
         if _is_operational_error(exc):
             return _emit_operational(exc, fmt)
@@ -1055,43 +1207,58 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
     if not getattr(args, "output", None):
         raise CliUsageError("plan generation requires --output")
 
-    loaded = _load_canonical_and_settings(
+    loaded = _load_operation_runtime(
         config_path=args.config,
         profile=getattr(args, "profile", None),
         fmt=fmt,
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings, authority = loaded
+    operation = loaded
+    try:
+        settings = settings_for_operation(operation)
+    except ConfigResolutionError as exc:
+        return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
+    authority = operation.authority
+    policies_canonical = operation.policies_canonical
 
-    if not canonical.targets:
+    if not operation.has_targets:
         return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
 
-    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    mode = _effective_mode_or_invalid(
+        settings,
+        fmt=fmt,
+        canonical=operation.canonical_v1,
+    )
     if isinstance(mode, int):
         return mode
     try:
-        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+        mapping_config = _resolve_mapping_for_operation(operation, mode=mode)
     except CliOperationalError as exc:
         return _emit_operational_message(str(exc), fmt)
 
     # Validate effective Collibra runtime before any PostgreSQL/Collibra I/O.
     try:
-        validate_collibra_runtime(settings, canonical)
-        build_target_context_projection(settings)
+        if operation.kind == "1":
+            assert operation.canonical_v1 is not None
+            validate_collibra_runtime(settings, operation.canonical_v1)
+        else:
+            validate_collibra_runtime(settings, None)
+        target_context_projection_for_runtime(operation)
     except ConfigResolutionError as exc:
-        return _emit_resolution_error(exc, fmt, canonical=canonical)
+        return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
     except ValueError as exc:
-        return _emit_runtime_invalid(exc, fmt, canonical=canonical)
+        return _emit_runtime_invalid(exc, fmt, canonical=operation.canonical_v1)
 
     try:
-        policy_set = load_normalized_policies(canonical)
+        policy_set = load_normalized_policies(policies_canonical)
     except PolicyError as exc:
         return _emit_policy_error(exc, fmt)
 
     odcs_paths, dbt_paths, openlineage_paths = _reconciliation_source_paths(args)
     try:
-        bundle = _compose_or_empty_reconciliation_bundle(
+        bundle = _compose_reconciliation_bundle_for_operation(
+            operation,
             namespace=settings.postgres_source_name,
             odcs_paths=odcs_paths,
             dbt_paths=dbt_paths,
@@ -1102,7 +1269,7 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
         return _emit_reconciliation_error(exc, fmt)
 
     try:
-        model = _scan_model(settings)
+        model = scan_model_from_runtime(operation)
     except Exception as exc:
         if _is_operational_error(exc):
             return _emit_operational(exc, fmt)
@@ -1138,13 +1305,17 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
 
     try:
         desired0 = map_to_desired_state(model, mapping_config)
-        adapter = build_collibra_adapter(settings, mapping_config)
+        collibra_binding = _collibra_binding_for_operation(
+            operation,
+            settings,
+            mapping_config,
+        )
         with execution_scope(
             execution_mode=settings.collibra_execution_mode,
             default_outcome="success",
             default_writes_performed=0,
         ):
-            remote = adapter.read_remote_state(desired0)
+            remote = invoke_remote_state_read(collibra_binding, desired0)
             overlay = apply_reconciliation_overlay(
                 desired0,
                 remote,
@@ -1153,7 +1324,7 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
                 physical_index,
             )
             desired1 = overlay.desired
-            sync_plan = build_sync_plan(desired1, remote)
+            sync_plan = invoke_target_planning(collibra_binding, desired1, remote)
             remote_identity = compute_remote_state_identity_value(remote)
             assumptions = build_reconciliation_assumptions(
                 baseline_desired=desired0,
@@ -1168,16 +1339,23 @@ def _cmd_plan_generate(args: argparse.Namespace) -> int:
     except ReconciliationError as exc:
         return _emit_reconciliation_error(exc, fmt)
     except ConfigResolutionError as exc:
-        return _emit_resolution_error(exc, fmt, canonical=canonical)
+        return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
     except Exception as exc:
         if _is_operational_error(exc):
             return _emit_operational(exc, fmt)
         raise
 
+    if operation.kind == "2":
+        assert operation.loaded_v2 is not None
+        observed_config = config_identity_v2(operation.loaded_v2.canonical.identity_projection())
+    else:
+        assert operation.canonical_v1 is not None
+        observed_config = config_identity(operation.canonical_v1.identity_projection())
+
     saved = build_saved_plan(
         settings=settings,
         sync_plan=sync_plan,
-        config_identity=config_identity(canonical.identity_projection()),
+        config_identity=observed_config,
         snapshot=snapshot,
         policy_set=policy_set,
         mapping_config=mapping_config,
@@ -1212,14 +1390,17 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     except PlanError as exc:
         return _emit_plan_error(exc, fmt)
 
-    loaded = _load_canonical_and_settings(
+    loaded = _load_operation_runtime(
         config_path=args.config,
         profile=getattr(args, "profile", None),
         fmt=fmt,
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings, authority = loaded
+    operation = loaded
+    settings = settings_for_operation(operation)
+    authority = operation.authority
+    policies_canonical = operation.policies_canonical
 
     odcs_paths, dbt_paths, openlineage_paths = _reconciliation_source_paths(args)
     source_flags_present = has_reconciliation_source_flags(
@@ -1249,7 +1430,8 @@ def _cmd_apply(args: argparse.Namespace) -> int:
     # v2: recompute decisions on the saved boundary before other freshness checks.
     if saved.plan_version == PLAN_VERSION_V2:
         try:
-            bundle = _compose_or_empty_reconciliation_bundle(
+            bundle = _compose_reconciliation_bundle_for_operation(
+                operation,
                 namespace=settings.postgres_source_name,
                 odcs_paths=odcs_paths,
                 dbt_paths=dbt_paths,
@@ -1300,31 +1482,39 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 sys.stdout.write(format_stale_human(stale))
             return 5
 
-    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    mode = _effective_mode_or_invalid(
+        settings,
+        fmt=fmt,
+        canonical=operation.canonical_v1,
+    )
     if isinstance(mode, int):
         return mode
     _validate_apply_flags(mode=mode, apply=apply, confirm_live=confirm_live)
 
     try:
-        policy_set = load_normalized_policies(canonical)
+        policy_set = load_normalized_policies(policies_canonical)
     except PolicyError as exc:
         return _emit_policy_error(exc, fmt)
 
-    if not canonical.targets:
+    if not operation.has_targets:
         return _emit_operational_message(_SAFE_TARGET_REQUIRED_PLAN, fmt)
 
     try:
-        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+        mapping_config = _resolve_mapping_for_operation(operation, mode=mode)
     except CliOperationalError as exc:
         return _emit_operational_message(str(exc), fmt)
 
     try:
-        validate_collibra_runtime(settings, canonical)
-        target_projection = build_target_context_projection(settings)
+        if operation.kind == "1":
+            assert operation.canonical_v1 is not None
+            validate_collibra_runtime(settings, operation.canonical_v1)
+        else:
+            validate_collibra_runtime(settings, None)
+        target_projection = target_context_projection_for_runtime(operation)
     except ConfigResolutionError as exc:
-        return _emit_resolution_error(exc, fmt, canonical=canonical)
+        return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
     except ValueError as exc:
-        return _emit_runtime_invalid(exc, fmt, canonical=canonical)
+        return _emit_runtime_invalid(exc, fmt, canonical=operation.canonical_v1)
 
     observed_public = target_context_public(target_projection)
     observed_target = target_context_identity(target_projection)
@@ -1350,14 +1540,19 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         )
 
     try:
-        model = _scan_model(settings)
+        model = scan_model_from_runtime(operation)
     except Exception as exc:
         if _is_operational_error(exc):
             return _emit_operational(exc, fmt)
         raise
 
     snapshot = GovernanceSnapshot.from_model(model)
-    observed_config = config_identity(canonical.identity_projection())
+    if operation.kind == "2":
+        assert operation.loaded_v2 is not None
+        observed_config = config_identity_v2(operation.loaded_v2.canonical.identity_projection())
+    else:
+        assert operation.canonical_v1 is not None
+        observed_config = config_identity(operation.canonical_v1.identity_projection())
     observed_policy = policy_identity(policy_set.to_identity_dict())
     observed_snapshot = snapshot.content_identity()
     observed_mapping = mapping_identity(mapping_config.to_identity_dict())
@@ -1427,7 +1622,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             )
         )
 
-    adapter = None
+    collibra_binding = None
     target_fresh = (
         observed_target == saved.target_context_identity
         and dict(saved.target_context) == observed_public
@@ -1436,8 +1631,12 @@ def _cmd_apply(args: argparse.Namespace) -> int:
         if target_fresh:
             try:
                 desired = map_to_desired_state(model, mapping_config)
-                adapter = build_collibra_adapter(settings, mapping_config)
-                remote = adapter.read_remote_state(desired)
+                collibra_binding = _collibra_binding_for_operation(
+                    operation,
+                    settings,
+                    mapping_config,
+                )
+                remote = invoke_remote_state_read(collibra_binding, desired)
                 observed_remote = compute_remote_state_identity_value(remote)
             except ConfigResolutionError as exc:
                 finish_execution(
@@ -1445,7 +1644,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                     execution_mode=settings.collibra_execution_mode,
                     writes_performed=0,
                 )
-                return _emit_resolution_error(exc, fmt, canonical=canonical)
+                return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
             except Exception as exc:
                 if _is_operational_error(exc):
                     finish_execution(
@@ -1478,18 +1677,26 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 sys.stdout.write(format_stale_human(stale))
             return 5
 
-        if adapter is None:
-            # Unreachable when fresh: matching target_context always builds adapter above.
+        if collibra_binding is None:
+            # Unreachable when fresh: matching target_context always builds binding above.
             try:
-                validate_collibra_runtime(settings, canonical)
-                adapter = build_collibra_adapter(settings, mapping_config)
+                if operation.kind == "1":
+                    assert operation.canonical_v1 is not None
+                    validate_collibra_runtime(settings, operation.canonical_v1)
+                else:
+                    validate_collibra_runtime(settings, None)
+                collibra_binding = _collibra_binding_for_operation(
+                    operation,
+                    settings,
+                    mapping_config,
+                )
             except ConfigResolutionError as exc:
                 finish_execution(
                     outcome="error",
                     execution_mode=settings.collibra_execution_mode,
                     writes_performed=0,
                 )
-                return _emit_resolution_error(exc, fmt, canonical=canonical)
+                return _emit_resolution_error(exc, fmt, canonical=operation.canonical_v1)
             except Exception as exc:
                 if _is_operational_error(exc):
                     finish_execution(
@@ -1501,16 +1708,22 @@ def _cmd_apply(args: argparse.Namespace) -> int:
                 raise
 
         try:
-            result = execute_collibra_plan(
-                adapter,
-                saved.sync_plan,
-                mapping_config,
-                apply=apply,
-                execution_mode=settings.collibra_execution_mode,
-                synchronization_id=_synchronization_id_for_mode(settings),
-                max_resources=settings.collibra_batch_max_resources,
-                max_additional_characteristics=settings.collibra_batch_max_additional_characteristics,
-            )
+            if apply:
+                result = invoke_authorized_mutation(
+                    collibra_binding,
+                    CollibraMutationRequest(plan=saved.sync_plan),
+                )
+            else:
+                result = dry_run_collibra_plan_result(
+                    plan=saved.sync_plan,
+                    mapping_config=mapping_config,
+                    execution_mode=settings.collibra_execution_mode,
+                    synchronization_id=_synchronization_id_for_mode(settings),
+                    max_resources=settings.collibra_batch_max_resources,
+                    max_additional_characteristics=(
+                        settings.collibra_batch_max_additional_characteristics
+                    ),
+                )
         except CollibraAdapterError as exc:
             return _emit_operational(exc, fmt)
     if isinstance(result, ImportExecutionResult):
@@ -2001,29 +2214,51 @@ def _cmd_history_inspect(args: argparse.Namespace) -> int:
 
 def _cmd_preflight(args: argparse.Namespace) -> int:
     fmt: OutputFormat = args.format
-    loaded = _load_canonical_and_settings(
+    loaded = _load_operation_runtime(
         config_path=args.config,
         profile=getattr(args, "profile", None),
         fmt=fmt,
     )
     if isinstance(loaded, int):
         return loaded
-    canonical, settings, _authority = loaded
+    operation = loaded
 
-    if not canonical.targets:
+    if not operation.has_targets:
         return _emit_operational_message(_SAFE_TARGET_REQUIRED, fmt)
 
-    mode = _effective_mode_or_invalid(settings, fmt=fmt, canonical=canonical)
+    try:
+        preflight_binding = preflight_target_binding(operation)
+    except ConfigSemanticError as exc:
+        return _emit_config_contract_error(exc, fmt)
+
+    settings = collibra_runtime_from_context(
+        preflight_binding.runtime_context,
+        validate_runtime=False,
+    ).build_settings()
+
+    mode = _effective_mode_or_invalid(
+        settings,
+        fmt=fmt,
+        canonical=operation.canonical_v1,
+    )
     if isinstance(mode, int):
         return mode
 
     try:
-        mapping_config = _resolve_mapping_config_from_canonical(mode, canonical)
+        mapping_config = _resolve_mapping_for_operation(operation, mode=mode)
     except CliOperationalError as exc:
         return _emit_operational_message(str(exc), fmt)
 
+    try:
+        collibra_binding = _collibra_binding_for_operation(
+            operation,
+            settings,
+            mapping_config,
+        )
+    except ConfigSemanticError as exc:
+        return _emit_config_contract_error(exc, fmt)
     with execution_scope(execution_mode=settings.collibra_execution_mode):
-        report = run_preflight(settings, mapping_config)
+        report = invoke_preflight(collibra_binding)
         finish_execution(
             outcome="success" if preflight_exit_code(report) == 0 else "failure",
             execution_mode=settings.collibra_execution_mode,
@@ -2047,27 +2282,54 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     odcs_paths = list(getattr(args, "odcs", None) or [])
     dbt_paths = list(getattr(args, "dbt_manifest", None) or [])
     openlineage_paths = list(getattr(args, "openlineage", None) or [])
-    if not odcs_paths and not dbt_paths and not openlineage_paths:
-        raise CliUsageError("at least one of --odcs, --dbt-manifest, or --openlineage is required")
+    has_legacy = bool(odcs_paths or dbt_paths or openlineage_paths)
 
     policy_set = None
     affected_policies = ()
+    impact_operation: OperationRuntime | None = None
     config_path = getattr(args, "config", None)
     if config_path is not None:
         try:
-            canonical = load_canonical_config(
+            runtime_cfg = load_runtime_configuration(
                 config_path,
                 profile=getattr(args, "profile", None),
             )
         except ConfigContractError as exc:
             return _emit_config_contract_error(exc, fmt)
-        authority = _validate_authority(canonical, fmt)
-        if isinstance(authority, int):
-            return authority
-        try:
-            policy_set = load_normalized_policies(canonical)
-        except PolicyError as exc:
-            return _emit_policy_error(exc, fmt)
+        if isinstance(runtime_cfg, V1RuntimeConfiguration):
+            canonical = runtime_cfg.canonical
+            try:
+                load_normalized_authority_from_files_config(
+                    authority=canonical.authority,
+                    config_root=canonical.config_root,
+                )
+            except AuthorityError as exc:
+                return _emit_authority_error(exc, fmt, canonical=canonical)
+            try:
+                policy_set = load_normalized_policies(canonical)
+            except PolicyError as exc:
+                return _emit_policy_error(exc, fmt)
+        else:
+            loaded = _load_operation_runtime(
+                config_path=config_path,
+                profile=getattr(args, "profile", None),
+                fmt=fmt,
+            )
+            if isinstance(loaded, int):
+                return loaded
+            impact_operation = loaded
+            try:
+                policy_set = load_normalized_policies(impact_operation.policies_canonical)
+            except PolicyError as exc:
+                return _emit_policy_error(exc, fmt)
+
+    if not has_legacy:
+        if impact_operation is not None and impact_operation.kind == "2":
+            pass
+        else:
+            raise CliUsageError(
+                "at least one of --odcs, --dbt-manifest, or --openlineage is required"
+            )
 
     try:
         changed_nodes = load_impact_changes(args.changes, expected_namespace=namespace)
@@ -2081,6 +2343,7 @@ def _cmd_impact(args: argparse.Namespace) -> int:
             dbt_paths=dbt_paths,
             openlineage_paths=openlineage_paths,
             dbt_default_database=getattr(args, "dbt_default_database", None),
+            operation=impact_operation,
         )
     except ImpactError as exc:
         return _emit_impact_error(exc, fmt)
@@ -2148,6 +2411,91 @@ def _reconciliation_source_paths(
     )
 
 
+def _resolve_mapping_for_operation(
+    operation: OperationRuntime,
+    *,
+    mode: Mode,
+) -> CollibraMappingConfig:
+    if operation.kind == "2":
+        return mapping_for_operation(operation)
+    assert operation.canonical_v1 is not None
+    return _resolve_mapping_config_from_canonical(mode, operation.canonical_v1)
+
+
+def _collibra_binding_for_operation(
+    operation: OperationRuntime,
+    settings: Settings,
+    mapping_config: CollibraMappingConfig,
+) -> ResolvedProviderBinding:
+    if operation.kind == "2":
+        binding = operation_collibra_binding(operation)
+        # Honor CLI ``--mode`` / effective Settings over unresolved/resolved YAML mode.
+        current_mode = str(binding.runtime_context.config.get("mode", "")).strip().lower()
+        effective_mode = settings.collibra_mode.strip().lower()
+        if current_mode == effective_mode:
+            return binding
+        overlay = dict(binding.runtime_context.config)
+        overlay["mode"] = effective_mode
+        return ResolvedProviderBinding(
+            role=binding.role,
+            logical_id=binding.logical_id,
+            provider_id=binding.provider_id,
+            registration=binding.registration,
+            runtime_context=ProviderRuntimeContext(
+                config=overlay,
+                config_root=binding.runtime_context.config_root,
+            ),
+            config_path=binding.config_path,
+        )
+    return _collibra_provider_binding(settings, mapping_config, operation.registry)
+
+
+def _compose_reconciliation_bundle_for_operation(
+    operation: OperationRuntime,
+    *,
+    namespace: str,
+    odcs_paths: list[str],
+    dbt_paths: list[str],
+    openlineage_paths: list[str],
+    dbt_default_database: str | None,
+) -> ReconciliationSourceBundle:
+    if operation.kind == "2":
+        assert operation.resolved is not None
+        jobs = list(compose_v2_reconciliation_jobs(operation.resolved, operation.registry))
+        if has_reconciliation_source_flags(
+            odcs_paths=odcs_paths,
+            dbt_paths=dbt_paths,
+            openlineage_paths=openlineage_paths,
+        ):
+            jobs.extend(
+                compose_legacy_reconciliation_jobs(
+                    namespace=namespace,
+                    odcs_paths=odcs_paths,
+                    dbt_paths=dbt_paths,
+                    openlineage_paths=openlineage_paths,
+                    dbt_default_database=dbt_default_database,
+                    registry=operation.registry,
+                )
+            )
+        if not jobs:
+            return ReconciliationSourceBundle(
+                observations=PropertyObservationSet(),
+                known_objects=(),
+            )
+        executed = run_reconciliation_sources(jobs)
+        return ReconciliationSourceBundle(
+            observations=executed.observations,
+            known_objects=executed.known_objects,
+        )
+    return _compose_or_empty_reconciliation_bundle(
+        namespace=namespace,
+        odcs_paths=odcs_paths,
+        dbt_paths=dbt_paths,
+        openlineage_paths=openlineage_paths,
+        dbt_default_database=dbt_default_database,
+    )
+
+
 def _compose_or_empty_reconciliation_bundle(
     *,
     namespace: str,
@@ -2181,41 +2529,55 @@ def _compose_impact_graph(
     dbt_paths: list[str],
     openlineage_paths: list[str],
     dbt_default_database: str | None,
+    registry: ProviderRegistry | None = None,
+    operation: OperationRuntime | None = None,
 ) -> GovernanceGraph:
-    specs: list[tuple[str, str]] = []
-    specs.extend(("dbt", path) for path in dbt_paths)
-    specs.extend(("odcs", path) for path in odcs_paths)
-    specs.extend(("openlineage", path) for path in openlineage_paths)
-    specs.sort(key=lambda item: (item[0], item[1]))
-
-    graphs: list[GovernanceGraph] = []
-    for kind, path in specs:
-        try:
-            if kind == "odcs":
-                graphs.append(load_odcs_graph(path, namespace=namespace))
-            elif kind == "dbt":
-                graphs.append(
-                    load_dbt_graph(
-                        path,
-                        namespace=namespace,
-                        default_database=dbt_default_database,
-                    )
+    if operation is not None and operation.kind == "2":
+        assert operation.resolved is not None
+        jobs = list(compose_v2_impact_jobs(operation.resolved, operation.registry))
+        if odcs_paths or dbt_paths or openlineage_paths:
+            jobs.extend(
+                compose_legacy_impact_jobs(
+                    namespace=namespace,
+                    odcs_paths=odcs_paths,
+                    dbt_paths=dbt_paths,
+                    openlineage_paths=openlineage_paths,
+                    dbt_default_database=dbt_default_database,
+                    registry=operation.registry,
                 )
-            else:
-                graphs.append(load_openlineage_graph(path, namespace=namespace))
-        except (OdcsError, DbtError, OpenLineageError) as exc:
+            )
+    else:
+        if registry is None:
+            registry = build_provider_registry(discover_external=True)
+        jobs = compose_legacy_impact_jobs(
+            namespace=namespace,
+            odcs_paths=odcs_paths,
+            dbt_paths=dbt_paths,
+            openlineage_paths=openlineage_paths,
+            dbt_default_database=dbt_default_database,
+            registry=registry,
+        )
+    if not jobs:
+        raise CliUsageError(
+            "no governance_graph sources available; declare sources in governance.yaml v2 "
+            "or pass --odcs/--dbt-manifest/--openlineage"
+        )
+    graphs: list[GovernanceGraph] = []
+    for job in jobs:
+        try:
+            graphs.append(run_impact_graph([job]))
+        except ReconciliationError as exc:
             raise ImpactSourceError(
                 [
                     ImpactDiagnosticError(
                         code=CODE_SOURCE,
-                        path=getattr(item, "path", "") or "",
+                        path=item.path or "",
                         message=item.message,
-                        source_kind=kind,
+                        source_kind=job.provider_id,
                     )
                     for item in exc.errors
                 ]
             ) from exc
-
     try:
         return GovernanceGraph.from_parts(
             [node for graph in graphs for node in graph.nodes],
@@ -2281,31 +2643,47 @@ def _emit_explain_error(exc: ExplainError, fmt: OutputFormat) -> int:
     return 4
 
 
-def _load_canonical_and_settings(
+def _load_operation_runtime(
     *,
     config_path: str,
     profile: str | None,
     fmt: OutputFormat,
-) -> tuple[CanonicalConfig, Settings, NormalizedAuthorityPolicySet] | int:
+) -> OperationRuntime | int:
     try:
-        canonical = load_canonical_config(config_path, profile=profile)
+        return load_operation_runtime(config_path, profile=profile)
     except ConfigContractError as exc:
         return _emit_config_contract_error(exc, fmt)
-    authority = _validate_authority(canonical, fmt)
-    if isinstance(authority, int):
-        return authority
-    try:
-        settings = resolve_settings(canonical)
+    except AuthorityError as exc:
+        try:
+            runtime = load_runtime_configuration(config_path, profile=profile)
+        except ConfigContractError:
+            canonical_for_map: CanonicalConfig | CanonicalConfigV2 | None = None
+        else:
+            if isinstance(runtime, V2RuntimeConfiguration):
+                canonical_for_map = runtime.loaded.canonical
+            else:
+                canonical_for_map = runtime.canonical
+        return _emit_authority_error(exc, fmt, canonical=canonical_for_map)
     except ConfigResolutionError as exc:
-        return _emit_resolution_error(exc, fmt, canonical=canonical)
-    return canonical, settings, authority
+        return _emit_resolution_error(exc, fmt, canonical=None)
+    except ConfigSemanticError as exc:
+        return _emit_config_contract_error(ConfigContractError(list(exc.errors)), fmt)
+    except BaseException as exc:
+        try:
+            return _emit_config_contract_error(map_provider_errors(exc), fmt)
+        except BaseException:
+            raise
 
 
 def _validate_authority(
-    canonical: CanonicalConfig, fmt: OutputFormat
+    canonical: CanonicalConfig | CanonicalConfigV2,
+    fmt: OutputFormat,
 ) -> NormalizedAuthorityPolicySet | int:
     try:
-        return load_normalized_authority(canonical)
+        return load_normalized_authority_from_files_config(
+            authority=canonical.authority,
+            config_root=canonical.config_root,
+        )
     except AuthorityError as exc:
         return _emit_authority_error(exc, fmt, canonical=canonical)
 
@@ -2314,7 +2692,7 @@ def _emit_authority_error(
     exc: AuthorityError,
     fmt: OutputFormat,
     *,
-    canonical: CanonicalConfig | None = None,
+    canonical: CanonicalConfig | CanonicalConfigV2 | None = None,
 ) -> int:
     mapped = map_authority_exception_to_config_diagnostics(exc, canonical=canonical)
     return _emit_config_contract_error(
@@ -2439,7 +2817,7 @@ def _effective_mode_or_invalid(
     settings: Settings,
     *,
     fmt: OutputFormat,
-    canonical: CanonicalConfig,
+    canonical: CanonicalConfig | None,
 ) -> Mode | int:
     mode = settings.collibra_mode.strip().lower()
     if mode not in {"mock", "live"}:
@@ -2482,18 +2860,25 @@ def _resolve_cli_mapping_path(
 
 
 def _resolve_export_output(
-    settings: Settings,
+    settings: Settings | None,
     *,
-    canonical: CanonicalConfig | None,
+    canonical: CanonicalConfig | CanonicalConfigV2 | None,
     artifact: ArtifactKind,
     cli_output: str | None,
 ) -> str:
     if cli_output is not None:
         return cli_output
     if canonical is not None:
+        root = Path(canonical.config_root)
         if artifact == "snapshot":
-            return str(resolve_snapshot_path(canonical))
-        return str(resolve_inventory_path(canonical))
+            if isinstance(canonical, CanonicalConfig):
+                return str(resolve_snapshot_path(canonical))
+            return str(root / canonical.artifacts.snapshot_path)
+        if isinstance(canonical, CanonicalConfig):
+            return str(resolve_inventory_path(canonical))
+        return str(root / canonical.artifacts.inventory_path)
+    if settings is None:
+        raise CliUsageError("export output path requires --output or --config with artifacts")
     if artifact == "snapshot":
         inventory = Path(settings.inventory_output_path)
         return str(inventory.with_name("governance-snapshot.json"))
@@ -2502,6 +2887,19 @@ def _resolve_export_output(
 
 def _cmd_scan(settings: Settings, *, json_output: bool) -> int:
     model = _scan_model(settings)
+    summary = _scan_summary(model)
+    if json_output:
+        _print_json(summary)
+    else:
+        _print_scan_human(summary)
+    return 0
+
+
+def _cmd_scan_from_operation(operation: OperationRuntime, *, json_output: bool) -> int:
+    try:
+        model = scan_model_from_runtime(operation)
+    except ConfigSemanticError as exc:
+        return _emit_config_contract_error(exc, "json" if json_output else "human")
     summary = _scan_summary(model)
     if json_output:
         _print_json(summary)
@@ -2530,25 +2928,57 @@ def _cmd_export(
     return 0
 
 
+def _cmd_export_from_operation(
+    operation: OperationRuntime,
+    *,
+    output_path: str,
+    artifact: ArtifactKind,
+) -> int:
+    model = scan_model_from_runtime(operation)
+    if artifact == "snapshot":
+        from governance.snapshots import write_snapshot
+
+        snapshot = GovernanceSnapshot.from_model(model)
+        written = write_snapshot(snapshot, output_path)
+        print(f"snapshot_written={written}")
+        return 0
+    inventory = MetadataInventory.from_model(model)
+    written = write_inventory(inventory, output_path)
+    print(f"inventory_written={written}")
+    return 0
+
+
 def _cmd_diff(
     settings: Settings,
     *,
     mode: Mode,
     mapping_config_path: str | None,
     json_output: bool,
+    operation: OperationRuntime | None = None,
 ) -> int:
-    mapping_config = _resolve_mapping_config(mode, mapping_config_path)
+    if operation is not None and operation.kind == "2":
+        mapping_config = mapping_for_operation(operation)
+    else:
+        mapping_config = _resolve_mapping_config(mode, mapping_config_path)
     effective = replace(settings, collibra_mode=mode)
-    model = _scan_model(effective)
+    if operation is not None:
+        model = scan_model_from_runtime(operation)
+        collibra_binding = _collibra_binding_for_operation(
+            operation,
+            effective,
+            mapping_config,
+        )
+    else:
+        model = _scan_model(effective)
+        collibra_binding = _collibra_provider_binding(effective, mapping_config)
     desired = map_to_desired_state(model, mapping_config)
-    adapter = build_collibra_adapter(effective, mapping_config)
     with execution_scope(
         execution_mode=effective.collibra_execution_mode,
         default_outcome="success",
         default_writes_performed=0,
     ):
-        remote = adapter.read_remote_state(desired)
-        plan = build_sync_plan(desired, remote)
+        remote = invoke_remote_state_read(collibra_binding, desired)
+        plan = invoke_target_planning(collibra_binding, desired, remote)
     payload = _diff_payload(mode=mode, plan=plan)
     if json_output:
         _print_json(payload)
@@ -2564,26 +2994,45 @@ def _cmd_sync(
     mapping_config_path: str | None,
     apply: bool,
     json_output: bool,
+    operation: OperationRuntime | None = None,
 ) -> int:
-    mapping_config = _resolve_mapping_config(mode, mapping_config_path)
+    if operation is not None and operation.kind == "2":
+        mapping_config = mapping_for_operation(operation)
+    else:
+        mapping_config = _resolve_mapping_config(mode, mapping_config_path)
     effective = replace(settings, collibra_mode=mode)
-    model = _scan_model(effective)
+    if operation is not None:
+        model = scan_model_from_runtime(operation)
+        collibra_binding = _collibra_binding_for_operation(
+            operation,
+            effective,
+            mapping_config,
+        )
+    else:
+        registry = build_provider_registry(discover_external=True)
+        model = _scan_model(effective, registry)
+        collibra_binding = _collibra_provider_binding(effective, mapping_config, registry)
     desired = map_to_desired_state(model, mapping_config)
-    adapter = build_collibra_adapter(effective, mapping_config)
     with execution_scope(execution_mode=settings.collibra_execution_mode):
-        remote = adapter.read_remote_state(desired)
-        plan = build_sync_plan(desired, remote)
+        remote = invoke_remote_state_read(collibra_binding, desired)
+        plan = invoke_target_planning(collibra_binding, desired, remote)
         try:
-            result = execute_collibra_plan(
-                adapter,
-                plan,
-                mapping_config,
-                apply=apply,
-                execution_mode=settings.collibra_execution_mode,
-                synchronization_id=_synchronization_id_for_mode(settings),
-                max_resources=settings.collibra_batch_max_resources,
-                max_additional_characteristics=settings.collibra_batch_max_additional_characteristics,
-            )
+            if apply:
+                result = invoke_authorized_mutation(
+                    collibra_binding,
+                    CollibraMutationRequest(plan=plan),
+                )
+            else:
+                result = dry_run_collibra_plan_result(
+                    plan=plan,
+                    mapping_config=mapping_config,
+                    execution_mode=settings.collibra_execution_mode,
+                    synchronization_id=_synchronization_id_for_mode(settings),
+                    max_resources=settings.collibra_batch_max_resources,
+                    max_additional_characteristics=(
+                        settings.collibra_batch_max_additional_characteristics
+                    ),
+                )
         except CollibraAdapterError as exc:
             return _emit_operational(exc, "json" if json_output else "human")
     if isinstance(result, ImportExecutionResult):
@@ -2657,8 +3106,24 @@ def _resolve_mapping_config_from_canonical(
     return config
 
 
-def _scan_model(settings: Settings) -> GovernanceModel:
-    return PostgresMetadataScanner(settings).scan()
+def _collibra_provider_binding(
+    settings: Settings,
+    mapping_config: CollibraMappingConfig,
+    registry: ProviderRegistry | None = None,
+):
+    if registry is None:
+        registry = build_provider_registry(discover_external=True)
+    return collibra_binding_from_settings(settings, mapping_config, registry)
+
+
+def _scan_model(
+    settings: Settings,
+    registry: ProviderRegistry | None = None,
+) -> GovernanceModel:
+    if registry is None:
+        registry = build_provider_registry(discover_external=True)
+    binding = postgresql_binding_from_settings(settings, registry)
+    return run_metadata_discovery(binding)
 
 
 def _synchronization_id_for_mode(settings: Settings) -> str | None:

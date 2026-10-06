@@ -20,15 +20,15 @@ from governance.providers.errors import (
 from governance.providers.registry import ProviderRegistry
 
 
-def discover_providers(
+def discover_provider_registrations(
     *,
     entry_points: Sequence[metadata.EntryPoint] | Iterable[metadata.EntryPoint] | None = None,
-) -> ProviderRegistry:
-    """Load and validate providers from the ``governance.providers`` entry-point group.
+) -> tuple[ProviderRegistration, ...]:
+    """Load and validate all entry-point registrations atomically.
 
-    Discovery is metadata/registration only: no operational I/O, no secret
-    resolution, and no capability factory invocation. Failures fail closed;
-    a partial registry is never returned as success.
+    Failures accumulate diagnostics and raise ``ProviderDiscoveryError`` without
+    returning a partial registration set. Success returns a deterministic tuple
+    ordered by entry-point sort key (then provider_id).
     """
     candidates = list(
         entry_points
@@ -36,8 +36,7 @@ def discover_providers(
         else metadata.entry_points().select(group=PROVIDER_ENTRY_POINT_GROUP)
     )
     ordered = sorted(candidates, key=_entry_point_sort_key)
-
-    registry = ProviderRegistry()
+    registrations: list[ProviderRegistration] = []
     diagnostics: list[ProviderDiagnostic] = []
 
     for entry_point in ordered:
@@ -102,10 +101,7 @@ def discover_providers(
             )
             continue
 
-        try:
-            registry.register(registration)
-        except ProviderError as exc:
-            diagnostics.extend(exc.errors)
+        registrations.append(registration)
 
     if diagnostics:
         raise ProviderDiscoveryError(
@@ -119,6 +115,38 @@ def discover_providers(
             ]
         )
 
+    return tuple(sorted(registrations, key=lambda item: item.descriptor.provider_id))
+
+
+def discover_providers(
+    *,
+    entry_points: Sequence[metadata.EntryPoint] | Iterable[metadata.EntryPoint] | None = None,
+) -> ProviderRegistry:
+    """Load and validate providers from the ``governance.providers`` entry-point group.
+
+    Discovery is metadata/registration only: no operational I/O, no secret
+    resolution, and no capability factory invocation. Failures fail closed;
+    a partial registry is never returned as success.
+    """
+    registrations = discover_provider_registrations(entry_points=entry_points)
+    registry = ProviderRegistry()
+    register_diagnostics: list[ProviderDiagnostic] = []
+    for registration in registrations:
+        try:
+            registry.register(registration)
+        except ProviderError as exc:
+            register_diagnostics.extend(exc.errors)
+    if register_diagnostics:
+        raise ProviderDiscoveryError(
+            [
+                ProviderDiagnostic(
+                    code=CODE_DISCOVERY_FAILED,
+                    path="/discovery",
+                    message="provider discovery failed; registry is invalid",
+                ),
+                *sort_diagnostics(register_diagnostics),
+            ]
+        )
     return registry
 
 

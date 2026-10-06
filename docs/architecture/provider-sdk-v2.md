@@ -7,10 +7,13 @@
 - **PR sequence:** 1/6 of v2.0 (`Provider Ecosystem`); foundation implementation is PR 2/6 (#90–#92)
 
 > **Implementation state:** This document freezes architectural decisions for the Provider SDK.
-> The public foundation under `governance.providers` (SDK API version `1`, registry, and entry-point
-> discovery) is implemented against this contract. Built-in integrations are not yet migrated;
-> CLI/Action/config v1 behavior remains unchanged. Issues #93–#101 MUST continue to implement
-> against this contract and MUST NOT redefine its fundamental semantics.
+> The public foundation under `governance.providers` (SDK API version `1`, registry, entry-point
+> discovery, and built-in registrations via atomic `build_provider_registry`) is implemented
+> against this contract. `governance.yaml` v2 uses inline provider mapping and
+> `resolve_provider_configuration`; v1 CLI/Action paths that resolve `Settings` are unchanged.
+> Desired-state projection for Collibra (`map_to_desired_state`) remains Collibra-specific even
+> when targets are provider-driven. Issues #93–#101 MUST continue to implement against this
+> contract and MUST NOT redefine its fundamental semantics.
 > Public reference: [docs/providers/sdk-reference.md](../providers/sdk-reference.md).
 
 Language in this document uses **MUST / MUST NOT / SHOULD / MAY** with normative force for future
@@ -165,7 +168,7 @@ flowchart TB
 | Aspect | Pre-#90 (v1.4) | After foundation (#90–#92) / remaining v2 work |
 | --- | --- | --- |
 | Public Provider SDK | None | `governance.providers` landed (SDK API `1`); built-ins not yet registered |
-| Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Still hardcoded until provider-driven orchestration (#95–#98) |
+| Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Provider-driven orchestration via built-in capabilities (#95–#98) |
 | Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | v1 unchanged; additive v2 loader/resolution in #93/#94 (`LoadedConfigV2`) |
 | Discovery | N/A | `discover_providers()` via entry points group `governance.providers` |
 | Collibra/PG packaging | In-repo integrations | Remain in-repo as built-ins for v2.0 |
@@ -242,7 +245,10 @@ Capabilities reflect real roles already present in the repository. They are the 
 | `metadata_discovery` | Produce technical/discovered metadata usable by inventory/snapshots | PostgreSQL scanner |
 | `governance_graph` | Produce a `GovernanceGraph` | ODCS, dbt, OpenLineage mappers |
 | `property_observations` | Produce property observations / provenance | ODCS, dbt, OpenLineage |
-| `lineage` | Produce lineage assertions/edges | dbt, OpenLineage |
+| `lineage` | Produce lineage assertions/edges | OpenLineage |
+
+> **Note:** dbt dependency graph edges are **not** the same as SDK `ColumnLineageAssertion` /
+> the `lineage` capability; among built-in providers, only OpenLineage implements `lineage`.
 
 ### Target-side
 

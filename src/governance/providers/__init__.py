@@ -24,7 +24,7 @@ from governance.providers.contracts import (
     RemoteStateReadCapability,
     TargetPlanningCapability,
 )
-from governance.providers.discovery import discover_providers
+from governance.providers.discovery import discover_provider_registrations, discover_providers
 from governance.providers.errors import (
     CODE_BROKEN_ENTRY_POINT,
     CODE_DISCOVERY_FAILED,
@@ -87,5 +87,20 @@ __all__ = [
     "ProviderRuntimeContext",
     "RemoteStateReadCapability",
     "TargetPlanningCapability",
+    "builtin_provider_registrations",
+    "discover_provider_registrations",
     "discover_providers",
+    "builtins",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name == "builtin_provider_registrations":
+        from governance.providers.builtins import builtin_provider_registrations
+
+        return builtin_provider_registrations
+    if name == "builtins":
+        from governance.providers import builtins as builtins_module
+
+        return builtins_module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
