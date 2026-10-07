@@ -1,0 +1,85 @@
+name: Provider / integration proposal
+description: Propose a new Provider SDK integration or capability use case.
+body:
+  - type: input
+    id: provider-system
+    attributes:
+      label: Provider/system
+      description: Name of the system or provider you want to integrate.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this integration
+      description: What problem does this solve for Governance-as-Code users?
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Provider role
+      options:
+        - Source
+        - Target
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: capabilities
+    attributes:
+      label: Proposed capabilities
+      description: Select the Provider SDK capabilities you expect to use.
+      options:
+        - label: metadata_discovery
+        - label: governance_graph
+        - label: property_observations
+        - label: lineage
+        - label: remote_state_read
+        - label: target_planning
+        - label: compatibility_preflight
+        - label: authorized_mutation
+  - type: textarea
+    id: external-interface
+    attributes:
+      label: External interface
+      description: API, file format, protocol, SDK, or other integration surface.
+    validations:
+      required: true
+  - type: textarea
+    id: authentication
+    attributes:
+      label: Authentication
+      description: Describe the authentication mechanism if relevant. Do not include secrets, tokens, or credentials.
+    validations:
+      required: false
+  - type: textarea
+    id: read-write
+    attributes:
+      label: Read/write behavior
+      description: What is read-only vs mutating? When would remote writes occur?
+    validations:
+      required: true
+  - type: textarea
+    id: package-vs-core
+    attributes:
+      label: Why a provider package vs core integration
+      description: Prefer an independent package when the integration does not need to live in core.
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I reviewed the Provider SDK author guide.
+          required: true
+        - label: I understand installed providers are trusted Python dependencies and are not sandboxed.
+          required: true
