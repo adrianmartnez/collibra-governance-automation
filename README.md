@@ -223,7 +223,7 @@ governance apply production.gplan --config sample/governance.example.yaml
 # Mutations still require --apply; live apply still requires --confirm-live
 ```
 
-Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables via `*_env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping` / `policy` / `remote_state` / `target_context` / plan) are integrity digests, not authenticity proofs.
+Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables: v1 uses `*_env` references and v2 uses `$env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping` / `policy` / `remote_state` / `target_context` / plan) are integrity digests, not authenticity proofs.
 
 `governance plan` / `governance apply` use `--config` and optional `--profile` as the declarative source of truth (no `--mode` / `--mapping-config` overrides on that path). Legacy `diff` / `sync` keep their existing overrides. YAML and `.gplan` never authorize writes. Remote apply is fail-fast and not a distributed transaction.
 

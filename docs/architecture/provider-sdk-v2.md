@@ -433,7 +433,7 @@ Conforming providers MUST treat the following as non-mutating with respect to re
 
 - Remote governance mutation MAY occur only in phase 8 under core authorization.
 - Declaring `authorized_mutation` is insufficient for mutation.
-- Read-only workflows (including current v1.4 impact, explain, compare, drift, history, review, and preflight) MUST perform zero remote governance mutations.
+- Read-only workflows (including impact, explain, compare, drift, history, review, and preflight) MUST perform zero remote governance mutations.
 
 ### Secrets
 
@@ -444,7 +444,7 @@ Conforming providers MUST treat the following as non-mutating with respect to re
 
 ## 13. Configuration ownership
 
-Future `governance.yaml` v2 (implemented in #93/#94; ownership frozen here):
+`governance.yaml` v2 (implemented in #93/#94; ownership frozen here):
 
 ### Core owns
 
@@ -471,13 +471,13 @@ Future `governance.yaml` v2 (implemented in #93/#94; ownership frozen here):
 
 ### Compatibility commitment
 
-`governance.yaml` **v1** MUST remain supported in v2.0. This architecture PR does not change the current loader or schema.
+`governance.yaml` **v1** MUST remain supported in v2.0. The #89 architecture PR did not change the then-current loader or schema.
 
 ---
 
 ## 14. Built-in provider semantics
 
-Built-in providers planned for the ecosystem (registration in later issues):
+Built-in providers delivered in v2.0:
 
 - `postgresql`
 - `odcs`

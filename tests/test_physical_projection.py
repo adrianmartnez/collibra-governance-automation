@@ -70,7 +70,7 @@ def _column(
     )
 
 
-def test_package_version_is_1_4_0() -> None:
+def test_package_version_is_2_0_0() -> None:
     assert governance.__version__ == "2.0.0"
 
 

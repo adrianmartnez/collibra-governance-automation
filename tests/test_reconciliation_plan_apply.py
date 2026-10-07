@@ -336,7 +336,7 @@ def _dbt_manifest(*, description: str, unique_suffix: str = "") -> dict[str, Any
     }
 
 
-def test_package_version_1_4_0() -> None:
+def test_package_version_2_0_0() -> None:
     assert governance.__version__ == "2.0.0"
 
 
