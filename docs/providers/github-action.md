@@ -11,13 +11,20 @@ Set to a workspace-relative Python interpreter prepared by the workflow owner th
 already contains trusted providers. The Action installs **only** the core/Action
 package into that interpreter. It never installs providers.
 
+Constraints enforced by the Action bootstrap:
+
+- path must be workspace-relative (no `..`, no absolute paths)
+- path must exist, be a file, and be executable
+- interpreter must be Python 3.12+
+
 ### `impact-sources-from-config` (default `false`)
 
 `false`: legacy Phase-A — impact requires ≥1 `impact-odcs` / `impact-dbt-manifest` /
 `impact-openlineage` input.
 
 `true`: requires `config`; allows zero legacy source flags so `governance.yaml` v2 can
-select `governance_graph` providers. Legacy flags may still be combined.
+select `governance_graph` providers. Legacy flags may still be combined with config-driven
+sources. Selection is capability-based (no provider-name branching).
 
 ## Example
 
@@ -38,3 +45,5 @@ select `governance_graph` providers. Legacy flags may still be combined.
 ```
 
 Non-goals: `provider-package`, remote URLs, automatic provider installation.
+
+See also [author-guide.md](author-guide.md) and [packaging.md](packaging.md).

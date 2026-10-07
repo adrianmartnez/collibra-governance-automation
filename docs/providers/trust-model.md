@@ -18,4 +18,5 @@ Conformance validates cooperative observable behavior. It does not detect arbitr
 malicious exfiltration or prove absence of side effects during `register()`.
 
 GitHub Action never auto-installs providers. Workflow owners who install providers into
-a caller-prepared runtime accept that responsibility explicitly.
+a caller-prepared `runtime-python` accept that responsibility explicitly.
+See [github-action.md](github-action.md).

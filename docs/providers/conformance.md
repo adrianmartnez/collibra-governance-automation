@@ -11,8 +11,12 @@ from governance.conformance import (
     empty_runtime_context,
     run_provider_conformance,
     run_source_capability_conformance,
+    run_target_capability_conformance,
 )
 ```
+
+External repositories (including the companion template) typically run the full suite from
+their own CI after installing a host core that provides Provider SDK API `"1"`.
 
 ## Full vs partial
 

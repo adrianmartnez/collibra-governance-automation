@@ -1,34 +1,40 @@
 # Provider SDK v2 — Architecture and Compatibility Contract
 
-- **Status:** Normative architecture contract
+- **Status:** Normative architecture contract (frozen in #89)
 - **Package version at freeze:** `collibra-governance-automation` `1.4.0`
+- **Package version in v2.0.0:** `2.0.0` (does not redefine this contract)
 - **Epic:** [#19 — Publish the provider SDK and extension ecosystem](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)
 - **Issue:** [#89 — Define the v2 Provider SDK architecture and compatibility contract](https://github.com/adrianmartnez/collibra-governance-automation/issues/89)
-- **PR sequence:** 1/6 of v2.0 (`Provider Ecosystem`); foundation implementation is PR 2/6 (#90–#92)
+- **PR sequence (historical):** 1/6 of v2.0 (`Provider Ecosystem`); foundation implementation was PR 2/6 (#90–#92)
 
-> **Implementation state:** This document freezes architectural decisions for the Provider SDK.
+> **Lifecycle status (v2.0.0):**
+>
+> 1. **Architecture frozen in #89** before implementation began — the MUST / MUST NOT decisions in this document remain normative.
+> 2. **#90–#101 implemented** that architecture (public SDK API `"1"`, registry, discovery, `governance.yaml` v2, built-in registrations, orchestration, conformance, companion proof, Action docs).
+> 3. **#102 prepared the 2.0.0 release** without redefining this contract's fundamental semantics.
+> 4. **Future SDK API changes** require deliberate Provider SDK API versioning; they MUST NOT silently alter API `"1"`.
+>
 > The public foundation under `governance.providers` (SDK API version `1`, registry, entry-point
 > discovery, and built-in registrations via atomic `build_provider_registry`) is implemented
 > against this contract. `governance.yaml` v2 uses inline provider mapping and
-> `resolve_provider_configuration`; v1 CLI/Action paths that resolve `Settings` are unchanged.
+> `resolve_provider_configuration`; v1 CLI/Action paths that resolve `Settings` remain supported.
 > Desired-state projection for Collibra (`map_to_desired_state`) remains Collibra-specific even
 > when targets are provider-driven. Public conformance lives under `governance.conformance` (#99).
 > Third-party proof/template: `adrianmartnez/governance-provider-example` (#100/#101).
-> Issues #102 MUST continue to implement against this
-> contract and MUST NOT redefine its fundamental semantics.
 > Public reference: [docs/providers/sdk-reference.md](../providers/sdk-reference.md).
 
-Language in this document uses **MUST / MUST NOT / SHOULD / MAY** with normative force for future
-implementation. Statements about current v1.4 behavior are descriptive and tagged as such.
+Language in this document uses **MUST / MUST NOT / SHOULD / MAY** with normative force for
+implementations of this contract. Historical statements describing pre-implementation or v1.4
+behavior remain as descriptive context and MUST NOT be read as reverting delivered work.
 
 ---
 
 ## 1. Purpose
 
-Freeze the architectural and compatibility decisions that define the v2 Provider SDK **before**
-implementation begins, so that:
+This document froze the architectural and compatibility decisions that define the v2 Provider SDK
+**before** implementation began (#89), so that:
 
-1. a third party can later implement a provider using only the public Provider SDK;
+1. a third party can implement a provider using only the public Provider SDK;
 2. package it as an independent Python distribution;
 3. register it through Python entry points;
 4. install it without modifying this repository;
@@ -39,7 +45,8 @@ implementation begins, so that:
 9. execute the public conformance kit;
 10. coexist with built-in providers under the same contracts.
 
-This document is the normative reference for PRs that deliver #90–#101.
+This document remains the normative reference for the work delivered in #90–#101 and for the
+v2.0.0 release preparation in #102 (which MUST NOT redefine these semantics).
 
 ---
 
@@ -54,7 +61,7 @@ This document is the normative reference for PRs that deliver #90–#101.
 - Python entry-point discovery contract
 - Provider SDK API compatibility model
 - Lifecycle phases and side-effect boundaries
-- Configuration ownership (core vs provider) for future `governance.yaml` v2
+- Configuration ownership (core vs provider) for `governance.yaml` v2
 - Built-in vs third-party registration semantics
 - Trust / security model
 - Machine-contract preservation policy
@@ -63,7 +70,11 @@ This document is the normative reference for PRs that deliver #90–#101.
 - Packaging boundaries for v2.0
 - Explicit non-goals and implementation sequence
 
-### Out of scope (this PR / this document as implementation)
+### Out of scope (historical — #89 document / PR as implementation)
+
+At freeze time (#89), the following were explicitly **not** delivered by the architecture PR.
+They were subsequently delivered under #90–#101 / #102 as separate work items and MUST still
+conform to this contract:
 
 - Implementing `governance.providers` types, registry, or discovery
 - Implementing `governance.yaml` v2
@@ -86,7 +97,7 @@ This document is the normative reference for PRs that deliver #90–#101.
 | **Capability** | An explicit, named technical role a provider declares (see §7) |
 | **ProviderDescriptor** | Public metadata describing identity, versions, SDK compatibility, and declared capabilities |
 | **ProviderRegistration** | Object returned by an entry-point callable: descriptor plus factories/bindings for declared capabilities |
-| **Provider SDK API** | The public Python contracts under the future `governance.providers` namespace |
+| **Provider SDK API** | The public Python contracts under the `governance.providers` namespace |
 | **Provider SDK API version** | Compatibility version of those contracts; independent of package SemVer and machine contracts |
 | **Machine contract** | Versioned artifact/schema/result contracts (snapshots, plans, observations, Action results, etc.) |
 | **Operational I/O** | HTTP, database connections, remote filesystem access, secret materialization used for runtime work, and other side-effecting I/O beyond loading Python modules / reading packaging metadata |
@@ -105,7 +116,7 @@ This document is the normative reference for PRs that deliver #90–#101.
 6. **Independent version axes.** Package SemVer, Provider SDK API compatibility version, provider package version (PEP 440), and machine-contract versions are independent.
 7. **Trust without sandbox claims.** Installed providers are trusted Python code. Conformance is not a security audit.
 
-### Target architecture (future)
+### Target architecture (as specified; now implemented)
 
 ```text
 Governance Core
@@ -142,7 +153,7 @@ flowchart TB
     Orchestration[deterministicOrchestration]
   end
 
-  subgraph sdk [ProviderSDK_future]
+  subgraph sdk [ProviderSDK]
     Descriptor[ProviderDescriptor]
     Registration[ProviderRegistration]
     Caps[explicitCapabilities]
@@ -165,17 +176,17 @@ flowchart TB
   Orchestration --> Safety
 ```
 
-### Current v1.4 vs target v2
+### Pre-#90 (v1.4) vs delivered v2.0
 
-| Aspect | Pre-#90 (v1.4) | After foundation (#90–#92) / remaining v2 work |
+| Aspect | Pre-#90 (v1.4) | Delivered in #90–#101 / package 2.0.0 |
 | --- | --- | --- |
-| Public Provider SDK | None | `governance.providers` landed (SDK API `1`); built-ins not yet registered |
+| Public Provider SDK | None | `governance.providers` (SDK API `1`); built-ins registered |
 | Source composition | Hardcoded imports (e.g. reconciliation sources know ODCS/dbt/OpenLineage) | Provider-driven orchestration via built-in capabilities (#95–#98) |
-| Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | v1 unchanged; additive v2 loader/resolution in #93/#94 (`LoadedConfigV2`) |
+| Config | `governance.yaml` v1 (`sources.provider=postgresql`, `targets.provider=collibra`) | v1 unchanged; additive v2 loader/resolution (#93/#94, `LoadedConfigV2`) |
 | Discovery | N/A | `discover_providers()` via entry points group `governance.providers` |
 | Collibra/PG packaging | In-repo integrations | Remain in-repo as built-ins for v2.0 |
 
-Hardcoded composition in v1.4 is acknowledged and is **intentionally not refactored** by the PR that lands this document.
+Hardcoded composition in v1.4 is acknowledged and was **intentionally not refactored** by the PR that landed this document (#89); later PRs delivered provider-driven orchestration under this contract.
 
 ---
 
@@ -665,16 +676,16 @@ This architecture / PR sequence item (#89) does **not**:
 | **#99** | Public conformance test kit. |
 | **#100** | Prove third-party provider loading from an independent package. |
 | **#101** | Provider-neutral Action support (additive) + provider-author documentation. |
-| **#102** | Release preparation for v2.0.0 (separate PR). |
+| **#102** | Release preparation for v2.0.0 (separate PR); MUST NOT redefine this contract. |
 
-Planned PR grouping:
+Historical PR grouping (completed through PR 5; PR 6 is release preparation):
 
-1. **PR 1 (this document)** — #89 architecture contract  
-2. **PR 2** — #90 + #91 + #92 SDK foundation  
-3. **PR 3** — #93 + #94 configuration v2  
-4. **PR 4** — #95 + #96 + #97 + #98 provider-driven engine  
-5. **PR 5** — #99 + #100 + #101 ecosystem proof  
-6. **PR 6** — #102 release v2.0.0  
+1. **PR 1 (this document)** — #89 architecture contract
+2. **PR 2** — #90 + #91 + #92 SDK foundation
+3. **PR 3** — #93 + #94 configuration v2
+4. **PR 4** — #95 + #96 + #97 + #98 provider-driven engine
+5. **PR 5** — #99 + #100 + #101 ecosystem proof
+6. **PR 6** — #102 release prepare v2.0.0 (no architecture changes)
 
 ---
 
