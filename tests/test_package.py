@@ -13,16 +13,16 @@ from governance import __version__
 
 
 def test_package_import() -> None:
-    assert __version__ == "1.4.0"
-    assert governance.__version__ == "1.4.0"
+    assert __version__ == "2.0.0"
+    assert governance.__version__ == "2.0.0"
     assert governance.__name__ == "governance"
 
 
 def test_pyproject_version_matches_runtime() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
-    assert 'version = "1.4.0"' in text
-    assert metadata.version("collibra-governance-automation") == "1.4.0"
+    assert 'version = "2.0.0"' in text
+    assert metadata.version("collibra-governance-automation") == "2.0.0"
 
 
 def test_history_observation_snapshot_schemas_packaged() -> None:
@@ -113,6 +113,7 @@ def test_sample_governance_example_validates() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
 
 
 def test_readme_documents_both_mutation_lanes() -> None:

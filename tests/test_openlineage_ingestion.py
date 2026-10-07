@@ -1203,9 +1203,9 @@ def test_public_api_surface_is_small() -> None:
 
 
 def test_package_version_is_140() -> None:
-    assert __version__ == "1.4.0"
+    assert __version__ == "2.0.0"
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    assert 'version = "1.4.0"' in pyproject.read_text(encoding="utf-8")
+    assert 'version = "2.0.0"' in pyproject.read_text(encoding="utf-8")
 
 
 def test_no_openlineage_runtime_dependency_declared() -> None:
