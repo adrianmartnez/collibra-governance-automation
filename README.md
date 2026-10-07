@@ -1,6 +1,8 @@
 # collibra-governance-automation
 
 [![CI](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/adrianmartnez/collibra-governance-automation)](https://github.com/adrianmartnez/collibra-governance-automation/releases/latest)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 
 A Python Governance-as-Code engine with a public Provider SDK for analyzing metadata provenance, authority, conflicts, lineage, impact, and drift before changes reach a governance platform.
 
@@ -718,6 +720,8 @@ Third parties can implement providers using only the public surfaces `governance
 - [Provider SDK v2 architecture and compatibility contract](docs/architecture/provider-sdk-v2.md)
 - [Provider SDK public docs](docs/providers/README.md)
 - [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
 
 ## Repository structure
 

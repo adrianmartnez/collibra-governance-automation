@@ -1,0 +1,90 @@
+name: Bug report
+description: Report a reproducible problem in the CLI, Provider SDK, integrations, contracts, or GitHub Action.
+labels:
+  - bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reproducible example you can.
+      placeholder: Commands, config snippets, and relevant files (with secrets removed).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package / release version.
+      placeholder: "2.0.0"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.12.x"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 / Ubuntu 24.04 / macOS"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI / configuration
+        - Provider SDK
+        - Provider discovery / conformance
+        - PostgreSQL
+        - ODCS
+        - dbt
+        - OpenLineage
+        - Collibra integration
+        - GitHub Action
+        - Packaging / installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / artifacts
+      description: Optional logs or artifact excerpts. Remove credentials, tokens, personal data, and other secrets before posting.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I can reproduce this with the information provided.
+          required: true
+        - label: I removed secrets and sensitive data from the report.
+          required: true
