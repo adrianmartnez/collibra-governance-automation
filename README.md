@@ -6,11 +6,23 @@ A Python Governance-as-Code engine with a public Provider SDK for analyzing meta
 
 It ingests PostgreSQL, ODCS, dbt, and OpenLineage metadata into a vendor-neutral governance core, supports pull-request-native review and plan-before-apply workflows, and provides a safe Collibra reconciliation boundary as the reference target integration.
 
-**Current package version:** `2.0.0`
+**Current stable release:** [`v2.0.0`](https://github.com/adrianmartnez/collibra-governance-automation/releases/tag/v2.0.0)
 
 **Version axes:** package SemVer `2.0.0` · Provider SDK API `"1"` · machine contracts versioned independently
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
+
+## v2.0 at a glance
+
+v2.0 turns the project into an extensible Governance-as-Code engine rather than a fixed set of integrations.
+
+- Public Provider SDK API `"1"` with eight explicit capabilities.
+- `governance.yaml` v2 for provider-neutral source and target configuration, while v1 remains supported.
+- Built-in PostgreSQL, ODCS, dbt, OpenLineage, and Collibra integrations use the same public provider model.
+- Public conformance kit for third-party providers.
+- Independently packaged `example.catalog` provider proving external discovery, conformance, and impact execution.
+- Provider-neutral GitHub Action support through caller-prepared trusted runtimes.
+- Existing dry-run, plan-before-apply, stale-plan, conflict-blocking, and explicit mutation controls remain intact.
 
 ## Core flow
 
@@ -781,6 +793,14 @@ CI defines eight `ubuntu-latest` jobs:
 - `cli-integration` (includes official Action `uses: ./` plan PASS, blocked check, impact CLEAR/IMPACTED/ERROR, review PASS/BLOCKED/non-failing, and provider-neutral impact smokes)
 
 No commercial Collibra tenant, self-hosted runners, or OS matrix is required. The localhost contract server is not a commercial-tenant stand-in.
+
+## Feedback and testing
+
+v2.0.0 is published and available for independent testing.
+
+If you find a bug, unclear documentation, an integration edge case, or behavior that does not match the documented contracts, please [open a GitHub issue](https://github.com/adrianmartnez/collibra-governance-automation/issues) with the smallest reproducible example you can provide.
+
+External testing is particularly useful for the Provider SDK, `governance.yaml` v2, provider discovery, conformance, impact workflows, and the GitHub Action.
 
 ## Limitations
 
