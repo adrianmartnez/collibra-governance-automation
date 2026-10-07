@@ -1,20 +1,62 @@
 # Changelog
 
-## [Unreleased]
+## 2.0.0 - 2026-10-07
 
 ### Added
 
-- Public `governance.conformance` Provider SDK conformance kit (#99)
+- Public Provider SDK under `governance.providers` (SDK API `"1"`): descriptors, registration, capability bindings, and entry-point discovery (#89–#92)
+- Vendor-neutral domain companion API (`governance.domain`) and public conformance kit (`governance.conformance`) (#99)
+- Additive `governance.yaml` schema v2 with provider-neutral multi source/target entries and `$env` refs (v1 loader/schema unchanged) (#93/#94)
+- `LoadedConfigV2` atomic load result (`CanonicalConfigV2` + role-scoped `EffectiveProviderLocations`)
+- Pre-I/O `resolve_provider_configuration` / `construct_provider_capability` boundary
+- Domain-separated `config_identity_v2` (`gov-config-v2` prefix); locations never enter the hash
+- Built-in provider registrations for PostgreSQL, ODCS, dbt, OpenLineage, and Collibra via the same public registration model (#95/#96)
+- Version-aware `load_runtime_configuration` and v2 provider resolution orchestration (#97)
+- Provider-driven source/target orchestration hooks; Collibra desired-state mapping remains Collibra-specific (#98)
 - Independent third-party provider proof `example.catalog` via companion template repository and pinned core snapshot (#100)
 - Additive GitHub Action inputs `runtime-python` and `impact-sources-from-config` for provider-neutral automation without automatic provider installation (#101)
 - Provider author documentation under `docs/providers/` (author guide, capabilities, conformance, trust, packaging, Action, migration)
-- Additive `governance.yaml` schema v2 with provider-neutral multi source/target entries and `$env` refs (v1 loader/schema unchanged)
-- `LoadedConfigV2` atomic load result (`CanonicalConfigV2` + role-scoped `EffectiveProviderLocations`)
-- Pre-I/O `resolve_provider_configuration` / `construct_provider_capability` boundary (#93/#94)
-- Domain-separated `config_identity_v2` (`gov-config-v2` prefix); locations never enter the hash
-- Built-in provider registrations and atomic `build_provider_registry` (#95/#96)
-- Version-aware `load_runtime_configuration` and v2 provider resolution orchestration (#97)
-- Provider-driven source/target orchestration hooks; Collibra desired-state mapping remains Collibra-specific (#98)
+- Public sample `sample/governance.v2.example.yaml` alongside the existing v1 sample
+
+### Changed
+
+- Package and runtime version are now `2.0.0` (deliberate package major; Provider SDK API remains `"1"`)
+- Built-in integrations register and negotiate capabilities through the public Provider SDK contracts
+
+### Provider ecosystem
+
+- Eight frozen capability IDs: `metadata_discovery`, `governance_graph`, `property_observations`, `lineage`, `remote_state_read`, `target_planning`, `compatibility_preflight`, `authorized_mutation`
+- Entry-point group `governance.providers`; duplicate `provider_id` values hard-fail
+- Companion template: https://github.com/adrianmartnez/governance-provider-example
+- Installed providers are trusted Python dependencies (no sandbox claim)
+
+### Compatibility
+
+- `governance.yaml` v1 remains supported
+- Legacy CLI and Action source flags remain supported
+- Existing machine contracts are not silently revved by the package SemVer bump
+- Provider SDK API remains `"1"`; future SDK API changes require deliberate versioning
+- Action contract v1, impact/review result contracts v1 remain on their current versions
+
+### Safety
+
+- Dry-run-by-default, plan-before-apply, stale-plan protection, and explicit apply/live authorization remain intact
+- Applicable unresolved conflicts remain zero-write blockers
+- No automatic destructive reconciliation
+- GitHub Action never auto-installs provider packages; caller-prepared `runtime-python` is explicit
+- Telemetry redaction and fork/token isolation guarantees unchanged
+
+### Limitations
+
+- No commercial Collibra tenant validation in this repository
+- Localhost contract-server tests are not a commercial-tenant stand-in
+- Providers are not sandboxed; conformance is not a security audit or vendor certification
+- No provider marketplace or automatic provider installation
+- No hosted governance service
+- No claim of a transactional remote-state snapshot across concurrent mutations
+- No large-scale performance certification
+- PyPI publication is not assumed; GitHub tag/git install is the guaranteed distribution path unless PyPI is separately approved
+- This package remains a technical governance automation project, not a hosted governance platform
 
 ## 1.4.0 - 2026-09-03
 

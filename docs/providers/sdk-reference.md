@@ -1,11 +1,11 @@
 # Provider SDK public reference
 
-Public Python surface for third-party and future built-in providers.
+Public Python surface for third-party and built-in providers.
 
 **Architecture contract:** [provider-sdk-v2.md](../architecture/provider-sdk-v2.md)  
 **SDK API version:** `1`  
 **Entry-point group:** `governance.providers`  
-**Package version:** remains independent (`1.4.0` at foundation landing)
+**Package SemVer:** independent (`2.0.0` for this release train)
 
 Public surfaces for Provider SDK API `1`:
 
@@ -16,8 +16,8 @@ Public surfaces for Provider SDK API `1`:
 | `governance.conformance` | Conformance / test API |
 
 Built-in providers (PostgreSQL, ODCS, dbt, OpenLineage, Collibra) register through the same
-`ProviderRegistry` as third-party entry points. v1 CLI/Action paths that use `Settings`
-resolution are unchanged until explicitly migrated.
+`ProviderRegistry` as third-party entry points. Legacy v1 CLI/Action paths that resolve
+`Settings` remain supported; provider-aware v2 and orchestration paths use the registry.
 
 Author docs index: [README.md](README.md). Conformance: [conformance.md](conformance.md).
 Template: https://github.com/adrianmartnez/governance-provider-example
@@ -114,7 +114,14 @@ registry = discover_providers()
 provider = registry.get("example.fixture")
 ```
 
-Uses `importlib.metadata` entry points in group `governance.providers`. Broken entry points produce secret-safe diagnostics (exception type, not raw exception strings). Discovery is not wired into the CLI; `governance --help` does not initialize providers.
+Uses `importlib.metadata` entry points in group `governance.providers`. Broken entry points produce secret-safe diagnostics (exception type, not raw exception strings).
+
+Provider-dependent CLI and Action operations build a registry via
+`build_provider_registry(discover_external=True)` when the operation needs providers.
+Surfaces that do not require discovery — notably `governance --help` and
+`governance --version` — stay lazy and do not initialize providers. A broken unrelated
+provider entry point must not disable help/version or other provider-independent
+surfaces under the current contract.
 
 ## Entry-point example
 
@@ -147,7 +154,7 @@ def register() -> ProviderRegistration:
 | Axis | Example | Coupled to SDK API? |
 | --- | --- | --- |
 | Provider SDK API | `"1"` | — |
-| Package SemVer | `1.4.0` | no |
+| Package SemVer | `2.0.0` | no |
 | Provider package version | PEP 440 | no |
 | Machine contracts | snapshot/plan/… v1 | no |
 

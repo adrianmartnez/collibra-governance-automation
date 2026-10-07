@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from importlib import metadata
@@ -13,16 +14,16 @@ from governance import __version__
 
 
 def test_package_import() -> None:
-    assert __version__ == "1.4.0"
-    assert governance.__version__ == "1.4.0"
+    assert __version__ == "2.0.0"
+    assert governance.__version__ == "2.0.0"
     assert governance.__name__ == "governance"
 
 
 def test_pyproject_version_matches_runtime() -> None:
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     text = pyproject.read_text(encoding="utf-8")
-    assert 'version = "1.4.0"' in text
-    assert metadata.version("collibra-governance-automation") == "1.4.0"
+    assert 'version = "2.0.0"' in text
+    assert metadata.version("collibra-governance-automation") == "2.0.0"
 
 
 def test_history_observation_snapshot_schemas_packaged() -> None:
@@ -113,6 +114,54 @@ def test_sample_governance_example_validates() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_sample_governance_v2_example_validates() -> None:
+    """v2 validate resolves $env pre-I/O; DATABASE_URL must be supplied by the test env."""
+    root = Path(__file__).resolve().parents[1]
+    env = {
+        **os.environ,
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/governance_demo",
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "governance",
+            "config",
+            "validate",
+            "--config",
+            str(root / "sample/governance.v2.example.yaml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_sample_governance_v2_mapping_matches_public_json() -> None:
+    import json
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    sample = yaml.safe_load(
+        (root / "sample/governance.v2.example.yaml").read_text(encoding="utf-8")
+    )
+    public = json.loads((root / "sample/collibra-mapping.example.json").read_text(encoding="utf-8"))
+    inline = sample["targets"][0]["config"]["mapping"]
+    assert inline == public
+
+
+def test_config_v2_schema_packaged() -> None:
+    resource = files("governance.config_contract.schemas").joinpath(
+        "governance-config.v2.schema.json"
+    )
+    assert resource.is_file()
+    text = resource.read_text(encoding="utf-8")
+    assert "urn:collibra-governance-automation:schema:governance-config:2" in text
 
 
 def test_readme_documents_both_mutation_lanes() -> None:

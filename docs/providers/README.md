@@ -1,5 +1,7 @@
 # Provider documentation index
 
+**Package SemVer:** `2.0.0` · **Provider SDK API:** `"1"`
+
 Public surfaces for third-party provider authors:
 
 | Surface | Role |
@@ -8,7 +10,16 @@ Public surfaces for third-party provider authors:
 | `governance.domain` | Vendor-neutral domain companion API (graphs, observations, models, lineage) |
 | `governance.conformance` | Test/conformance API (not a runtime dependency of pytest) |
 
-Normative architecture: [../architecture/provider-sdk-v2.md](../architecture/provider-sdk-v2.md)
+Normative architecture (frozen in #89; implemented in #90–#101; release-prepared in #102
+without redefining semantics):
+[../architecture/provider-sdk-v2.md](../architecture/provider-sdk-v2.md)
+
+## Read first
+
+1. [Author guide](author-guide.md)
+2. [SDK reference](sdk-reference.md)
+3. [Conformance](conformance.md)
+4. [Packaging](packaging.md)
 
 ## Guides
 

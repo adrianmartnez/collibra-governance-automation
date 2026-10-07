@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "collibra-governance-automation"
-version = "1.4.0"
-description = "Deterministic governance change intelligence and Governance-as-Code automation: open-standard contracts and lineage, impact analysis, and an explicit Collibra integration boundary."
+version = "2.0.0"
+description = "Governance-as-Code in Python with a public Provider SDK: deterministic metadata provenance, authority/conflicts, lineage/impact, drift/history, and a safe Collibra reconciliation boundary."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-authors = [{ name = "fgnfmackk" }]
+authors = [{ name = "Adrián Martínez Martín" }]
 dependencies = [
     "python-dotenv>=1.0",
     "psycopg[binary]>=3.2,<4",
@@ -25,6 +25,12 @@ dev = [
     "ruff>=0.6",
     "build>=1.2",
 ]
+
+[project.urls]
+Repository = "https://github.com/adrianmartnez/collibra-governance-automation"
+Documentation = "https://github.com/adrianmartnez/collibra-governance-automation/tree/main/docs"
+Issues = "https://github.com/adrianmartnez/collibra-governance-automation/issues"
+Changelog = "https://github.com/adrianmartnez/collibra-governance-automation/blob/main/CHANGELOG.md"
 
 [project.scripts]
 governance = "governance.cli:main"

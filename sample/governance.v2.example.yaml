@@ -1,0 +1,55 @@
+# Example Governance-as-Code configuration (v2).
+# Paths are relative to this file's directory (sample/).
+# Secrets use $env references when present — never literal credentials.
+# Collibra mode is literal mock so validate needs no Collibra credentials.
+schema_version: "2"
+
+sources:
+  - id: primary
+    provider: postgresql
+    config:
+      source_name: governance-demo
+      database_url:
+        $env: DATABASE_URL
+
+targets:
+  - id: collibra
+    provider: collibra
+    config:
+      mode: mock
+      mapping:
+        domain_ref: "<tenant-domain-id>"
+        asset_type_refs:
+          database: "<database-asset-type-id>"
+          schema: "<schema-asset-type-id>"
+          table: "<table-asset-type-id>"
+          column: "<column-asset-type-id>"
+        relation_type_refs:
+          database_schema: "<database-schema-relation-type-id>"
+          schema_table: "<schema-table-relation-type-id>"
+          table_column: "<table-column-relation-type-id>"
+          table_fk: "<table-fk-relation-type-id>"
+        attribute_type_refs:
+          local_id: "<local-id-attribute-type-id>"
+          description: "<description-attribute-type-id>"
+          owner: "<owner-attribute-type-id>"
+          data_type: "<data-type-attribute-type-id>"
+          nullable: "<nullable-attribute-type-id>"
+          ordinal_position: "<ordinal-position-attribute-type-id>"
+
+artifacts:
+  inventory_path: artifacts/metadata-inventory.json
+  snapshot_path: artifacts/governance-snapshot.json
+
+policies:
+  files:
+    - policies/tables-require-description.warning.yaml
+
+authority:
+  files:
+    - authority/metadata-authority.example.yaml
+
+profiles:
+  ci:
+    artifacts:
+      snapshot_path: artifacts/ci-governance-snapshot.json

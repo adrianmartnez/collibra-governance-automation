@@ -2,11 +2,13 @@
 
 [![CI](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/adrianmartnez/collibra-governance-automation/actions/workflows/ci.yml)
 
-A Python Governance-as-Code engine for analyzing metadata provenance, authority, conflicts, lineage, impact, and drift before changes reach a governance platform.
+A Python Governance-as-Code engine with a public Provider SDK for analyzing metadata provenance, authority, conflicts, lineage, impact, and drift before changes reach a governance platform.
 
-It ingests PostgreSQL, ODCS, dbt, and OpenLineage metadata into deterministic governance state, supports pull-request-native review and plan-before-apply workflows, and provides a safe reconciliation boundary for Collibra.
+It ingests PostgreSQL, ODCS, dbt, and OpenLineage metadata into a vendor-neutral governance core, supports pull-request-native review and plan-before-apply workflows, and provides a safe Collibra reconciliation boundary as the reference target integration.
 
-**Current release:** `v1.4.0`
+**Current package version:** `2.0.0`
+
+**Version axes:** package SemVer `2.0.0` · Provider SDK API `"1"` · machine contracts versioned independently
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
@@ -27,7 +29,7 @@ The governance model is vendor-neutral. Collibra is a first-class integration fo
 
 Review, impact, explain, compare, drift, and history workflows are read-only. Remote mutations require explicit apply authorization, live Collibra writes require confirmation, and the project does not perform automatic deletes or remediation.
 
-Package SemVer is independent from versioned machine contracts such as `governance-action-result` v1, `governance-impact-result` v1, and `governance-ci-review-result` v1.
+Package SemVer is independent from the Provider SDK API version and from versioned machine contracts such as `governance-action-result` v1, `governance-impact-result` v1, and `governance-ci-review-result` v1.
 
 ## What is implemented
 
@@ -42,7 +44,11 @@ Package SemVer is independent from versioned machine contracts such as `governan
 | Reconciliation safety / conflict blocking | Implemented (mapped unresolved/ambiguous conflicts block before mutation) |
 | `governance explain` (authority/conflict) | Implemented (read-only; zero remote mutations) |
 | Deterministic inventory / snapshot artifacts | Implemented |
-| Governance-as-Code (`governance.yaml`, policies, authority, saved plans) | Implemented (opt-in via `--config`) |
+| Governance-as-Code (`governance.yaml` v1/v2, policies, authority, saved plans) | Implemented (opt-in via `--config`) |
+| Public Provider SDK (`governance.providers`, SDK API `"1"`) | Implemented (eight frozen capabilities) |
+| Built-in providers (PostgreSQL, ODCS, dbt, OpenLineage, Collibra) | Registered via the public registration model |
+| Provider conformance kit (`governance.conformance`) | Implemented |
+| Independent third-party provider proof (`example.catalog`) | Companion template + pinned core snapshot |
 | Open Data Contract Standard (ODCS) ingestion | Implemented |
 | dbt manifest metadata + dependency edges | Implemented |
 | OpenLineage events + dataset facets | Implemented |
@@ -188,7 +194,7 @@ Without `--config`, legacy operational commands keep the v1.0 environment-based 
 
 `governance drift` consumes a persisted `governance-snapshot-comparison` v1 artifact and optionally a `governance-drift-policy` v1 YAML file. When the comparison reports differences, `--policy` is required; missing policy fails explicitly (exit `4`). An explicit empty policy (`rules: []`) is valid and means no differences are permitted. Unexpected drift is reported as data (exit `0`), not as a process failure. Comparison v1 does not include provenance, authority, or conflict payload; drift preserves only context present in the validated comparison input. `writes_performed=0` means zero remote governance mutations.
 
-`governance history` maintains a local offline `governance-history` v1 index of ordered snapshot references (and optional observations/authority context). It does not consume `governance-drift-result` or a drift policy; snapshot-only history works independently of drift classification. Four machine contracts: `governance-history`, `governance-history-diagnostics`, `governance-history-evolution`, and `governance-property-observations`. There is no default history path — point `--history` at an explicit external runtime location, e.g. `../governance-runtime/history.json` (not `.governance/history` as a VCS default). Snapshot-only history works without context; provenance / authority / conflict evolution requires observations (and authority for full context). Public Python APIs persist observations independently. `history add` mutates only the local history file; `show` / `inspect` perform zero remote mutations (`writes_performed=0` on evolution). Exit codes: `0` success, `2` usage, `4` validation/integrity. Package version is `1.4.0`.
+`governance history` maintains a local offline `governance-history` v1 index of ordered snapshot references (and optional observations/authority context). It does not consume `governance-drift-result` or a drift policy; snapshot-only history works independently of drift classification. Four machine contracts: `governance-history`, `governance-history-diagnostics`, `governance-history-evolution`, and `governance-property-observations`. There is no default history path — point `--history` at an explicit external runtime location, e.g. `../governance-runtime/history.json` (not `.governance/history` as a VCS default). Snapshot-only history works without context; provenance / authority / conflict evolution requires observations (and authority for full context). Public Python APIs persist observations independently. `history add` mutates only the local history file; `show` / `inspect` perform zero remote mutations (`writes_performed=0` on evolution). Exit codes: `0` success, `2` usage, `4` validation/integrity. Package version is `2.0.0`.
 
 `governance impact` composes ODCS / dbt / OpenLineage graphs under a shared `--namespace`, reads parent-aware changed nodes from a versioned `governance-impact-changes` v1 file, and writes a canonical `governance-impact-result` v1 artifact. Analysis performs zero remote writes. Source paths are never auto-discovered. Optional `--config` loads configured policies for relevance matching only (not policy evaluation / blocking).
 
@@ -196,7 +202,7 @@ Without `--config`, legacy operational commands keep the v1.0 environment-based 
 
 ## Governance-as-Code (optional)
 
-Declare sources, optional Collibra targets, artifact paths, policy file hooks, and optional metadata authority files in `governance.yaml`. See [`sample/governance.example.yaml`](sample/governance.example.yaml) and [`sample/authority/metadata-authority.example.yaml`](sample/authority/metadata-authority.example.yaml). Drift demos may use [`sample/drift/governance-drift-policy.example.yaml`](sample/drift/governance-drift-policy.example.yaml).
+Declare sources, optional Collibra targets, artifact paths, policy file hooks, and optional metadata authority files in `governance.yaml`. See the v1 sample [`sample/governance.example.yaml`](sample/governance.example.yaml) (`*_env` refs) and the v2 sample [`sample/governance.v2.example.yaml`](sample/governance.v2.example.yaml) (provider IDs + `$env` refs). Authority: [`sample/authority/metadata-authority.example.yaml`](sample/authority/metadata-authority.example.yaml). Drift demos may use [`sample/drift/governance-drift-policy.example.yaml`](sample/drift/governance-drift-policy.example.yaml).
 
 ```bash
 export DATABASE_URL="${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/governance_demo}"
@@ -217,7 +223,7 @@ governance apply production.gplan --config sample/governance.example.yaml
 # Mutations still require --apply; live apply still requires --confirm-live
 ```
 
-Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables via `*_env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping` / `policy` / `remote_state` / `target_context` / plan) are integrity digests, not authenticity proofs.
+Validation covers YAML parse, JSON Schema, profile overlay, and semantic checks before any PostgreSQL or Collibra I/O. Secrets stay in environment variables: v1 uses `*_env` references and v2 uses `$env` references. Snapshots are a distinct artifact from the metadata inventory and embed a required `content_identity`. Component identities (`config` / `snapshot` / `mapping` / `policy` / `remote_state` / `target_context` / plan) are integrity digests, not authenticity proofs.
 
 `governance plan` / `governance apply` use `--config` and optional `--profile` as the declarative source of truth (no `--mode` / `--mapping-config` overrides on that path). Legacy `diff` / `sync` keep their existing overrides. YAML and `.gplan` never authorize writes. Remote apply is fail-fast and not a distributed transaction.
 
@@ -266,7 +272,7 @@ Exit codes for `history` only:
 ### Representative local output (mock demo)
 
 ```text
-governance 1.4.0
+governance 2.0.0
 ```
 
 ```text
@@ -489,9 +495,11 @@ dry_run = execute_sync_plan(adapter, plan, apply=False)
 
 ## GitHub Action (Governance as Code)
 
-Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `1.4.0`.
+Official composite Action at the repository root (`action.yml`). Supported runners for v1: **GitHub-hosted Linux/Ubuntu** only. Action contract version `v1` is independent of package SemVer `2.0.0`.
 
 The Action installs this package into a fresh Action-owned virtualenv under `RUNNER_TEMP`, then runs the governance CLI with isolated Python (`python -I -m ...`). Consumer site-packages are not modified. Relative config paths resolve against `GITHUB_WORKSPACE` (the consumer must checkout their repository before `uses:`).
+
+Additive inputs for provider-neutral workflows: `runtime-python` (caller-prepared interpreter that already contains trusted providers; Action installs **only** the core package into that interpreter) and `impact-sources-from-config` (default `false` preserves legacy impact source flags; `true` allows config-driven `governance_graph` sources). The Action never auto-installs provider packages.
 
 **Writes performed: always 0.** The Action never calls `governance apply` or mutating `sync`. Impact is read-only analysis.
 
@@ -522,8 +530,10 @@ The Action installs this package into a fresh Action-owned virtualenv under `RUN
 | `review-drift-policy` | `""` | Drift policy YAML (optional; required when comparison differs) |
 | `review-align-source-roots` | `"false"` | Root alignment ack for baseline/candidate only |
 | `review-align-database-roots` | `"false"` | Root alignment ack for baseline/candidate only |
+| `runtime-python` | `""` | Optional workspace-relative Python already containing trusted providers; Action installs core only |
+| `impact-sources-from-config` | `"false"` | When `true`, requires `config` and allows zero legacy impact source flags |
 
-Provider credentials are **not** Action inputs. They remain environment variables referenced by governance.yaml `*_env` keys.
+Provider credentials are **not** Action inputs. They remain environment variables referenced by governance.yaml (`*_env` in v1, `$env` in v2).
 
 For `operation: impact`, `contract-version` and `result-path` are empty. Use `impact-status`, `impact-result-path`, and `impact-result-version` instead. The machine blast-radius artifact is `governance-impact-result` v1 (`impact-result.json`). Impact is read-only (`writes-performed=0`). CLI exit `6` (`impacted`) is domain success and does not fail the Action by default.
 
@@ -674,18 +684,28 @@ Fork PRs skip commenting (`comment-status=skipped_untrusted_fork`). Missing toke
 ### F. Version pinning
 
 - Strongest: pin the Action to a full immutable commit SHA.
-- Release consumers may pin the immutable SemVer tag `v1.4.0` once that tag is published.
-- Prior release tags `v1.3.0`, `v1.2.0`, and `v1.1.0` remain available historically.
+- After the annotated `v2.0.0` tag exists, release consumers may pin that SemVer tag.
+- Prior release tags `v1.4.0`, `v1.3.0`, `v1.2.0`, and `v1.1.0` remain available historically.
 - Do not use mutable `@main`.
-- Package version `1.4.0` ships with Action contract v1, impact result contracts v1, and review result contract v1; keep Action/package compatibility explicit across releases.
+- Package version `2.0.0` ships with Action contract v1, impact result contracts v1, and review result contract v1; Provider SDK API remains `"1"`. Keep Action/package/SDK compatibility explicit across releases.
 - The Action ref pins Action metadata and the Python package installed from `GITHUB_ACTION_PATH` together.
+
+## Provider SDK
+
+Third parties can implement providers using only the public surfaces `governance.providers`, `governance.domain`, and `governance.conformance`, package them independently, and register them through the `governance.providers` entry-point group. Built-in and third-party providers use the same registration and capability contracts. Installed providers are trusted Python dependencies (no sandbox).
+
+- [Provider documentation index](docs/providers/README.md)
+- [SDK reference](docs/providers/sdk-reference.md) — SDK API version `"1"`
+- [Author guide](docs/providers/author-guide.md)
+- [Migration v1.4 → v2](docs/providers/migration-v1.4-to-v2.md)
+- [Architecture contract](docs/architecture/provider-sdk-v2.md) (frozen in #89; implemented in #90–#101)
+- Companion template: https://github.com/adrianmartnez/governance-provider-example
 
 ## Documentation
 
-- [Provider SDK v2 architecture and compatibility contract](docs/architecture/provider-sdk-v2.md) — normative design for the provider ecosystem ([epic #19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19)).
-- [Provider SDK public reference](docs/providers/sdk-reference.md) — public import surface, registration, registry, and entry-point discovery (SDK API version `1`).
-
-Provider SDK foundation is implemented under `governance.providers`. Built-in integrations are not yet provider-driven; v2.0 ecosystem work continues in follow-up issues. This is not a v2.0.0 release.
+- [Provider SDK v2 architecture and compatibility contract](docs/architecture/provider-sdk-v2.md)
+- [Provider SDK public docs](docs/providers/README.md)
+- [Changelog](CHANGELOG.md)
 
 ## Repository structure
 
@@ -695,7 +715,8 @@ docs/architecture/               normative architecture contracts (Provider SDK 
 docs/providers/                  Provider SDK public reference
 src/governance/
   domain/                        vendor-neutral model, graph, lineage, observations, authority, conflicts
-  providers/                     public Provider SDK (descriptor, registry, discovery)
+  providers/                     public Provider SDK (descriptor, registry, discovery, builtins)
+  conformance/                   Provider SDK conformance kit
   scanner/                       PostgreSQL metadata discovery
   exporters/                     deterministic inventory JSON
   integrations/
@@ -703,9 +724,10 @@ src/governance/
     odcs/                        Open Data Contract Standard ingestion + schema
     dbt/                         dbt manifest ingestion
     openlineage/                 OpenLineage event ingestion
+  orchestration/                 provider-aware runtime resolution
   impact/                        impact CLI contracts + impact schemas
   github_ci/                     Action runner, reporting, review, action-result schema
-  config_contract/               governance.yaml schema + resolution
+  config_contract/               governance.yaml v1/v2 schema + resolution
   policy/                        policy schema + evaluation
   authority/                     metadata authority schema + loaders
   reconciliation/                explain + reconciliation safety
@@ -717,8 +739,8 @@ src/governance/
   snapshots/                     governance snapshot artifacts
   identity/                      content-identity hashing
   cli.py                         argparse CLI orchestration
-tests/                           unit/integration + fixtures; localhost Collibra contract server
-sample/                          demo SQL, GaC/authority/drift examples, Collibra mapping example
+tests/                           unit/integration + fixtures; companion provider snapshot; Collibra contract server
+sample/                          demo SQL, GaC v1/v2/authority/drift examples, Collibra mapping example
 .github/workflows/               CI quality gates
 ```
 
@@ -756,7 +778,7 @@ CI defines eight `ubuntu-latest` jobs:
 - `postgres-integration`
 - `metadata-integration`
 - `collibra-integration`
-- `cli-integration` (includes official Action `uses: ./` plan PASS, blocked check, impact CLEAR/IMPACTED/ERROR, and review PASS/BLOCKED/non-failing smokes)
+- `cli-integration` (includes official Action `uses: ./` plan PASS, blocked check, impact CLEAR/IMPACTED/ERROR, review PASS/BLOCKED/non-failing, and provider-neutral impact smokes)
 
 No commercial Collibra tenant, self-hosted runners, or OS matrix is required. The localhost contract server is not a commercial-tenant stand-in.
 
@@ -764,7 +786,9 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required. Th
 
 - No commercial Collibra tenant validation
 - Local contract-server coverage is not commercial-tenant validation
-- Provider SDK foundation is available (`governance.providers`, SDK API `1`); built-in integrations are not yet registered/provider-driven (architecture: [docs/architecture/provider-sdk-v2.md](docs/architecture/provider-sdk-v2.md); reference: [docs/providers/sdk-reference.md](docs/providers/sdk-reference.md); epic [#19](https://github.com/adrianmartnez/collibra-governance-automation/issues/19))
+- Installed providers are trusted Python dependencies; there is no sandbox or security isolation claim
+- Conformance validates cooperative observable behavior; it is not a vendor or production certification
+- No provider marketplace or automatic provider installation
 - No hosted governance service
 - No automatic deletes or destructive reconciliation
 - No automatic apply/remediation from impact analysis or Action review
@@ -773,6 +797,7 @@ No commercial Collibra tenant, self-hosted runners, or OS matrix is required. Th
 - No large-scale performance benchmark
 - Mock state is process-local demonstration state
 - Demo data is fictional
+- PyPI publication is not assumed; install from the Git tag when `v2.0.0` exists
 - This package remains a technical governance automation project, not a hosted governance platform
 
 ## License
