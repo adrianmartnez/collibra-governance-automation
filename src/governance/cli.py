@@ -1,5 +1,5 @@
 """Governance CLI: scan, export, diff, sync, check, plan, apply, explain, compare, drift,
-impact, history, and preflight.
+impact, report, history, and preflight.
 """
 
 from __future__ import annotations
@@ -118,6 +118,7 @@ from governance.impact import (
     match_affected_policies,
     write_impact_result,
 )
+from governance.impact.html import render_impact_report_from_file
 from governance.integrations.collibra import (
     PLANNER_CONTRACT_VERSION,
     CollibraAdapterError,
@@ -139,6 +140,7 @@ from governance.integrations.collibra import (
     preflight_exit_code,
 )
 from governance.integrations.collibra.telemetry import execution_scope, finish_execution
+from governance.io.atomic import atomic_write_text
 from governance.operation_diagnostics import operation_diagnostics_failure
 from governance.orchestration.compat_v1 import (
     collibra_binding_from_settings,
@@ -367,6 +369,8 @@ def _run(argv: list[str] | None) -> int:
         return _cmd_drift(args)
     if command == "history":
         return _cmd_history(args)
+    if command == "report":
+        return _cmd_report(args)
     if command == "impact":
         return _cmd_impact(args)
     if command == "preflight":
@@ -480,6 +484,12 @@ def _build_parser() -> argparse.ArgumentParser:
         version=f"governance {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    report = subparsers.add_parser(
+        "report", help="Render a validated impact v1 artifact as offline, read-only HTML."
+    )
+    report.add_argument("--input", required=True, metavar="FILE", help="Impact result v1 JSON.")
+    report.add_argument("--output", required=True, metavar="FILE", help="Local HTML output path.")
 
     scan = subparsers.add_parser(
         "scan",
@@ -2269,6 +2279,31 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(format_preflight_human(report))
     return preflight_exit_code(report)
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    source = Path(args.input)
+    target = Path(args.output)
+    try:
+        if source.resolve() == target.resolve() or (
+            source.exists() and target.exists() and source.samefile(target)
+        ):
+            raise CliUsageError("report input and output must be different files")
+        html = render_impact_report_from_file(source)
+    except ImpactError as exc:
+        return _emit_impact_error(exc, "human")
+    except OSError as exc:
+        raise CliOperationalError(
+            f"unable to read report input: {format_human_value(str(exc))}"
+        ) from exc
+    try:
+        atomic_write_text(target, html)
+    except OSError as exc:
+        raise CliOperationalError(
+            f"unable to write HTML report: {format_human_value(str(exc))}"
+        ) from exc
+    print(f"report_written={format_human_value(str(target))}")
+    return 0
 
 
 def _cmd_impact(args: argparse.Namespace) -> int:

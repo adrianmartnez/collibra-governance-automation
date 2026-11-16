@@ -102,3 +102,23 @@ missing relationship provenance are identified separately when present. A clear
 result means no impact identified in the supplied graph, not proof of complete
 lineage or production safety. Policies shown are matches, not compliance results.
 The renderer neither revalidates graph semantics nor invents missing relationships.
+
+## CLI report generation
+
+From an installed package (including a wheel installation):
+
+```sh
+governance report --input sample/offline-impact/expected-result.json --output offline-impact-report.html
+```
+
+For a source checkout, set `PYTHONPATH=src` as above and use
+`python -m governance report --input sample/offline-impact/expected-result.json --output offline-impact-report.html`.
+The input may also be the `offline-impact-result.json` produced by this demo.
+
+The command returns 0 only after saving the HTML. Missing/invalid/incompatible
+or tampered input returns 4 with diagnostics on stderr and leaves any existing
+output untouched. Output write failures return 1; argument errors return 2.
+Input and output must be different files. Parent output directories are created
+as needed, and an existing report is replaced atomically only after validation
+and complete rendering. Temporary files are removed on write failure.
+No credentials, configuration, external provider discovery or network are used.
