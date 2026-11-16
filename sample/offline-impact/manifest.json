@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+    "dbt_version": "1.10.0",
+    "generated_at": "2024-01-01T00:00:00.000000Z",
+    "invocation_id": "offline-impact-demo"
+  },
+  "nodes": {
+    "model.demo.orders": {
+      "unique_id": "model.demo.orders",
+      "resource_type": "model",
+      "name": "orders",
+      "package_name": "demo",
+      "database": "demo",
+      "schema": "analytics",
+      "alias": "orders",
+      "fqn": [
+        "demo",
+        "orders"
+      ],
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {},
+      "tags": [],
+      "meta": {},
+      "description": "Synthetic orders asset; not production metadata."
+    },
+    "model.demo.order_totals": {
+      "unique_id": "model.demo.order_totals",
+      "resource_type": "model",
+      "name": "order_totals",
+      "package_name": "demo",
+      "database": "demo",
+      "schema": "analytics",
+      "alias": "order_totals",
+      "fqn": [
+        "demo",
+        "order_totals"
+      ],
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {},
+      "tags": [],
+      "meta": {},
+      "description": "Synthetic order_totals asset; not production metadata."
+    },
+    "model.demo.revenue_report": {
+      "unique_id": "model.demo.revenue_report",
+      "resource_type": "model",
+      "name": "revenue_report",
+      "package_name": "demo",
+      "database": "demo",
+      "schema": "analytics",
+      "alias": "revenue_report",
+      "fqn": [
+        "demo",
+        "revenue_report"
+      ],
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {},
+      "tags": [],
+      "meta": {},
+      "description": "Synthetic revenue_report asset; not production metadata."
+    },
+    "model.demo.inventory": {
+      "unique_id": "model.demo.inventory",
+      "resource_type": "model",
+      "name": "inventory",
+      "package_name": "demo",
+      "database": "demo",
+      "schema": "analytics",
+      "alias": "inventory",
+      "fqn": [
+        "demo",
+        "inventory"
+      ],
+      "config": {
+        "materialized": "table"
+      },
+      "columns": {},
+      "tags": [],
+      "meta": {},
+      "description": "Synthetic inventory asset; not production metadata."
+    }
+  },
+  "sources": {},
+  "parent_map": {
+    "model.demo.orders": [],
+    "model.demo.order_totals": [
+      "model.demo.orders"
+    ],
+    "model.demo.revenue_report": [
+      "model.demo.order_totals"
+    ],
+    "model.demo.inventory": []
+  },
+  "disabled": {}
+}
