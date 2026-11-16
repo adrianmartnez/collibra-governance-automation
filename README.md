@@ -110,6 +110,10 @@ flowchart LR
 
 Neutral core owns observations, authority, conflicts, provenance, contracts, lineage, policies, comparison, drift, history, and change intelligence. Collibra adapters are the integration boundary for desired-state mapping and plan-driven sync. Reconciliation remains plan-driven. `governance apply` executes a saved, reviewable `.gplan`, while legacy `governance sync --apply` executes an in-memory sync plan. Mutations always require explicit apply authorization; live writes additionally require `--confirm-live`.
 
+For installation from local wheel or sdist without a development checkout, see
+[Clean installation and distribution](docs/installation.md). Offline impact
+analysis and HTML reporting require no PostgreSQL or Collibra service.
+
 ## Quick start (clean checkout, mock)
 
 No Collibra tenant is required.

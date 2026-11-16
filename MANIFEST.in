@@ -1,0 +1,2 @@
+include docs/installation.md
+recursive-include sample/offline-impact *.py *.json *.md

@@ -1,31 +1,38 @@
-"""Offline wheel install proof; no editable installation or source import path."""
+"""Clean wheel/sdist proof with network denied during the offline demo and report."""
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata as metadata
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
+import tomllib
 import venv
 import zipfile
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_report_from_clean_wheel(tmp_path):
+@pytest.fixture(scope="module")
+def distributions(tmp_path_factory):
+    tmp_path = tmp_path_factory.mktemp("report-distributions")
     # Repack already-installed dependency distributions into local wheels. This
     # avoids runtime dependency downloads and shares no site-packages with
     # the test venv. The project wheel uses an isolated build backend.
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     pending = [
         Requirement(r)
-        for r in metadata.requires("collibra-governance-automation")
+        for r in project["project"]["dependencies"]
         if not Requirement(r).marker or Requirement(r).marker.evaluate({"extra": ""})
     ]
     pending.append(Requirement("pytest"))
@@ -64,16 +71,73 @@ def test_report_from_clean_wheel(tmp_path):
             ):
                 pending.append(child)
 
+    build_requirements = project["build-system"]["requires"]
+    # Setup may access a package index for declared build tools. Neither installation
+    # below nor the demo/report subprocesses may use the network.
+    downloaded = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "download",
+            "--only-binary=:all:",
+            "--dest",
+            str(wheelhouse),
+            *build_requirements,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert downloaded.returncode == 0, downloaded.stdout + downloaded.stderr
+    build_env = {**os.environ, "PIP_NO_INDEX": "1", "PIP_FIND_LINKS": str(wheelhouse)}
+    build_env.pop("PYTHONPATH", None)
     completed = subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(wheelhouse), str(ROOT)],
+        [sys.executable, "-m", "build", "--outdir", str(wheelhouse), str(ROOT)],
+        env=build_env,
         capture_output=True,
         text=True,
         timeout=120,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    wheels = list(wheelhouse.glob("collibra_governance_automation-*.whl"))
-    assert len(wheels) == 1
-    wheel = wheels[0]
+    (wheel,) = wheelhouse.glob("collibra_governance_automation-*.whl")
+    (sdist,) = wheelhouse.glob("collibra_governance_automation-*.tar.gz")
+    expected = {
+        p.relative_to(ROOT / "src/governance").as_posix(): hashlib.sha256(
+            p.read_bytes()
+        ).hexdigest()
+        for p in (ROOT / "src/governance").rglob("*")
+        if p.is_file() and p.suffix in {".py", ".json", ".txt"}
+    }
+    with zipfile.ZipFile(wheel) as archive:
+        for relative, digest in expected.items():
+            assert hashlib.sha256(archive.read("governance/" + relative)).hexdigest() == digest
+    demo = tmp_path / "distributed-demo"
+    demo.mkdir()
+    with tarfile.open(sdist) as archive:
+        prefix = sdist.name.removesuffix(".tar.gz") + "/"
+        for relative, digest in expected.items():
+            resource = archive.extractfile(prefix + "src/governance/" + relative)
+            assert resource is not None
+            assert hashlib.sha256(resource.read()).hexdigest() == digest
+        for name in (
+            "run.py",
+            "manifest.json",
+            "changes.json",
+            "expected-result.json",
+            "README.md",
+        ):
+            member = archive.extractfile(prefix + "sample/offline-impact/" + name)
+            assert member is not None
+            (demo / name).write_bytes(member.read())
+        assert archive.getmember(prefix + "docs/installation.md").isfile()
+    return wheelhouse, {"wheel": wheel, "sdist": sdist}, demo, expected
+
+
+@pytest.mark.parametrize("distribution", ["wheel", "sdist"])
+def test_report_from_clean_distribution(tmp_path, distributions, distribution):
+    wheelhouse, artifacts, demo, expected = distributions
+    artifact = artifacts[distribution]
     env_dir = tmp_path / "clean-venv"
     venv.EnvBuilder(with_pip=True, system_site_packages=False).create(env_dir)
     scripts = env_dir / ("Scripts" if os.name == "nt" else "bin")
@@ -85,9 +149,15 @@ def test_report_from_clean_wheel(tmp_path):
         k: v
         for k, v in os.environ.items()
         if k not in {"PYTHONPATH", "PYTHONHOME"}
+        and k != "DATABASE_URL"
         and not k.startswith(("COLLIBRA_", "GOVERNANCE_", "PG"))
     }
-    env.update(PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONNOUSERSITE="1")
+    env.update(
+        PIP_NO_INDEX="1",
+        PIP_DISABLE_PIP_VERSION_CHECK="1",
+        PIP_FIND_LINKS=str(wheelhouse),
+        PYTHONNOUSERSITE="1",
+    )
 
     def run(args):
         completed = subprocess.run(
@@ -96,10 +166,53 @@ def test_report_from_clean_wheel(tmp_path):
         assert completed.returncode == 0, completed.stdout + completed.stderr
         return completed.stdout
 
-    run([python, "-m", "pip", "install", "--no-index", "--find-links", wheelhouse, wheel, "pytest"])
+    installed = run(
+        [
+            python,
+            "-m",
+            "pip",
+            "install",
+            "--no-index",
+            "--find-links",
+            wheelhouse,
+            artifact,
+            "pytest",
+            "--no-cache-dir",
+        ]
+    )
+    if distribution == "sdist":
+        assert "building wheel for collibra-governance-automation" in installed.lower().replace(
+            "_", "-"
+        )
     run([python, "-m", "pip", "check"])
     module = run([python, "-c", "import governance; print(governance.__file__)"]).strip()
     assert str(env_dir) in module and str(ROOT / "src") not in module
+    manifest = work / "resources.json"
+    manifest.write_text(json.dumps(expected), encoding="utf-8")
+    run(
+        [
+            python,
+            "-c",
+            "import hashlib,json; from importlib.resources import files; "
+            "from pathlib import Path; expected=json.loads(Path('resources.json').read_text()); "
+            "assert all(hashlib.sha256(files('governance').joinpath(k).read_bytes())"
+            ".hexdigest()==v "
+            "for k,v in expected.items()); print(len(expected))",
+        ]
+    )
+    assert "report" in run([executable, "--help"])
+    assert run([executable, "--version"]).strip() == "governance 2.0.0"
+    assert (
+        run(
+            [
+                python,
+                "-c",
+                "from importlib.metadata import entry_points; "
+                "assert not list(entry_points(group='governance.providers'))",
+            ]
+        ).strip()
+        == ""
+    )
     # Deny sockets and runtime/provider resolution in every CLI subprocess.
     site = Path(
         run([python, "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"]).strip()
@@ -114,14 +227,44 @@ def test_report_from_clean_wheel(tmp_path):
         "cli.load_settings = cli.load_operation_runtime = cli.build_provider_registry = denied\n",
         encoding="utf-8",
     )
-    fixture = work / "result.json"
-    fixture.write_bytes((ROOT / "sample/offline-impact/expected-result.json").read_bytes())
+    local_demo = work / "demo"
+    shutil.copytree(demo, local_demo)
+    run([python, local_demo / "run.py"])
+    fixture = work / "offline-impact-result.json"
+    original = fixture.read_bytes()
+    assert original == (local_demo / "expected-result.json").read_bytes()
+    run(
+        [
+            python,
+            "-c",
+            "from governance.impact import load_impact_result; "
+            "r=load_impact_result('offline-impact-result.json'); "
+            "assert r['result_version']=='1' and r['writes_performed']==0",
+        ]
+    )
+
     assert "--input" in run([executable, "report", "--help"])
     run([executable, "report", "--input", fixture, "--output", "report.html"])
     first = (work / "report.html").read_bytes()
+    run([python, local_demo / "run.py"])
+    assert fixture.read_bytes() == original
     run([executable, "report", "--input", fixture, "--output", "report.html"])
     assert (work / "report.html").read_bytes() == first
     assert "Impact identified" in first.decode()
+    assert fixture.read_bytes() == original
+    assert b"<script" not in first and b"<link" not in first
+    assert b"default-src 'none'" in first
+    run(
+        [
+            python,
+            "-c",
+            "from pathlib import Path; "
+            "from governance.impact.html import render_impact_report_from_file; "
+            "assert Path('report.html').read_bytes()=="
+            "render_impact_report_from_file('offline-impact-result.json').encode('utf-8')",
+        ]
+    )
+
     # Remove only the test guard before regression tests of other commands, which
     # deliberately mock their own runtime/provider boundaries.
     (site / "sitecustomize.py").write_text("", encoding="utf-8")
@@ -132,6 +275,9 @@ def test_report_from_clean_wheel(tmp_path):
             "pytest",
             "-q",
             ROOT / "tests/test_cli.py",
+            ROOT / "tests/test_package.py",
+            ROOT / "tests/test_report_cli.py",
+            ROOT / "tests/test_impact_html.py",
             "-o",
             "pythonpath=",
             "--confcutdir",
@@ -139,4 +285,14 @@ def test_report_from_clean_wheel(tmp_path):
         ]
     )
     assert "failed" not in output
-    print(json.dumps({"wheel": Path(wheel).name, "module": module, "regressions": output.strip()}))
+    print(
+        json.dumps(
+            {
+                "distribution": distribution,
+                "artifact": artifact.name,
+                "module": module,
+                "resources": len(expected),
+                "regressions": output.strip(),
+            }
+        )
+    )
