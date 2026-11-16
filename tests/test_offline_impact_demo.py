@@ -1,4 +1,5 @@
 """Offline example, evidence, canonical contract and existing CLI regression checks."""
+
 from __future__ import annotations
 
 import os
@@ -75,10 +76,14 @@ def test_demo_is_canonical_and_reproducible(tmp_path, monkeypatch):
             assert step["edge"]["kind"] == "depends_on"
             assert step["edge"]["source"] == step["to_node"]
             assert step["edge"]["target"] == step["from_node"]
-            assert step["edge"]["provenance"] == [{
-                "observation_mode": "declared", "provider_type": "dbt",
-                "source_ref": f"model.demo.{child}", "source_version": "1.10.0",
-            }]
+            assert step["edge"]["provenance"] == [
+                {
+                    "observation_mode": "declared",
+                    "provider_type": "dbt",
+                    "source_ref": f"model.demo.{child}",
+                    "source_version": "1.10.0",
+                }
+            ]
             previous = child
 
 
@@ -87,12 +92,24 @@ def test_existing_cli_produces_same_artifact_offline(tmp_path, monkeypatch, caps
     registry = build_provider_registry(discover_external=False)
     monkeypatch.setattr("governance.cli.build_provider_registry", lambda **kwargs: registry)
     output = tmp_path / "result.json"
-    assert main([
-        "impact", "--namespace", "offline-demo",
-        "--changes", str(DEMO / "changes.json"),
-        "--dbt-manifest", str(DEMO / "manifest.json"),
-        "--output", str(output), "--format", "json",
-    ]) == 6
+    assert (
+        main(
+            [
+                "impact",
+                "--namespace",
+                "offline-demo",
+                "--changes",
+                str(DEMO / "changes.json"),
+                "--dbt-manifest",
+                str(DEMO / "manifest.json"),
+                "--output",
+                str(output),
+                "--format",
+                "json",
+            ]
+        )
+        == 6
+    )
     captured = capsys.readouterr()
     assert captured.err == ""
     assert captured.out.encode() == output.read_bytes()
