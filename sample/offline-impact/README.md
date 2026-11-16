@@ -72,3 +72,33 @@ The tests deny network/HTTP/database access, compare independent runs byte for
 byte against the committed result, verify v1 integrity and exact paths, and
 exercise the existing CLI with the built-in registry of a clean environment.
 The existing CLI returns 6 when impact is found; this is its expected status.
+
+## Read-only HTML report (Python API)
+
+With `PYTHONPATH=src` set as above, render the validated demo artifact locally:
+
+```python
+from pathlib import Path
+from governance.impact.html import render_impact_report_from_file
+
+html = render_impact_report_from_file("sample/offline-impact/expected-result.json")
+Path("offline-impact-report.html").write_text(html, encoding="utf-8")
+```
+
+Open the generated file in a browser. The report is self-contained, has no
+JavaScript or external resources, and renders metadata as escaped text, never
+as links or markup. No network, credentials, provider discovery or analysis
+execution is involved. The Python API returns HTML; the caller explicitly
+chooses whether and where to save it. No new CLI command is introduced.
+
+`render_impact_report(result)` accepts an in-memory artifact and checks the
+existing v1 schema and content integrity too. Invalid, incompatible or tampered
+inputs raise the existing contract exceptions rather than producing a report.
+Output is deterministic for the same artifact and does not change its contents.
+
+The report preserves `impacted` or `clear` exactly as recorded. V1 has no coverage
+or insufficient-evidence status; missing roots, missing explanation paths and
+missing relationship provenance are identified separately when present. A clear
+result means no impact identified in the supplied graph, not proof of complete
+lineage or production safety. Policies shown are matches, not compliance results.
+The renderer neither revalidates graph semantics nor invents missing relationships.
