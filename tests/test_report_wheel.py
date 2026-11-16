@@ -7,11 +7,11 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import venv
 import zipfile
 from pathlib import Path
 
-from build import ProjectBuilder
 from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_report_from_clean_wheel(tmp_path):
     # Repack already-installed dependency distributions into local wheels. This
-    # avoids downloads, shares no site-packages with the venv, and installs no tools
-    # globally. The project itself is built from source by its declared backend.
+    # avoids runtime dependency downloads and shares no site-packages with
+    # the test venv. The project wheel uses an isolated build backend.
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     pending = [
@@ -64,7 +64,16 @@ def test_report_from_clean_wheel(tmp_path):
             ):
                 pending.append(child)
 
-    wheel = ProjectBuilder(str(ROOT)).build("wheel", str(wheelhouse))
+    completed = subprocess.run(
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(wheelhouse), str(ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    wheels = list(wheelhouse.glob("collibra_governance_automation-*.whl"))
+    assert len(wheels) == 1
+    wheel = wheels[0]
     env_dir = tmp_path / "clean-venv"
     venv.EnvBuilder(with_pip=True, system_site_packages=False).create(env_dir)
     scripts = env_dir / ("Scripts" if os.name == "nt" else "bin")
