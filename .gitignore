@@ -219,3 +219,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local web workbench
+workbench/node_modules/
+workbench/dist/
+workbench/*.tsbuildinfo
+.venv-workbench/
+
+workbench/dist-public/

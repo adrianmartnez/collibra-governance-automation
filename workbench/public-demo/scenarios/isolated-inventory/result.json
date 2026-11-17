@@ -1,0 +1,114 @@
+{
+  "affected_policies": [],
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "75d4263f075b65bd3f1d8ecd8409554af08afdf0c21c0c04b7e9b01f905781e8",
+    "hashing_contract_version": "1"
+  },
+  "graph_identity": {
+    "algorithm": "sha256",
+    "digest": "52e6a4e688b60a24c363e1d0e10dc8b2917d6ec61fb04680d50fd509ad229594",
+    "hashing_contract_version": "1"
+  },
+  "impact": {
+    "affected_edges": [],
+    "associated_contracts": [],
+    "changed_nodes": [
+      {
+        "kind": "table",
+        "logical_id": "inventory",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      }
+    ],
+    "direct_nodes": [],
+    "governance_assets": [
+      {
+        "kind": "data_source",
+        "logical_id": "demo",
+        "namespace": "offline-demo",
+        "parent": null
+      },
+      {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      {
+        "kind": "table",
+        "logical_id": "inventory",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      }
+    ],
+    "paths": [],
+    "policy_relevant_nodes": [
+      {
+        "kind": "data_source",
+        "logical_id": "demo",
+        "namespace": "offline-demo",
+        "parent": null
+      },
+      {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      {
+        "kind": "table",
+        "logical_id": "inventory",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      }
+    ],
+    "transitive_nodes": []
+  },
+  "impact_detected": false,
+  "policy_identity": null,
+  "result_schema": "governance-impact-result",
+  "result_version": "1",
+  "status": "clear",
+  "writes_performed": 0
+}

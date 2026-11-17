@@ -1,0 +1,574 @@
+{
+  "can_analyze": false,
+  "coverage": "Full supplied graph",
+  "edges": [
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "data_source",
+        "logical_id": "demo",
+        "namespace": "offline-demo",
+        "parent": null
+      },
+      "source_id": "23f46dc5e501bffdc4cf489b78fe34705ddcc91ff532a2ec041f913a9feb37d2",
+      "target": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      "target_id": "6cbbdf869ab23580546cd791098af25b4b973efb1869e405c993104a559111a4"
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      "source_id": "6cbbdf869ab23580546cd791098af25b4b973efb1869e405c993104a559111a4",
+      "target": {
+        "kind": "table",
+        "logical_id": "inventory",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target_id": "5d73ca863f850c48bdcdd7633c7b119a843cf094d5d837b8f7f747f2d548dc9b"
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      "source_id": "6cbbdf869ab23580546cd791098af25b4b973efb1869e405c993104a559111a4",
+      "target": {
+        "kind": "table",
+        "logical_id": "order_totals",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target_id": "74415c943b002c6ce9918dc44ba529339e49ae0b67cb37fc60229136a14b9404"
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      "source_id": "6cbbdf869ab23580546cd791098af25b4b973efb1869e405c993104a559111a4",
+      "target": {
+        "kind": "table",
+        "logical_id": "orders",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target_id": "df0efbf19bd52913432d959c3f1277cec722f0a03ec009156ac2b67a7ad6d2d0"
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      "source_id": "6cbbdf869ab23580546cd791098af25b4b973efb1869e405c993104a559111a4",
+      "target": {
+        "kind": "table",
+        "logical_id": "revenue_report",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target_id": "5650734145b479c1845d6a37676968c8dafa636b05ea8a85b8795e6c9c74cfb6"
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.order_totals",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "order_totals",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "source_id": "74415c943b002c6ce9918dc44ba529339e49ae0b67cb37fc60229136a14b9404",
+      "target": {
+        "kind": "table",
+        "logical_id": "orders",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target_id": "df0efbf19bd52913432d959c3f1277cec722f0a03ec009156ac2b67a7ad6d2d0"
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.revenue_report",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "revenue_report",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "source_id": "5650734145b479c1845d6a37676968c8dafa636b05ea8a85b8795e6c9c74cfb6",
+      "target": {
+        "kind": "table",
+        "logical_id": "order_totals",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target_id": "74415c943b002c6ce9918dc44ba529339e49ae0b67cb37fc60229136a14b9404"
+    }
+  ],
+  "nodes": [
+    {
+      "attributes": {},
+      "description": null,
+      "distance": null,
+      "id": "23f46dc5e501bffdc4cf489b78fe34705ddcc91ff532a2ec041f913a9feb37d2",
+      "identity": {
+        "kind": "data_source",
+        "logical_id": "demo",
+        "namespace": "offline-demo",
+        "parent": null
+      },
+      "impact_class": "Not reached",
+      "name": "demo",
+      "provenance": []
+    },
+    {
+      "attributes": {},
+      "description": null,
+      "distance": null,
+      "id": "6cbbdf869ab23580546cd791098af25b4b973efb1869e405c993104a559111a4",
+      "identity": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      },
+      "impact_class": "Not reached",
+      "name": "analytics",
+      "provenance": []
+    },
+    {
+      "attributes": {
+        "dbt_name": "inventory",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "inventory"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic inventory asset; not production metadata.",
+      "distance": null,
+      "id": "5d73ca863f850c48bdcdd7633c7b119a843cf094d5d837b8f7f747f2d548dc9b",
+      "identity": {
+        "kind": "table",
+        "logical_id": "inventory",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "impact_class": "Changed",
+      "name": "inventory",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.inventory",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "order_totals",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "order_totals"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic order_totals asset; not production metadata.",
+      "distance": null,
+      "id": "74415c943b002c6ce9918dc44ba529339e49ae0b67cb37fc60229136a14b9404",
+      "identity": {
+        "kind": "table",
+        "logical_id": "order_totals",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "impact_class": "Not reached",
+      "name": "order_totals",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.order_totals",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "orders",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "orders"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic orders asset; not production metadata.",
+      "distance": null,
+      "id": "df0efbf19bd52913432d959c3f1277cec722f0a03ec009156ac2b67a7ad6d2d0",
+      "identity": {
+        "kind": "table",
+        "logical_id": "orders",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "impact_class": "Not reached",
+      "name": "orders",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.orders",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "revenue_report",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "revenue_report"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic revenue_report asset; not production metadata.",
+      "distance": null,
+      "id": "5650734145b479c1845d6a37676968c8dafa636b05ea8a85b8795e6c9c74cfb6",
+      "identity": {
+        "kind": "table",
+        "logical_id": "revenue_report",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        }
+      },
+      "impact_class": "Not reached",
+      "name": "revenue_report",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.revenue_report",
+          "source_version": "1.10.0"
+        }
+      ]
+    }
+  ],
+  "result": {
+    "affected_policies": [],
+    "content_identity": {
+      "algorithm": "sha256",
+      "digest": "75d4263f075b65bd3f1d8ecd8409554af08afdf0c21c0c04b7e9b01f905781e8",
+      "hashing_contract_version": "1"
+    },
+    "graph_identity": {
+      "algorithm": "sha256",
+      "digest": "52e6a4e688b60a24c363e1d0e10dc8b2917d6ec61fb04680d50fd509ad229594",
+      "hashing_contract_version": "1"
+    },
+    "impact": {
+      "affected_edges": [],
+      "associated_contracts": [],
+      "changed_nodes": [
+        {
+          "kind": "table",
+          "logical_id": "inventory",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "dataset",
+            "logical_id": "analytics",
+            "namespace": "offline-demo",
+            "parent": {
+              "kind": "data_source",
+              "logical_id": "demo",
+              "namespace": "offline-demo",
+              "parent": null
+            }
+          }
+        }
+      ],
+      "direct_nodes": [],
+      "governance_assets": [
+        {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        },
+        {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        },
+        {
+          "kind": "table",
+          "logical_id": "inventory",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "dataset",
+            "logical_id": "analytics",
+            "namespace": "offline-demo",
+            "parent": {
+              "kind": "data_source",
+              "logical_id": "demo",
+              "namespace": "offline-demo",
+              "parent": null
+            }
+          }
+        }
+      ],
+      "paths": [],
+      "policy_relevant_nodes": [
+        {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        },
+        {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "offline-demo",
+            "parent": null
+          }
+        },
+        {
+          "kind": "table",
+          "logical_id": "inventory",
+          "namespace": "offline-demo",
+          "parent": {
+            "kind": "dataset",
+            "logical_id": "analytics",
+            "namespace": "offline-demo",
+            "parent": {
+              "kind": "data_source",
+              "logical_id": "demo",
+              "namespace": "offline-demo",
+              "parent": null
+            }
+          }
+        }
+      ],
+      "transitive_nodes": []
+    },
+    "impact_detected": false,
+    "policy_identity": null,
+    "result_schema": "governance-impact-result",
+    "result_version": "1",
+    "status": "clear",
+    "writes_performed": 0
+  },
+  "synthetic": true
+}

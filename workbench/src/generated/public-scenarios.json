@@ -1,0 +1,61 @@
+{
+  "format": "governance-public-demo-assets",
+  "format_version": "1",
+  "scenarios": [
+    {
+      "contract": "governance-impact-result",
+      "contract_version": "1",
+      "description": "What could changing orders affect? Follow its direct and indirect consumers.",
+      "files": {
+        "graph.json": "70aef85b1c8cb71a035eabe28df28026b9b1a6a8c0340e5d8a2da33bd93e82c6",
+        "report.html": "88cadba0832aa292ad6738d07cc8fdb2de418ee35ba77d29c91c5981a33bce99",
+        "result.json": "7aa6c86ada91ce8166b1df3bfa8ac062df9d1002084e5b881b95c597616f995c",
+        "workspace.json": "9b813db7f93344e9ca11139ccedbf007ae5824aa6042c4cfec491debc1c09d63"
+      },
+      "id": "orders-impact",
+      "result_identity": {
+        "algorithm": "sha256",
+        "digest": "4b96c6da0fd8dfe17b048fe2bf6b4d18d51da3e94b2bc0c99344acc0d6e95aaf",
+        "hashing_contract_version": "1"
+      },
+      "title": "Orders impact"
+    },
+    {
+      "contract": "governance-impact-result",
+      "contract_version": "1",
+      "description": "No consumers were identified for inventory in the supplied graph. Coverage and real-world risk remain unknown.",
+      "files": {
+        "graph.json": "70aef85b1c8cb71a035eabe28df28026b9b1a6a8c0340e5d8a2da33bd93e82c6",
+        "report.html": "17c4b01d303bcb6e1eae2b5f21e7daf32de459393d531a587ac0e65dff4280b8",
+        "result.json": "f24ff7082ff63d7050fa1f973807bbe87eefecde849f1cc4e10572619eb33914",
+        "workspace.json": "473e267ef45666b23eb3cd9f048372f0e9f8c1aa4bda257cefbb076cab51be4d"
+      },
+      "id": "isolated-inventory",
+      "result_identity": {
+        "algorithm": "sha256",
+        "digest": "75d4263f075b65bd3f1d8ecd8409554af08afdf0c21c0c04b7e9b01f905781e8",
+        "hashing_contract_version": "1"
+      },
+      "title": "Isolated inventory"
+    },
+    {
+      "contract": "governance-impact-result",
+      "contract_version": "1",
+      "description": "Explore a synthetic orders pipeline with two processing branches and three downstream consumers.",
+      "files": {
+        "graph.json": "34a9bfa2597d2230f2d62661b7d15fd031b1231c2c0167b783c9a8d896b4263c",
+        "report.html": "9ba97b178d010e3be4a0e0109e8e43b9697a392e1684eacbc23566f0216b61cc",
+        "result.json": "466d9893d199cbf8975e7ba0475de770eb84e935d0ef6fdb55736bc5544bdd3f",
+        "workspace.json": "9061816000d6dd195c4eea8a8817d0bd1c10d1072a20ba8e872c4583c3475157"
+      },
+      "id": "multi-branch-pipeline",
+      "result_identity": {
+        "algorithm": "sha256",
+        "digest": "8cdd28aaff13fdd0d220eb12824fedede058dbe866498cf14fcb0f86c45d46b7",
+        "hashing_contract_version": "1"
+      },
+      "title": "Multi-branch data pipeline"
+    }
+  ],
+  "synthetic": true
+}

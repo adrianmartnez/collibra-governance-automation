@@ -1,0 +1,171 @@
+{
+  "disabled": {},
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+    "dbt_version": "1.10.0",
+    "generated_at": "2024-01-01T00:00:00.000000Z",
+    "invocation_id": "offline-impact-demo"
+  },
+  "nodes": {
+    "model.demo.clean_orders": {
+      "alias": "clean_orders",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic clean_orders model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "clean_orders"
+      ],
+      "meta": {},
+      "name": "clean_orders",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.clean_orders"
+    },
+    "model.demo.daily_revenue": {
+      "alias": "daily_revenue",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic daily_revenue model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "daily_revenue"
+      ],
+      "meta": {},
+      "name": "daily_revenue",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.daily_revenue"
+    },
+    "model.demo.monthly_metrics": {
+      "alias": "monthly_metrics",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic monthly_metrics model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "monthly_metrics"
+      ],
+      "meta": {},
+      "name": "monthly_metrics",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.monthly_metrics"
+    },
+    "model.demo.order_events": {
+      "alias": "order_events",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic order_events model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "order_events"
+      ],
+      "meta": {},
+      "name": "order_events",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.order_events"
+    },
+    "model.demo.reference_calendar": {
+      "alias": "reference_calendar",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic reference_calendar model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "reference_calendar"
+      ],
+      "meta": {},
+      "name": "reference_calendar",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.reference_calendar"
+    },
+    "model.demo.risk_flags": {
+      "alias": "risk_flags",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic risk_flags model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "risk_flags"
+      ],
+      "meta": {},
+      "name": "risk_flags",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.risk_flags"
+    },
+    "model.demo.risk_summary": {
+      "alias": "risk_summary",
+      "columns": {},
+      "config": {
+        "materialized": "table"
+      },
+      "database": "demo",
+      "description": "Synthetic risk_summary model. Declared dependencies only; no commercial platform connection.",
+      "fqn": [
+        "demo",
+        "risk_summary"
+      ],
+      "meta": {},
+      "name": "risk_summary",
+      "package_name": "demo",
+      "resource_type": "model",
+      "schema": "analytics",
+      "tags": [],
+      "unique_id": "model.demo.risk_summary"
+    }
+  },
+  "parent_map": {
+    "model.demo.clean_orders": [
+      "model.demo.order_events"
+    ],
+    "model.demo.daily_revenue": [
+      "model.demo.clean_orders"
+    ],
+    "model.demo.monthly_metrics": [
+      "model.demo.clean_orders"
+    ],
+    "model.demo.order_events": [],
+    "model.demo.reference_calendar": [],
+    "model.demo.risk_flags": [
+      "model.demo.order_events"
+    ],
+    "model.demo.risk_summary": [
+      "model.demo.risk_flags"
+    ]
+  },
+  "sources": {}
+}

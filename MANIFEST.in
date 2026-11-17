@@ -1,2 +1,3 @@
 include docs/installation.md
 recursive-include sample/offline-impact *.py *.json *.md
+recursive-include src/governance/workbench/resources *.json *.html *.js *.css

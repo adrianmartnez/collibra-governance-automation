@@ -1,0 +1,100 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Governance impact report</title><style>body{font:1rem system-ui,sans-serif;max-width:75rem;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#17212b;background:#fff}section{border-top:1px solid #ccd3da;margin-top:1.5rem}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f7;padding:1rem}li,p{overflow-wrap:anywhere}h3{margin-top:1.5rem}</style></head><body><main><h1>Governance impact report</h1><p><strong>Impact identified</strong></p><p>Artifact status: impacted; impact_detected: True; writes_performed: 0</p><p>Read-only presentation of governance-impact-result v1. No analysis decisions are recomputed.</p><section><h2>Changed assets (1)</h2><ul><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events</li></ul></section><section><h2>Direct impacts (2)</h2><ul><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags</li></ul></section><section><h2>Transitive impacts (3)</h2><ul><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary</li></ul></section><section><h2>Recorded dependencies</h2><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.clean_orders&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.daily_revenue&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.monthly_metrics&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.risk_flags&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.risk_summary&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></section><section><h2>Recorded impact paths</h2><h3>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</h3><p>Recorded distance: 1</p><ol><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.clean_orders&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li></ol><h3>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue</h3><p>Recorded distance: 2</p><ol><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.clean_orders&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.daily_revenue&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li></ol><h3>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics</h3><p>Recorded distance: 2</p><ol><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.clean_orders&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.monthly_metrics&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li></ol><h3>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags</h3><p>Recorded distance: 1</p><ol><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.risk_flags&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li></ol><h3>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary</h3><p>Recorded distance: 2</p><ol><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.risk_flags&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li><li><p>Traversal: reverse; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary</p><p>Stored relationship: pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary &rarr; pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags; kind: depends_on</p><h4>Relationship provenance</h4><pre>[
+  {
+    &quot;observation_mode&quot;: &quot;declared&quot;,
+    &quot;provider_type&quot;: &quot;dbt&quot;,
+    &quot;source_ref&quot;: &quot;model.demo.risk_summary&quot;,
+    &quot;source_version&quot;: &quot;1.10.0&quot;
+  }
+]</pre><h4>Relationship attributes</h4><pre>{}</pre></li></ol></section><section><h2>Associated contracts (0)</h2><p>None recorded in this artifact.</p></section><section><h2>Governance assets (8)</h2><ul><li>pipeline-demo:data_source:demo</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary</li></ul></section><section><h2>Policy matching context (not additional downstream impacts) (8)</h2><ul><li>pipeline-demo:data_source:demo</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:clean_orders</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:daily_revenue</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:monthly_metrics</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:order_events</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_flags</li><li>pipeline-demo:data_source:demo / pipeline-demo:dataset:analytics / pipeline-demo:table:risk_summary</li></ul></section><section><h2>Affected policies (not compliance verdicts)</h2><pre>[]</pre></section><section><h2>Limitations and missing evidence</h2><p>No policy set identity recorded; policy compliance is unknown.</p><p>Contract v1 has no coverage or completeness verdict and no insufficient-evidence analysis status. Missing evidence is reported separately; the artifact status above is preserved. Empty lists do not establish complete coverage or production safety.</p><p>Only recorded relationships and paths are shown. Unrecorded dependencies, external consumers, runtime breakage, data values and business severity are unknown. Declared, observed and derived provenance are displayed as recorded, not upgraded to stronger evidence. No commercial tenant validation is claimed.</p></section><section><h2>Artifact identities</h2><h3>content_identity</h3><pre>{
+  &quot;algorithm&quot;: &quot;sha256&quot;,
+  &quot;digest&quot;: &quot;8cdd28aaff13fdd0d220eb12824fedede058dbe866498cf14fcb0f86c45d46b7&quot;,
+  &quot;hashing_contract_version&quot;: &quot;1&quot;
+}</pre><h3>graph_identity</h3><pre>{
+  &quot;algorithm&quot;: &quot;sha256&quot;,
+  &quot;digest&quot;: &quot;8986e77e80a7e990fb773d2255d872f2508c59a3ce1a345c9d6ccbf2b2781a9f&quot;,
+  &quot;hashing_contract_version&quot;: &quot;1&quot;
+}</pre><h3>policy_identity</h3><pre>null</pre></section></main></body></html>

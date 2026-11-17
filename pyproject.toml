@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+workbench = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -39,6 +40,7 @@ governance = "governance.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+"governance.workbench" = ["resources/demo/*.json", "resources/frontend/*.html", "resources/frontend/assets/*"]
 "governance.config_contract.schemas" = ["*.json"]
 "governance.policy.schemas" = ["*.json"]
 "governance.authority.schemas" = ["*.json"]
