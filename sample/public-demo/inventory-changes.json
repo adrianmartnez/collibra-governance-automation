@@ -1,0 +1,22 @@
+{
+  "changed_nodes": [
+    {
+      "kind": "table",
+      "logical_id": "inventory",
+      "namespace": "offline-demo",
+      "parent": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "offline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "offline-demo",
+          "parent": null
+        }
+      }
+    }
+  ],
+  "changes_schema": "governance-impact-changes",
+  "changes_version": "1"
+}

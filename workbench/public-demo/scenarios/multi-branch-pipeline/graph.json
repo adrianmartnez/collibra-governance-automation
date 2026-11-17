@@ -1,0 +1,772 @@
+{
+  "content_identity": {
+    "algorithm": "sha256",
+    "digest": "8986e77e80a7e990fb773d2255d872f2508c59a3ce1a345c9d6ccbf2b2781a9f",
+    "hashing_contract_version": "1"
+  },
+  "edges": [
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "data_source",
+        "logical_id": "demo",
+        "namespace": "pipeline-demo",
+        "parent": null
+      },
+      "target": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "clean_orders",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "daily_revenue",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "monthly_metrics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "order_events",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "reference_calendar",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "risk_flags",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "contains",
+      "provenance": [],
+      "source": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "risk_summary",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.clean_orders",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "clean_orders",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "order_events",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.daily_revenue",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "daily_revenue",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "clean_orders",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.monthly_metrics",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "monthly_metrics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "clean_orders",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.risk_flags",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "risk_flags",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "order_events",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    },
+    {
+      "attributes": {},
+      "kind": "depends_on",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.risk_summary",
+          "source_version": "1.10.0"
+        }
+      ],
+      "source": {
+        "kind": "table",
+        "logical_id": "risk_summary",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "target": {
+        "kind": "table",
+        "logical_id": "risk_flags",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "attributes": {},
+      "description": null,
+      "identity": {
+        "kind": "data_source",
+        "logical_id": "demo",
+        "namespace": "pipeline-demo",
+        "parent": null
+      },
+      "name": "demo",
+      "provenance": []
+    },
+    {
+      "attributes": {},
+      "description": null,
+      "identity": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      },
+      "name": "analytics",
+      "provenance": []
+    },
+    {
+      "attributes": {
+        "dbt_name": "clean_orders",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "clean_orders"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic clean_orders model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "clean_orders",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "clean_orders",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.clean_orders",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "daily_revenue",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "daily_revenue"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic daily_revenue model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "daily_revenue",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "daily_revenue",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.daily_revenue",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "monthly_metrics",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "monthly_metrics"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic monthly_metrics model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "monthly_metrics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "monthly_metrics",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.monthly_metrics",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "order_events",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "order_events"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic order_events model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "order_events",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "order_events",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.order_events",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "reference_calendar",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "reference_calendar"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic reference_calendar model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "reference_calendar",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "reference_calendar",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.reference_calendar",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "risk_flags",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "risk_flags"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic risk_flags model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "risk_flags",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "risk_flags",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.risk_flags",
+          "source_version": "1.10.0"
+        }
+      ]
+    },
+    {
+      "attributes": {
+        "dbt_name": "risk_summary",
+        "dbt_resource_type": "model",
+        "fqn": [
+          "demo",
+          "risk_summary"
+        ],
+        "materialized": "table",
+        "package_name": "demo"
+      },
+      "description": "Synthetic risk_summary model. Declared dependencies only; no commercial platform connection.",
+      "identity": {
+        "kind": "table",
+        "logical_id": "risk_summary",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "dataset",
+          "logical_id": "analytics",
+          "namespace": "pipeline-demo",
+          "parent": {
+            "kind": "data_source",
+            "logical_id": "demo",
+            "namespace": "pipeline-demo",
+            "parent": null
+          }
+        }
+      },
+      "name": "risk_summary",
+      "provenance": [
+        {
+          "observation_mode": "declared",
+          "provider_type": "dbt",
+          "source_ref": "model.demo.risk_summary",
+          "source_version": "1.10.0"
+        }
+      ]
+    }
+  ]
+}

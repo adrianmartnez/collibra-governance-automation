@@ -1,0 +1,22 @@
+{
+  "changed_nodes": [
+    {
+      "kind": "table",
+      "logical_id": "order_events",
+      "namespace": "pipeline-demo",
+      "parent": {
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "namespace": "pipeline-demo",
+        "parent": {
+          "kind": "data_source",
+          "logical_id": "demo",
+          "namespace": "pipeline-demo",
+          "parent": null
+        }
+      }
+    }
+  ],
+  "changes_schema": "governance-impact-changes",
+  "changes_version": "1"
+}

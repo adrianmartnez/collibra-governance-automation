@@ -14,6 +14,21 @@ It ingests PostgreSQL, ODCS, dbt, and OpenLineage metadata into a vendor-neutral
 
 **Stack:** Python 3.12 · PostgreSQL 16 · Psycopg 3 · httpx · Docker Compose · MIT
 
+## Static public demo (prepared locally)
+
+[Governance Explorer](workbench/PUBLIC-DEMO.md) is a static, synthetic demo of three
+recorded impact scenarios. It reuses the workbench UI and pre-generated Python
+artifacts/reports; visitors need no Python or backend. No hosted deployment or
+published workbench integration is implied.
+
+## Local web workbench
+
+[Governance Control Center](workbench/README.md) is an optional localhost app
+for loaded graphs, real impact analysis, evidence inspection and read-only plans.
+Its React frontend and optional Python API are separate from the core engine.
+The synthetic demo requires no PostgreSQL or Collibra service; no remote mutation
+or tenant connection is available in the workbench.
+
 ## v2.0 at a glance
 
 v2.0 turns the project into an extensible Governance-as-Code engine rather than a fixed set of integrations.

@@ -3,3 +3,7 @@ src/governance/integrations/odcs/schemas/odcs-json-schema-v3.1.0.json text eol=l
 src/governance/integrations/odcs/schemas/LICENSE-Apache-2.0.txt text eol=lf
 src/governance/integrations/odcs/schemas/ODCS-SCHEMA-NOTICE.txt text eol=lf
 sample/offline-impact/expected-result.json text eol=lf
+workbench/public-demo/scenarios/** text eol=lf
+workbench/src/generated/public-scenarios.json text eol=lf
+src/governance/workbench/resources/frontend/** text eol=lf
+src/governance/workbench/resources/demo/*.json text eol=lf

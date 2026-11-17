@@ -1,0 +1,22 @@
+{
+  "changes_schema": "governance-impact-changes",
+  "changes_version": "1",
+  "changed_nodes": [
+    {
+      "namespace": "offline-demo",
+      "kind": "table",
+      "logical_id": "orders",
+      "parent": {
+        "namespace": "offline-demo",
+        "kind": "dataset",
+        "logical_id": "analytics",
+        "parent": {
+          "namespace": "offline-demo",
+          "kind": "data_source",
+          "logical_id": "demo",
+          "parent": null
+        }
+      }
+    }
+  ]
+}

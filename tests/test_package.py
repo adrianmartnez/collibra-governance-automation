@@ -212,3 +212,14 @@ def test_entry_point_module_version() -> None:
     )
     assert result.returncode == 0
     assert result.stdout.strip() == f"governance {__version__}"
+
+
+def test_workbench_runtime_resources_packaged_without_web_imports() -> None:
+    import re
+
+    resources = files("governance.workbench").joinpath("resources")
+    html = resources.joinpath("frontend", "index.html").read_text(encoding="utf-8")
+    for asset in re.findall(r'(?:src|href)="(/assets/[^"]+)"', html):
+        assert resources.joinpath("frontend", asset.lstrip("/")).is_file()
+    for name in ("manifest.json", "changes.json"):
+        assert resources.joinpath("demo", name).is_file()
